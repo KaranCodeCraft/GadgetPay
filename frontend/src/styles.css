@@ -2984,13 +2984,16 @@ button {
   .gp-steps,
   .gp-why-grid,
   .gp-deals,
-  .gp-brand-strip,
   .gp-user-footer-grid,
   .gp-story-grid,
   .gp-review-grid,
   .gp-blog-grid,
   .gp-footer-grid {
     grid-template-columns: 1fr;
+  }
+
+  .gp-brand-strip {
+    grid-template-columns: repeat(3, 1fr);
   }
 
   .gp-user-footer-bottom {
