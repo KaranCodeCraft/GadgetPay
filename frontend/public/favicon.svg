@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title">
+  <title>GadgetPe</title>
+  <defs>
+    <linearGradient id="gpGradient" x1="0%" x2="100%" y1="0%" y2="100%">
+      <stop offset="0%" stop-color="#1d9e75" />
+      <stop offset="100%" stop-color="#0ea5c9" />
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="28" fill="#f0f4f8" />
+  <path fill="url(#gpGradient)" d="M33 29h40c14.912 0 27 12.088 27 27S87.912 83 73 83H54v16H33V29Zm21 19v16h18c4.418 0 8-3.582 8-8s-3.582-8-8-8H54Z" />
+  <circle cx="92" cy="92" r="12" fill="#163042" fill-opacity="0.08" />
+</svg>

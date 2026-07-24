@@ -1,0 +1,17 @@
+{
+  "name": "gadgetpe-workspace",
+  "private": true,
+  "scripts": {
+    "dev": "npm run dev:all",
+    "dev:all": "concurrently -n frontend,backend -c cyan,green \"npm --prefix frontend run dev\" \"npm --prefix backend run dev\"",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "dev:backend": "npm --prefix backend run dev",
+    "build": "npm --prefix frontend run build",
+    "build:frontend": "npm --prefix frontend run build",
+    "build:backend-check": "npm --prefix backend run check",
+    "test:backend": "npm --prefix backend test"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.3"
+  }
+}

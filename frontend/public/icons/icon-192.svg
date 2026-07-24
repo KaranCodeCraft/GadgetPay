@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" role="img" aria-labelledby="title">
+  <title>GadgetPe icon 192</title>
+  <defs>
+    <linearGradient id="gpGradient192" x1="12%" x2="88%" y1="10%" y2="90%">
+      <stop offset="0%" stop-color="#1d9e75" />
+      <stop offset="100%" stop-color="#0ea5c9" />
+    </linearGradient>
+  </defs>
+  <rect width="192" height="192" rx="48" fill="#f0f4f8" />
+  <circle cx="96" cy="96" r="74" fill="#ffffff" fill-opacity="0.74" />
+  <path fill="url(#gpGradient192)" d="M57 41h55c22.644 0 41 18.356 41 41s-18.356 41-41 41H86v28H57V41Zm29 28v26h25c7.18 0 13-5.82 13-13s-5.82-13-13-13H86Z" />
+  <rect x="104" y="108" width="24" height="24" rx="12" fill="#163042" fill-opacity="0.12" />
+</svg>

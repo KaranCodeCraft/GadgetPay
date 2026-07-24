@@ -1,0 +1,281 @@
+openapi: 3.0.3
+info:
+  title: GadgetPe Backend API
+  version: 0.1.0
+  description: Partner-first Node Express API with pincode tenant scope and admin serviceability control.
+servers:
+  - url: http://localhost:4000/api/v1
+paths:
+  /health:
+    get:
+      summary: Service health
+      responses:
+        '200':
+          description: Healthy
+  /auth/partner/otp/send:
+    post:
+      summary: Send OTP to partner phone
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone]
+              properties:
+                phone:
+                  type: string
+                  example: "9876543210"
+      responses:
+        '200':
+          description: OTP sent
+  /auth/partner/otp/verify:
+    post:
+      summary: Verify OTP and issue tokens
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone, otp]
+              properties:
+                phone:
+                  type: string
+                otp:
+                  type: string
+                name:
+                  type: string
+      responses:
+        '200':
+          description: Authenticated
+  /auth/refresh:
+    post:
+      summary: Refresh access token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken:
+                  type: string
+      responses:
+        '200':
+          description: Access token refreshed
+  /auth/admin/dev-login:
+    post:
+      summary: Dev admin login helper
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [key]
+              properties:
+                key:
+                  type: string
+                adminId:
+                  type: string
+      responses:
+        '200':
+          description: Admin tokens issued
+  /partner/me:
+    get:
+      summary: Get partner profile context
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Partner context
+  /partner/kyc/metadata:
+    post:
+      summary: Store partner KYC file metadata and create pending verification record
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [identityProof, fileName, mimeType, sizeBytes]
+              properties:
+                identityProof:
+                  type: string
+                  enum: [Aadhar, Voter ID, Driving License, PAN Card, Passport]
+                fileName:
+                  type: string
+                mimeType:
+                  type: string
+                sizeBytes:
+                  type: integer
+      responses:
+        '200':
+          description: Metadata saved and storage placeholder returned
+  /partner/kyc/status:
+    get:
+      summary: Get latest partner KYC verification status
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Latest submission status
+  /serviceability/pincodes/{pincode}:
+    get:
+      summary: Get pincode provider and serviceability details
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: pincode
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^\\d{6}$'
+      responses:
+        '200':
+          description: Pincode details
+  /serviceability/scope/resolve:
+    post:
+      summary: Resolve partner tenant scope by pincode
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pincode]
+              properties:
+                pincode:
+                  type: string
+                  example: "560001"
+      responses:
+        '200':
+          description: Tenant scope resolved
+        '400':
+          description: Pincode not serviceable
+  /admin/serviceability/pincodes:
+    get:
+      summary: List serviceability rows
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [ACTIVE, INACTIVE, LIMITED]
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Serviceability list
+    post:
+      summary: Create or update serviceability row
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pincode, status]
+              properties:
+                pincode:
+                  type: string
+                status:
+                  type: string
+                  enum: [ACTIVE, INACTIVE, LIMITED]
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: Serviceability row stored
+  /admin/serviceability/pincodes/{pincode}/toggle:
+    patch:
+      summary: Turn service area on or off
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: pincode
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^\\d{6}$'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled:
+                  type: boolean
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: Toggle updated
+  /admin/kyc/submissions:
+    get:
+      summary: List KYC submissions for admin verification queue
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [PENDING_REVIEW, VERIFIED, REJECTED]
+        - name: partnerId
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: KYC submission list
+  /admin/kyc/submissions/{kycId}/verification:
+    patch:
+      summary: Verify or reject a KYC submission
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: kycId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action:
+                  type: string
+                  enum: [APPROVE, REJECT]
+                notes:
+                  type: string
+      responses:
+        '200':
+          description: Verification state updated
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
