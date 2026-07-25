@@ -1,8 +1,9 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import NodeSqlite3Wasm from "node-sqlite3-wasm";
-const WasmDatabase = NodeSqlite3Wasm.Database;
+import { createRequire } from "module";
+const require = createRequire(import.meta.url);
+const { Database: WasmDatabase } = require("node-sqlite3-wasm");
 import { env } from "../config/env.js";
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
