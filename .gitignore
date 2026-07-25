@@ -31,3 +31,16 @@ frontend/.tanstack/**
 *.njsproj
 *.sln
 *.sw?
+
+# SQLite database files
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite.lock
+
+# Environment files
+.env
+
+# Smoke/temp test files
+smoke-test.*
+smoke-result.*

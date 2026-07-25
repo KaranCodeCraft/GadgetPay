@@ -6,8 +6,8 @@ import request from "supertest";
 import * as XLSX from "xlsx";
 
 const testDbPath = path.resolve(process.cwd(), "backend/data/gadgetpe-test.sqlite");
-if (fs.existsSync(testDbPath)) {
-  fs.rmSync(testDbPath, { force: true });
+for (const f of [testDbPath, testDbPath + ".lock", testDbPath + "-shm", testDbPath + "-wal"]) {
+  if (fs.existsSync(f)) fs.rmSync(f, { recursive: true, force: true });
 }
 
 process.env.NODE_ENV = "test";
