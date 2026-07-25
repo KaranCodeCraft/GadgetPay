@@ -1,0 +1,15 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Check node-sqlite3-wasm exports",
+			"type": "shell",
+			"command": "node -e \"import('node-sqlite3-wasm').then(m => console.log(Object.keys(m)))\""
+		},
+		{
+			"label": "Inspect node-sqlite3-wasm exports",
+			"type": "shell",
+			"command": "node --input-type=module --eval \"import m from './node_modules/node-sqlite3-wasm/dist/node-sqlite3-wasm.js'; console.log(typeof m); if(typeof m === 'object') console.log(Object.keys(m).slice(0,10)); if(typeof m === 'function') console.log(m.name);\""
+		}
+	]
+}

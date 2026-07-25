@@ -1,7 +1,8 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import Database from "better-sqlite3";
+import NodeSqlite3Wasm from "node-sqlite3-wasm";
+const WasmDatabase = NodeSqlite3Wasm.Database;
 import { env } from "../config/env.js";
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
@@ -12,7 +13,71 @@ const resolvedMediaRoot = path.resolve(process.cwd(), env.mediaRoot);
 fs.mkdirSync(path.dirname(resolvedDbPath), { recursive: true });
 fs.mkdirSync(resolvedMediaRoot, { recursive: true });
 
-const sqlite = new Database(resolvedDbPath);
+const wasmDb = new WasmDatabase(resolvedDbPath);
+
+let _savepointId = 0;
+
+const sqlite = {
+  exec(sql) { return wasmDb.exec(sql); },
+  pragma(str) {
+    const [key, val] = str.split("=").map(s => s.trim());
+    if (val !== undefined) {
+      wasmDb.exec(`PRAGMA ${key} = ${val}`);
+      return;
+    }
+    return wasmDb.exec(`PRAGMA ${key}`);
+  },
+  prepare(sql) {
+    const stmt = wasmDb.prepare(sql);
+    const normalizeParams = (args) => {
+      if (args.length === 0) return undefined;
+      if (args.length === 1 && Array.isArray(args[0])) return args[0];
+      if (args.length === 1 && typeof args[0] === "object" && args[0] !== null && !Array.isArray(args[0])) return args[0];
+      return args;
+    };
+    return {
+      run(...args) {
+        return stmt.run(normalizeParams(args));
+      },
+      get(...args) {
+        return stmt.get(normalizeParams(args));
+      },
+      all(...args) {
+        return stmt.all(normalizeParams(args));
+      },
+    };
+  },
+  transaction(fn) {
+    return (...args) => {
+      const nested = wasmDb.inTransaction;
+      const sp = `_sp${++_savepointId}`;
+      if (nested) {
+        wasmDb.exec(`SAVEPOINT ${sp}`);
+      } else {
+        wasmDb.exec("BEGIN");
+      }
+      try {
+        const result = fn(...args);
+        if (nested) {
+          wasmDb.exec(`RELEASE ${sp}`);
+        } else {
+          wasmDb.exec("COMMIT");
+        }
+        return result;
+      } catch (err) {
+        if (nested) {
+          wasmDb.exec(`ROLLBACK TO ${sp}`);
+          wasmDb.exec(`RELEASE ${sp}`);
+        } else {
+          wasmDb.exec("ROLLBACK");
+        }
+        throw err;
+      }
+    };
+  },
+  close() { wasmDb.close(); },
+};
+
 sqlite.pragma("journal_mode = WAL");
 
 sqlite.exec(`

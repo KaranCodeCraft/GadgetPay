@@ -1,0 +1,6 @@
+Constructor OK
+WAL OK
+CREATE OK
+INSERT OK
+GET OK: {"id":1}
+ALL DONE
