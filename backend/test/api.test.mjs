@@ -149,6 +149,7 @@ test("user sell flow API creates quote schedule and lists history", async () => 
     .post("/api/v1/user/sell-flows")
     .set("Authorization", `Bearer ${session.accessToken}`)
     .send({
+      servicePincode: "560001",
       selectedModel: {
         brandSlug: "apple",
         modelId: "iphone-15",
@@ -196,6 +197,7 @@ test("user sell flow API creates quote schedule and lists history", async () => 
     .set("Authorization", `Bearer ${session.accessToken}`)
     .send({
       pickupSchedule: {
+        pincode: "560001",
         primaryDate: "2026-07-15T00:00:00.000Z",
         primaryTime: "10:00 AM - 12:00 PM",
         alternateDate: "2026-07-16T00:00:00.000Z",
@@ -327,6 +329,7 @@ test("admin quote deduction rules drive user quotes and schedule snapshots", asy
     .post("/api/v1/user/sell-flows")
     .set("Authorization", `Bearer ${userSession.accessToken}`)
     .send({
+      servicePincode: "560001",
       selectedModel: {
         brandSlug: "apple",
         modelId: "iphone-15",
@@ -362,6 +365,7 @@ test("admin quote deduction rules drive user quotes and schedule snapshots", asy
     .set("Authorization", `Bearer ${userSession.accessToken}`)
     .send({
       pickupSchedule: {
+        pincode: "560001",
         primaryDate: "2026-07-15T00:00:00.000Z",
         primaryTime: "10:00 AM - 12:00 PM",
         alternateDate: "2026-07-16T00:00:00.000Z",
@@ -472,10 +476,10 @@ test("user sell flow becomes pincode scoped partner lead bucket and service lead
     .set("Authorization", `Bearer ${partnerSession.accessToken}`)
     .expect(200);
 
-  assert.equal(bucket.body.data.count, 1);
-  assert.equal(bucket.body.data.rows[0].userSellFlowId, flowId);
-  assert.equal(bucket.body.data.rows[0].leadType, "LEAD_BUCKET");
-  assert.equal(bucket.body.data.rows[0].selectedModel.modelName, "iPhone 14");
+  const bucketLead = bucket.body.data.rows.find((row) => row.userSellFlowId === flowId);
+  assert.equal(Boolean(bucketLead), true);
+  assert.equal(bucketLead.leadType, "LEAD_BUCKET");
+  assert.equal(bucketLead.selectedModel.modelName, "iPhone 14");
 
   const otherScope = await request(app)
     .get("/api/v1/partner/lead-bucket?pincode=110001")
@@ -508,11 +512,12 @@ test("user sell flow becomes pincode scoped partner lead bucket and service lead
     .set("Authorization", `Bearer ${partnerSession.accessToken}`)
     .expect(200);
 
-  assert.equal(serviceLeads.body.data.count, 1);
-  assert.equal(serviceLeads.body.data.rows[0].leadType, "SERVICE_LEAD");
-  assert.equal(serviceLeads.body.data.rows[0].pickupSchedule.callingPhoneNumber, "8000000105");
+  const serviceLead = serviceLeads.body.data.rows.find((row) => row.userSellFlowId === flowId);
+  assert.equal(Boolean(serviceLead), true);
+  assert.equal(serviceLead.leadType, "SERVICE_LEAD");
+  assert.equal(serviceLead.pickupSchedule.callingPhoneNumber, "8000000105");
 
-  const leadId = serviceLeads.body.data.rows[0].id;
+  const leadId = serviceLead.id;
   const detail = await request(app)
     .get(`/api/v1/partner/leads/${leadId}`)
     .set("Authorization", `Bearer ${partnerSession.accessToken}`)
@@ -563,6 +568,17 @@ test("user cancellation marks partner lead cancelled and user token cannot acces
     .expect(200);
 
   const flowId = create.body.data.flow.id;
+
+  await request(app)
+    .patch(`/api/v1/user/sell-flows/${flowId}/device-details`)
+    .set("Authorization", `Bearer ${userSession.accessToken}`)
+    .send({
+      deviceDetails: {
+        basicFunctionality: { canMakeCalls: "yes", touchWorking: "yes" },
+        physicalIssues: [],
+      },
+    })
+    .expect(200);
 
   await request(app)
     .post(`/api/v1/user/sell-flows/${flowId}/quote`)
@@ -824,6 +840,21 @@ test("partner lead access unlocks only after admin approves wallet recharge requ
 
   assert.equal(blockedWithoutCoins.body.error.code, "BAD_REQUEST");
 
+  await approvePartnerWalletRecharge({
+    partnerToken: partnerSession.accessToken,
+    adminToken,
+    txnRef: "TXN-9000000110",
+  });
+
+  const unblockedWithCoins = await request(app)
+    .get("/api/v1/partner/lead-bucket?pincode=560001")
+    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
+    .expect(200);
+
+  assert.equal(unblockedWithCoins.body.success, true);
+  assert.equal(Array.isArray(unblockedWithCoins.body.data.rows), true);
+});
+
 
 test("partner can persist call status attempts and read active pickup state", async () => {
   const userSession = await createUserSession("8000000111");
@@ -851,6 +882,17 @@ test("partner can persist call status attempts and read active pickup state", as
     .expect(200);
 
   const flowId = create.body.data.flow.id;
+
+  await request(app)
+    .patch(`/api/v1/user/sell-flows/${flowId}/device-details`)
+    .set("Authorization", `Bearer ${userSession.accessToken}`)
+    .send({
+      deviceDetails: {
+        basicFunctionality: { canMakeCalls: "yes", touchWorking: "yes" },
+        physicalIssues: [],
+      },
+    })
+    .expect(200);
 
   await request(app)
     .post(`/api/v1/user/sell-flows/${flowId}/quote`)
@@ -956,6 +998,17 @@ test("partner logout is blocked until active pickup workflow is completed", asyn
     .expect(200);
 
   const flowId = create.body.data.flow.id;
+
+  await request(app)
+    .patch(`/api/v1/user/sell-flows/${flowId}/device-details`)
+    .set("Authorization", `Bearer ${userSession.accessToken}`)
+    .send({
+      deviceDetails: {
+        basicFunctionality: { canMakeCalls: "yes", touchWorking: "yes" },
+        physicalIssues: [],
+      },
+    })
+    .expect(200);
 
   await request(app)
     .post(`/api/v1/user/sell-flows/${flowId}/quote`)
@@ -1308,65 +1361,4 @@ test("auto round-robin assignment alternates by mapped partners in same pincode"
   assert.equal(Boolean(firstLead.partnerId), true);
   assert.equal(Boolean(secondLead.partnerId), true);
   assert.notEqual(firstLead.partnerId, secondLead.partnerId);
-});
-  const kyc = await request(app)
-    .post("/api/v1/partner/kyc/metadata")
-    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
-    .send({
-      identityProof: "Aadhar",
-      fileName: "id.png",
-      mimeType: "image/png",
-      sizeBytes: 1024,
-    })
-    .expect(200);
-
-  await request(app)
-    .patch(`/api/v1/admin/kyc/submissions/${kyc.body.data.kyc.id}/verification`)
-    .set("Authorization", `Bearer ${adminToken}`)
-    .send({ action: "APPROVE", notes: "Verified for recharge" })
-    .expect(200);
-
-  const submitRecharge = await request(app)
-    .post("/api/v1/partner/coins/recharge")
-    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
-    .send({ amount: 500, upiTxnRef: "TXN-9000000110", upiApp: "MOCK_UPI" })
-    .expect(200);
-
-  assert.equal(submitRecharge.body.data.request.status, "PENDING");
-
-  const stillBlocked = await request(app)
-    .get("/api/v1/partner/lead-bucket?pincode=560001")
-    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
-    .expect(400);
-
-  assert.equal(stillBlocked.body.error.code, "BAD_REQUEST");
-
-  const requests = await request(app)
-    .get("/api/v1/partner/coins/recharge-requests/admin?status=PENDING")
-    .set("Authorization", `Bearer ${adminToken}`)
-    .expect(200);
-
-  assert.equal(requests.body.data.count >= 1, true);
-
-  const requestId = submitRecharge.body.data.request.id;
-
-  const approved = await request(app)
-    .patch(`/api/v1/partner/coins/recharge-requests/${requestId}/verify`)
-    .set("Authorization", `Bearer ${adminToken}`)
-    .send({ action: "APPROVE", note: "Approved in test" })
-    .expect(200);
-
-  assert.equal(approved.body.data.request.status, "APPROVED");
-
-  const wallet = await request(app)
-    .get("/api/v1/partner/coins/balance")
-    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
-    .expect(200);
-
-  assert.equal(wallet.body.data.balance, 500);
-
-  await request(app)
-    .get("/api/v1/partner/lead-bucket?pincode=560001")
-    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
-    .expect(200);
 });
