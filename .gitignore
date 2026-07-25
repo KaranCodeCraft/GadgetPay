@@ -44,3 +44,6 @@ frontend/.tanstack/**
 # Smoke/temp test files
 smoke-test.*
 smoke-result.*
+
+# Frontend build output copied into backend for unified serving
+backend/public/
