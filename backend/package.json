@@ -9,6 +9,7 @@
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
     "check": "node --check src/server.js && node --check src/app.js",
+    "build:backend-check": "npm run check",
     "test": "node --test test/**/*.test.mjs",
     "seed:partner-leads": "node scripts/seed-partner-leads.mjs",
     "backfill:admin-metrics": "node scripts/backfill-admin-metrics.mjs"
