@@ -3912,7 +3912,7 @@ function AdminAuthGate({ onAuthenticated }: { onAuthenticated: () => void }) {
       <section className="admin-auth-card">
         <div className="admin-auth-hero">
           <div className="admin-auth-brand">
-            <ShieldUser size={18} /> GadgetPe Admin
+            <ShieldUser size={18} /> <img src="/logo.png" alt="GadgetPe Admin" style={{ height: "45px", width: "auto", verticalAlign: "middle" }} />
           </div>
           <h1>Admin Login</h1>
           <p>
@@ -4182,7 +4182,7 @@ function AdminPage() {
         </button>
         <div className="admin-topbar-brand">
           <ShieldUser size={20} />
-          <span>GadgetPe Admin</span>
+          <span><img src="/logo.png" alt="GadgetPe Admin" style={{ height: "45px", width: "auto", verticalAlign: "middle" }} /></span>
         </div>
         <div className="admin-topbar-right">
           <span className="admin-topbar-meta">

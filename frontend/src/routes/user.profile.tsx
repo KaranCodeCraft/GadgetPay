@@ -130,7 +130,7 @@ function UserProfilePage() {
             Sell a Phone
           </Link>
           <Link to="/user/selling-history" className="user-auth-cancel user-inline-link" style={{ textAlign: "center" }}>
-            Selling History
+            Seller History
           </Link>
         </div>
       </section>

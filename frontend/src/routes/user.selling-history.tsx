@@ -57,7 +57,7 @@ function UserSellingHistoryPage() {
     <main className="user-seller-page">
       <section className="user-dashboard-shell user-dashboard-shell-pro">
         <div className="user-auth-brand">Seller Action</div>
-        <h1>Selling History</h1>
+        <h1>Seller History</h1>
         <p>Completed pickup schedules saved locally are shown here so the root dashboard stays focused.</p>
 
         {sellingHistory.length > 0 ? (
@@ -82,7 +82,7 @@ function UserSellingHistoryPage() {
             ))}
           </div>
         ) : (
-          <div className="user-action-route-empty">No selling history yet. Complete a pickup schedule to see it here.</div>
+          <div className="user-action-route-empty">No seller history yet. Complete a pickup schedule to see it here.</div>
         )}
 
         <div className="user-auth-actions" style={{ marginTop: 18 }}>

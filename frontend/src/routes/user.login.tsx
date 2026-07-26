@@ -120,7 +120,7 @@ function UserLoginPage() {
     <main className="user-seller-page">
       <div className="user-auth-overlay user-login-overlay user-login-route-overlay" role="dialog" aria-modal="true">
         <section className="user-auth-card user-auth-dialog user-login-dialog user-login-route-dialog">
-          <div className="user-auth-brand user-login-brand-center">GadgetPe Seller</div>
+          <div className="user-auth-brand user-login-brand-center"><img src="/logo.png" alt="GadgetPe" style={{ height: "60px", width: "auto" }} /></div>
           {/* <h1>Seller Login</h1> */}
           <p>Login to manage your listed devices, pickups, and payments.</p>
 

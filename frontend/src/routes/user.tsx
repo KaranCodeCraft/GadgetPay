@@ -1,9 +1,9 @@
 import { createFileRoute, Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
-import { Coins, History, IndianRupee, ListChecks, Mail, MapPin, Menu, PackageCheck, PhoneCall, Search, Send, ShieldCheck, Smartphone, Truck, UserRound } from "lucide-react";
+import { Coins, Flame, History, IndianRupee, ListChecks, Mail, MapPin, Menu, PackageCheck, PhoneCall, Search, Send, ShieldCheck, Smartphone, Truck, UserRound } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import { clearRoleSession, getActiveRole } from "../lib/auth/role-session";
-import { ApiClientError, getPincodeAvailability } from "../lib/api/gadgetpe-client";
+import { ApiClientError, ensureRoleAccessToken, getPincodeAvailability, logoutSession } from "../lib/api/gadgetpe-client";
 import { getBrandLogoUrl } from "../lib/brand-logos";
 
 export const Route = createFileRoute("/user")({
@@ -122,9 +122,9 @@ const footerServiceLinks = [
 
 const HERO_WORDS = ["Phones", "Tablets", "iPads"] as const;
 const USER_TOKEN_KEY = "gadgetpe_user_access_token";
+const USER_REFRESH_KEY = "gadgetpe_user_refresh_token";
 const USER_NAME_KEY = "gadgetpe_user_name";
 const SELLING_HISTORY_STORAGE_KEY = "gadgetpe_user_selling_history";
-const MEDAL_RIBBON_IMAGE_URL = "https://thumbs.dreamstime.com/b/champion-gold-silver-bronze-medal-blue-ribbon-icon-sign-first-second-third-place-isolated-transparent-background-151611665.jpg";
 const USER_SCOPE_KEY = "gadgetpe_user_scope";
 const USER_POST_LOGIN_SELL_MODAL_FLAG_KEY = "gadgetpe_user_post_login_sell_modal";
 
@@ -192,7 +192,7 @@ function UserFooter() {
     <footer className="gp-user-footer">
       <div className="gp-wrap gp-user-footer-grid">
         <div className="gp-user-footer-brand">
-          <div className="gp-user-footer-logo">GadgetPe</div>
+          <div className="gp-user-footer-logo"><img src="/logo.png" alt="GadgetPe" style={{ height: "60px", width: "auto" }} /></div>
           <p>Sell phones and tablets with instant quotes, doorstep pickup, and fast payouts across supported pincodes.</p>
           <div className="gp-user-footer-social" aria-label="Contact shortcuts">
             <a href="#sell" aria-label="Message GadgetPe"><Send size={18} /></a>
@@ -317,19 +317,38 @@ function UserPage() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const token = window.localStorage.getItem(USER_TOKEN_KEY);
     const storedName = window.localStorage.getItem(USER_NAME_KEY) || "Seller";
+    const hasRefreshToken = Boolean(window.localStorage.getItem(USER_REFRESH_KEY));
 
-    setIsLoggedIn(Boolean(token));
+    setIsLoggedIn(Boolean(window.localStorage.getItem(USER_TOKEN_KEY) || hasRefreshToken));
     setSellerName(storedName);
     setSellingHistory(getSellingHistory());
     setIsHydrated(true);
+
+    if (hasRefreshToken) {
+      void ensureRoleAccessToken("user").then((accessToken) => {
+        if (accessToken) setIsLoggedIn(true);
+      });
+    }
   }, []);
+
+  useEffect(() => {
+    if (!isLoggedIn || typeof window === "undefined") return;
+    if (!window.localStorage.getItem(USER_REFRESH_KEY)) return;
+
+    const refreshUserSession = () => {
+      void ensureRoleAccessToken("user");
+    };
+
+    refreshUserSession();
+    const intervalId = window.setInterval(refreshUserSession, 10 * 60 * 1000);
+    return () => window.clearInterval(intervalId);
+  }, [isLoggedIn]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    const token = window.localStorage.getItem(USER_TOKEN_KEY);
+    const token = window.localStorage.getItem(USER_TOKEN_KEY) || window.localStorage.getItem(USER_REFRESH_KEY);
     const storedName = window.localStorage.getItem(USER_NAME_KEY) || "Seller";
 
     setIsLoggedIn(Boolean(token));
@@ -415,7 +434,17 @@ function UserPage() {
     }
   }, [isLoggedIn]);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    const refreshToken = typeof window !== "undefined" ? window.localStorage.getItem(USER_REFRESH_KEY) : null;
+
+    if (refreshToken) {
+      try {
+        await logoutSession(refreshToken);
+      } catch {
+        // Clear local state even if the server-side token is already expired or revoked.
+      }
+    }
+
     clearRoleSession("user");
     setIsLoggedIn(false);
     setShowSellModal(false);
@@ -512,10 +541,10 @@ function UserPage() {
     <main className="gp-page">
       <header className="gp-header">
         {/* Single row: Logo | Search | Login */}
-        <div className="gp-wrap gp-head-row">
-          <div className="gp-logo">GadgetPe</div>
+        <div className="gp-wrap gp-head-row" style={{ display: "grid", gridTemplateColumns: "1fr 2fr 1fr", alignItems: "center", gap: "20px" }}>
+          <div className="gp-logo"><img src="/logo.png" alt="GadgetPe" style={{ height: "60px", width: "auto" }} /></div>
 
-          <div className="gp-search-bar" ref={searchRef}>
+          <div className="gp-search-bar" ref={searchRef} style={{ maxWidth: "600px", margin: "0 auto", width: "100%" }}>
             <Search size={16} className="gp-search-icon" aria-hidden="true" />
             <input
               type="search"
@@ -606,7 +635,7 @@ function UserPage() {
                       onClick={() => { setHamburgerOpen(false); void navigate({ to: "/user/selling-history" }); }}
                     >
                       <History size={16} />
-                      <span>Order History</span>
+                      <span>Seller History</span>
                     </button>
                     <button
                       type="button"
@@ -777,9 +806,9 @@ function UserPage() {
           <h1 className="h1">
             Sell Your <span className="hero-typeword">{typedText}</span>.
             <br />
-            Get the Best Price.
+            <span style={{ display: "inline-block", whiteSpace: "nowrap" }}>Turn Your Old Device Into Money.</span>
           </h1>
-          <p className="sub">Instant valuations. Free pickup. Instant payment. Join 50,000+ happy sellers.</p>
+          <p className="sub">Best Prices. Free Doorstep Pickup. Instant Payment.</p>
           <div className="cta-row">
             <button
               type="button"
@@ -965,16 +994,18 @@ function UserPage() {
         <div className="user-auth-overlay" role="dialog" aria-modal="true">
           <section className="user-auth-card user-sell-modal">
             <div className="user-sell-badge-strip" aria-hidden="true">
-              <div className="user-sell-badge-track">
-                <span className="sell-badge sell-badge-gold" style={{ backgroundImage: `url(${MEDAL_RIBBON_IMAGE_URL})` }} />
-                <span className="sell-badge sell-badge-silver" style={{ backgroundImage: `url(${MEDAL_RIBBON_IMAGE_URL})` }} />
-                <span className="sell-badge sell-badge-bronze" style={{ backgroundImage: `url(${MEDAL_RIBBON_IMAGE_URL})` }} />
+              <div className="user-sell-badge-track" style={{ display: "flex", justifyContent: "center", gap: "10px", margin: "10px 0" }}>
+                <Flame size={32} color="#FFD700" />
+                <Flame size={32} color="#C0C0C0" />
+                <Flame size={32} color="#CD7F32" />
               </div>
             </div>
-            <div className="user-auth-brand">GadgetPe Seller Boost</div>
-            <h1>You are ready to win today.</h1>
-            <p>List your gadgets now and climb from Bronze to Gold with every successful sale.</p>
-            <div className="user-auth-actions">
+            <div style={{ textAlign: "center" }}>
+              <div className="user-auth-brand" style={{ display: "inline-block" }}>GadgetPe Seller Boost</div>
+              <h1>You are ready to win today.</h1>
+              <p>List your Gadgets and earn a streak score with every successful sale.</p>
+            </div>
+            <div className="user-auth-actions" style={{ justifyContent: "center" }}>
               <button
                 type="button"
                 className="user-auth-submit user-sell-cta"

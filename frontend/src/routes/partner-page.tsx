@@ -17,6 +17,7 @@ import { clearRoleSession, getActiveRole } from "../lib/auth/role-session";
 import { PartnerDashboardCompactFooter, SupportFab } from "../components/partner-footer-and-support";
 import {
   ApiClientError,
+  ensureRoleAccessToken,
   getPartnerCoinBalance,
   getPartnerDashboard,
   getPartnerKycStatus,
@@ -107,6 +108,24 @@ function PartnerDashboardPage() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     setPartnerName(localStorage.getItem("gadgetpe_partner_name") || "Partner");
+
+    if (localStorage.getItem(PARTNER_REFRESH_TOKEN_KEY) || localStorage.getItem("gadgetpe_refresh_token")) {
+      void ensureRoleAccessToken("partner");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const refreshToken = localStorage.getItem(PARTNER_REFRESH_TOKEN_KEY) || localStorage.getItem("gadgetpe_refresh_token");
+    if (!refreshToken) return;
+
+    const refreshPartnerSession = () => {
+      void ensureRoleAccessToken("partner");
+    };
+
+    refreshPartnerSession();
+    const intervalId = window.setInterval(refreshPartnerSession, 10 * 60 * 1000);
+    return () => window.clearInterval(intervalId);
   }, []);
 
   useEffect(() => {
@@ -392,7 +411,7 @@ function PartnerDashboardPage() {
         ☰
       </button>
 
-        <div className="partner-top-logo">GadgetPe</div>
+        <div className="partner-top-logo"><img src="/logo.png" alt="GadgetPe" style={{ height: "45px", width: "auto" }} /></div>
 
         <div className="partner-coin-badge" aria-label="Coin balance">
           <Coins size={13} />
@@ -407,7 +426,7 @@ function PartnerDashboardPage() {
 
         <aside className={`partner-sidebar${isSidebarOpen ? " open" : ""}`}>
         <div className="partner-sidebar-head">
-          <div className="partner-sidebar-brand">GadgetPe Partner</div>
+          <div className="partner-sidebar-brand"><img src="/logo.png" alt="GadgetPe" style={{ height: "45px", width: "auto" }} /></div>
           <button
             type="button"
             className="partner-close-menu"

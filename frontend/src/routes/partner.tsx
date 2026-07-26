@@ -16,8 +16,8 @@ function PartnerAuthPage() {
   const [tab, setTab] = useState<"login" | "signup">("login");
 
   const [loginPhone, setLoginPhone] = useState("");
-  const [loginPassword, setLoginPassword] = useState("");
-  const [loginStep, setLoginStep] = useState<"phone" | "password">("phone");
+  const [loginOtp, setLoginOtp] = useState("");
+  const [loginStep, setLoginStep] = useState<"phone" | "otp">("phone");
 
   const [signupPhone, setSignupPhone] = useState("");
   const [signupOtp, setSignupOtp] = useState("");
@@ -55,7 +55,7 @@ function PartnerAuthPage() {
     return null;
   }
 
-  const handleContinueToPassword = (event: FormEvent<HTMLFormElement>) => {
+  const handleSendLoginOtp = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (loginPhone.trim().length < 10) {
       setError("Please enter a valid phone number.");
@@ -64,13 +64,23 @@ function PartnerAuthPage() {
 
     setError(null);
     setNotice(null);
-    setLoginStep("password");
+    setIsSendingOtp(true);
+
+    try {
+      await sendPartnerOtp(loginPhone.trim());
+      setLoginStep("otp");
+      setNotice("OTP sent. Please enter OTP to login.");
+    } catch (apiError) {
+      setError(apiError instanceof Error ? apiError.message : "Failed to send OTP.");
+    } finally {
+      setIsSendingOtp(false);
+    }
   };
 
   const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (loginPassword.trim().length < 4) {
-      setError("Please enter password.");
+    if (loginOtp.trim().length < 4) {
+      setError("Please enter OTP.");
       return;
     }
 
@@ -79,8 +89,7 @@ function PartnerAuthPage() {
     setIsSubmitting(true);
 
     try {
-      // OTP flow is temporarily disabled in UI; password is verified through current auth endpoint.
-      const result = await verifyPartnerOtp(loginPhone.trim(), loginPassword.trim());
+      const result = await verifyPartnerOtp(loginPhone.trim(), loginOtp.trim());
 
       localStorage.setItem("gadgetpe_access_token", result.accessToken);
       localStorage.setItem("gadgetpe_partner_access_token", result.accessToken);
@@ -106,8 +115,26 @@ function PartnerAuthPage() {
     }
   };
 
-  // Login OTP resend flow intentionally commented out while password-first login is active.
-  // const handleResendLoginOtp = async () => {};
+  const handleResendLoginOtp = async () => {
+    if (loginPhone.trim().length < 10) {
+      setError("Please enter a valid phone number.");
+      setLoginStep("phone");
+      return;
+    }
+
+    setError(null);
+    setNotice(null);
+    setIsSendingOtp(true);
+
+    try {
+      await sendPartnerOtp(loginPhone.trim());
+      setNotice(`OTP sent again to ${loginPhone.trim()}.`);
+    } catch (apiError) {
+      setError(apiError instanceof Error ? apiError.message : "Failed to resend OTP.");
+    } finally {
+      setIsSendingOtp(false);
+    }
+  };
 
   const handleSendSignupOtp = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -218,9 +245,9 @@ function PartnerAuthPage() {
     <>
       <main className="partner-auth-page">
         <section className="partner-auth-shell">
-        <div className="partner-brand">GadgetPe Partner</div>
+        <div className="partner-brand"><img src="/logo.png" alt="GadgetPe" style={{ height: "60px", width: "auto" }} /></div>
         <h1>Welcome Partner</h1>
-        <p className="partner-auth-subtitle">Login with phone and password, or register to start your partner journey.</p>
+        <p className="partner-auth-subtitle">Login with phone OTP, or register to start your partner journey.</p>
 
         <div className="partner-auth-tabs" role="tablist" aria-label="Partner auth tabs">
           <button
@@ -231,7 +258,7 @@ function PartnerAuthPage() {
             onClick={() => {
               setTab("login");
               setLoginStep("phone");
-              setLoginPassword("");
+              setLoginOtp("");
               setError(null);
               setNotice(null);
             }}
@@ -257,7 +284,7 @@ function PartnerAuthPage() {
 
         {tab === "login" ? (
           loginStep === "phone" ? (
-            <form className="partner-auth-form" onSubmit={handleContinueToPassword}>
+            <form className="partner-auth-form" onSubmit={handleSendLoginOtp}>
               <label>
                 Phone Number
                 <input
@@ -277,19 +304,21 @@ function PartnerAuthPage() {
                 </a>
               ) : null}
 
-              <button type="submit" className="partner-submit-btn">
-                Continue
+              <button type="submit" className="partner-submit-btn" disabled={isSendingOtp}>
+                {isSendingOtp ? "Sending OTP..." : "Send OTP"}
               </button>
             </form>
           ) : (
             <form className="partner-auth-form" onSubmit={handleLogin}>
               <label>
-                Password
+                OTP
                 <input
-                  type="password"
-                  placeholder="Enter password"
-                  value={loginPassword}
-                  onChange={(event) => setLoginPassword(event.target.value)}
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="Enter OTP"
+                  value={loginOtp}
+                  maxLength={6}
+                  onChange={(event) => setLoginOtp(event.target.value.replace(/\D/g, ""))}
                 />
               </label>
 
@@ -300,7 +329,7 @@ function PartnerAuthPage() {
                   className="partner-inline-link-btn"
                   onClick={() => {
                     setLoginStep("phone");
-                    setLoginPassword("");
+                    setLoginOtp("");
                     setError(null);
                     setNotice(null);
                   }}
@@ -315,6 +344,10 @@ function PartnerAuthPage() {
                   View latest uploaded KYC
                 </a>
               ) : null}
+
+              <button type="button" className="partner-inline-link-btn" onClick={handleResendLoginOtp} disabled={isSendingOtp}>
+                {isSendingOtp ? "Sending OTP..." : "Resend OTP"}
+              </button>
 
               <button type="submit" className="partner-submit-btn" disabled={isSubmitting}>
                 {isSubmitting ? "Please wait..." : "Login"}
@@ -495,7 +528,7 @@ function PartnerAuthPage() {
                   setSignupStep("phone");
                   setSignupOtp("");
                   setLoginPhone(signupPhone.trim());
-                  setLoginPassword("");
+                  setLoginOtp("");
                   setNotice("Signup complete. Please login after KYC is approved by admin.");
                 }}
               >

@@ -18,6 +18,23 @@ function getDefaultApiBase() {
 
 const API_BASE = (import.meta.env.VITE_GADGETPE_API_BASE as string | undefined) || getDefaultApiBase();
 
+function isLocalBrowser() {
+  if (typeof window === "undefined") return false;
+  return window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+}
+
+function buildOtpApiCandidates() {
+  const candidates = [API_BASE];
+
+  if (isLocalBrowser()) {
+    candidates.push("http://localhost:4000/api/v1");
+    candidates.push("http://localhost:4010/api/v1");
+    candidates.push("/api/v1");
+  }
+
+  return [...new Set(candidates)];
+}
+
 const PARTNER_SESSION_KEYS = [
   "gadgetpe_access_token",
   "gadgetpe_refresh_token",
@@ -26,6 +43,36 @@ const PARTNER_SESSION_KEYS = [
   "gadgetpe_partner_name",
   "gadgetpe_partner_scope",
 ];
+
+type RefreshAccessTokenResponse = {
+  accessToken: string;
+};
+
+type RefreshableRole = "user" | "partner";
+
+const roleRefreshTokenKeys: Record<RefreshableRole, string[]> = {
+  user: ["gadgetpe_user_refresh_token"],
+  partner: ["gadgetpe_partner_refresh_token", "gadgetpe_refresh_token"],
+};
+
+const roleAccessTokenKeys: Record<RefreshableRole, string[]> = {
+  user: ["gadgetpe_user_access_token"],
+  partner: ["gadgetpe_partner_access_token", "gadgetpe_access_token"],
+};
+
+function getStoredRefreshToken(role: RefreshableRole) {
+  if (typeof window === "undefined") return null;
+  for (const key of roleRefreshTokenKeys[role]) {
+    const token = window.localStorage.getItem(key);
+    if (token) return token;
+  }
+  return null;
+}
+
+function storeRoleAccessToken(role: RefreshableRole, accessToken: string) {
+  if (typeof window === "undefined") return;
+  roleAccessTokenKeys[role].forEach((key) => window.localStorage.setItem(key, accessToken));
+}
 
 function clearPartnerSessionAndRedirect() {
   if (typeof window === "undefined") return;
@@ -699,27 +746,86 @@ export async function verifyPartnerOtp(phone: string, otp: string, name?: string
 }
 
 export async function sendUserOtp(phone: string): Promise<SendUserOtpResponse> {
-  const response = await fetch(`${API_BASE}/auth/user/otp/send`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ phone }),
-  });
+  const candidates = buildOtpApiCandidates();
+  let lastError: unknown = null;
 
-  return parseResponse<SendUserOtpResponse>(response);
+  for (const base of candidates) {
+    try {
+      const response = await fetch(`${base}/auth/user/otp/send`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ phone }),
+      });
+
+      const result = await parseResponse<SendUserOtpResponse>(response);
+
+      if (isLocalBrowser() && result.devOtp && base.includes("localhost:4000") && candidates.length > 1) {
+        continue;
+      }
+
+      return result;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (lastError instanceof Error) {
+    throw lastError;
+  }
+  throw new ApiClientError("Failed to send OTP.");
 }
 
 export async function verifyUserOtp(phone: string, otp: string, name?: string): Promise<UserAuthResponse> {
-  const response = await fetch(`${API_BASE}/auth/user/otp/verify`, {
+  const candidates = buildOtpApiCandidates();
+  let lastError: unknown = null;
+
+  for (const base of candidates) {
+    try {
+      const response = await fetch(`${base}/auth/user/otp/verify`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ phone, otp, name }),
+      });
+
+      return await parseResponse<UserAuthResponse>(response);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (lastError instanceof Error) {
+    throw lastError;
+  }
+  throw new ApiClientError("OTP verification failed.");
+}
+
+export async function refreshAccessToken(refreshToken: string): Promise<RefreshAccessTokenResponse> {
+  const response = await fetch(`${API_BASE}/auth/refresh`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ phone, otp, name }),
+    body: JSON.stringify({ refreshToken }),
   });
 
-  return parseResponse<UserAuthResponse>(response);
+  return parseResponse<RefreshAccessTokenResponse>(response);
+}
+
+export async function ensureRoleAccessToken(role: RefreshableRole): Promise<string | null> {
+  const refreshToken = getStoredRefreshToken(role);
+  if (!refreshToken) return null;
+
+  try {
+    const result = await refreshAccessToken(refreshToken);
+    storeRoleAccessToken(role, result.accessToken);
+    return result.accessToken;
+  } catch {
+    return null;
+  }
 }
 
 export async function getUserMe(token: string): Promise<{ user: UserAuthResponse["user"] }> {

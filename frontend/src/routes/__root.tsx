@@ -16,11 +16,13 @@ import { AppShell, AppShellContainer, AppShellHeader, AppShellMain } from "../co
 import { PwaInstallBanner } from "../components/pwa-install-banner";
 import { Toaster } from "../components/ui/sonner";
 import { clearRoleSession } from "../lib/auth/role-session";
+import { ensureRoleAccessToken, logoutSession } from "../lib/api/gadgetpe-client";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 
 const USER_TOKEN_KEY = "gadgetpe_user_access_token";
+const USER_REFRESH_KEY = "gadgetpe_user_refresh_token";
 const USER_NAME_KEY = "gadgetpe_user_name";
 
 /** Shows only the GadgetPe logo on sub-pages (sell-phone, login, etc.).
@@ -43,10 +45,16 @@ function GlobalHeader() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const token = window.localStorage.getItem(USER_TOKEN_KEY);
+    const token = window.localStorage.getItem(USER_TOKEN_KEY) || window.localStorage.getItem(USER_REFRESH_KEY);
     const storedName = window.localStorage.getItem(USER_NAME_KEY) || "Seller";
     setIsLoggedIn(Boolean(token));
     setSellerName(storedName);
+
+    if (window.localStorage.getItem(USER_REFRESH_KEY)) {
+      void ensureRoleAccessToken("user").then((accessToken) => {
+        if (accessToken) setIsLoggedIn(true);
+      });
+    }
   }, [pathname]);
 
   useEffect(() => {
@@ -67,7 +75,17 @@ function GlobalHeader() {
     pathname !== "/user" &&
     pathname !== "/user/login";
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    const refreshToken = typeof window !== "undefined" ? window.localStorage.getItem(USER_REFRESH_KEY) : null;
+
+    if (refreshToken) {
+      try {
+        await logoutSession(refreshToken);
+      } catch {
+        // Clear local state even if the server-side token is already expired or revoked.
+      }
+    }
+
     clearRoleSession("user");
     setIsLoggedIn(false);
     setHamburgerOpen(false);
@@ -84,7 +102,7 @@ function GlobalHeader() {
           href="/user"
           className="text-lg font-black tracking-[-0.04em] text-slate-900 transition-colors hover:text-emerald-600 sm:text-xl"
         >
-          GadgetPe
+          <img src="/logo.png" alt="GadgetPe" style={{ height: "45px", width: "auto" }} />
         </a>
         {showSubpageHamburger ? (
           <div className="relative" ref={menuWrapRef}>
@@ -119,7 +137,7 @@ function GlobalHeader() {
                   }}
                 >
                   <History size={16} />
-                  <span>Selling History</span>
+                  <span>Seller History</span>
                 </button>
                 <button
                   type="button"
