@@ -1,1 +1,0 @@
-import{c as e}from"./useRouter-CAy1b4a2.js";import{v as t}from"./index-B_dbRAVp.js";var n=e();function r(){return(0,n.jsx)(t,{})}export{r as component};

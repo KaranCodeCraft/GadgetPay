@@ -9,6 +9,7 @@ lerna-debug.log*
 
 node_modules
 dist
+frontend/dist/
 dist-ssr
 .output
 .vinxi
@@ -44,6 +45,8 @@ frontend/.tanstack/**
 # Smoke/temp test files
 smoke-test.*
 smoke-result.*
+test-results/
+frontend/test-results/
 
 # Frontend build output copied into backend for unified serving
 backend/public/
