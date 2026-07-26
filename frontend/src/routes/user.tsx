@@ -815,11 +815,7 @@ function UserPage() {
               type="button"
               className="cta-green"
               onClick={() => {
-                if (isLoggedIn) {
-                  void navigate({ to: "/user/sell-phone" });
-                } else {
-                  void navigate({ to: "/user/login", search: { redirectTo: "/user/sell-phone" } });
-                }
+                void navigate({ to: "/user/sell-phone" });
               }}
             >
               Sell Now

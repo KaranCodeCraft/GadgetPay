@@ -201,6 +201,28 @@ function UserSellPhoneQuotePage() {
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
 
+  const loadBackendQuotePreview = async (model: SelectedModel | null) => {
+    const apiSelectedModel = getApiSelectedModel(model);
+    if (!apiSelectedModel) return false;
+
+    setQuoteLoading(true);
+    setQuoteError(null);
+    try {
+      const result = await previewUserQuote({
+        selectedModel: apiSelectedModel,
+        deviceDetails: getStoredJson<UserSellFlowDeviceDetails | null>(DEVICE_DETAILS_STORAGE_KEY, null),
+      });
+      setQuote(result.quote);
+      window.localStorage.setItem(QUOTE_STORAGE_KEY, JSON.stringify(result.quote));
+      return true;
+    } catch (err) {
+      setQuoteError(err instanceof Error ? err.message : "Unable to calculate backend quote preview.");
+      return false;
+    } finally {
+      setQuoteLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (modalStep !== "success" || typeof window === "undefined") return;
 
@@ -235,41 +257,7 @@ function UserSellPhoneQuotePage() {
   useEffect(() => {
     const storedModel = getStoredSelectedModel();
     setSelectedModel(storedModel);
-
-    if (!storedModel) return;
-
-    const fallbackQuote: UserSellFlowQuote = {
-      basePrice: storedModel.listedPrice ?? 0,
-      sellingPrice: storedModel.listedPrice ?? 0,
-      totalDeduction: 0,
-      currency: "INR",
-      priceSource: "LOCAL_LISTED_PRICE",
-      validUntil: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-      deductions: [],
-    };
-    setQuote(getStoredJson<UserSellFlowQuote>(QUOTE_STORAGE_KEY, fallbackQuote));
-
-    const apiSelectedModel = getApiSelectedModel(storedModel);
-    if (!apiSelectedModel) return;
-
-    const loadBackendQuotePreview = async () => {
-      setQuoteLoading(true);
-      setQuoteError(null);
-      try {
-        const result = await previewUserQuote({
-          selectedModel: apiSelectedModel,
-          deviceDetails: getStoredJson<UserSellFlowDeviceDetails | null>(DEVICE_DETAILS_STORAGE_KEY, null),
-        });
-        setQuote(result.quote);
-        window.localStorage.setItem(QUOTE_STORAGE_KEY, JSON.stringify(result.quote));
-      } catch (err) {
-        setQuoteError(err instanceof Error ? err.message : "Unable to calculate backend quote preview.");
-      } finally {
-        setQuoteLoading(false);
-      }
-    };
-
-    void loadBackendQuotePreview();
+    setQuote(null);
     setIsHydrated(true);
   }, []);
 
@@ -463,11 +451,12 @@ function UserSellPhoneQuotePage() {
       activateRoleSession("user");
       setVerifiedToken(result.accessToken);
       setVerifiedUser(result.user);
-      setIsPhoneVerified(true);
       setCallingPhoneNumber(phone);
       if (!sellerName.trim()) {
         setSellerName(result.user.name || "");
       }
+      setIsPhoneVerified(true);
+      void loadBackendQuotePreview(selectedModel);
       setAuthError(null);
     } catch (err) {
       const message = err instanceof ApiClientError || err instanceof Error ? err.message : "Unable to verify phone.";
@@ -500,10 +489,11 @@ function UserSellPhoneQuotePage() {
     }
   };
 
-  const displayedPrice = quote?.sellingPrice ?? selectedModel?.listedPrice ?? 0;
+  const displayedPrice = quote?.sellingPrice ?? 0;
   const PROCESSING_FEE = 49;
-  const quoteBasePrice = Math.round(quote?.basePrice ?? selectedModel?.listedPrice ?? 0);
+  const quoteBasePrice = Math.round(quote?.basePrice ?? 0);
   const totalAmount = displayedPrice;
+  const isQuoteReady = Boolean(quote);
   const specialOffers = [
     { id: "amazon", name: "Amazon Pay Gift Card", label: "amazon pay", bonus: 0.0215, desc: "Get 2.15% Extra" },
     { id: "flipkart", name: "Flipkart Gift Card", label: "flipkart", bonus: 0.035, desc: "Get 3.5% Extra" },
@@ -605,8 +595,8 @@ function UserSellPhoneQuotePage() {
                     <div className="user-quote-hero-details">
                       <h2 className="user-quote-hero-model">{selectedModel.modelName}</h2>
                       <div className="user-quote-selling-label">Selling price :</div>
-                      <div className="user-quote-selling-price">₹{formatInr(displayedPrice)}</div>
-                      {quoteLoading ? <p className="user-quote-muted" style={{ fontSize: 12 }}>Recalculating…</p> : null}
+                      <div className="user-quote-selling-price">{isQuoteReady ? `₹${formatInr(displayedPrice)}` : "Calculating..."}</div>
+                      {quoteLoading ? <p className="user-quote-muted" style={{ fontSize: 12 }}>Calculating final price...</p> : null}
                       {quoteError ? <p className="user-quote-muted" style={{ fontSize: 12, color: "#b91c1c" }}>{quoteError}</p> : null}
                       <Link to="/user/sell-phone/device-details" className="user-quote-recalc-btn">Recalculate</Link>
                       <div className="user-quote-badges-row">
@@ -650,7 +640,7 @@ function UserSellPhoneQuotePage() {
                     <h3 className="user-quote-summary-heading">Price Summary</h3>
                     <div className="user-quote-summary-row">
                       <span>Base Price</span>
-                      <span>₹{formatInr(quoteBasePrice)}</span>
+                      <span>{isQuoteReady ? `₹${formatInr(quoteBasePrice)}` : "Calculating..."}</span>
                     </div>
                     <div className="user-quote-summary-row">
                       <span>Processing Fee</span>
@@ -658,9 +648,9 @@ function UserSellPhoneQuotePage() {
                     </div>
                     <div className="user-quote-summary-total">
                       <span>Total Amount</span>
-                      <span>₹{formatInr(totalAmount)}</span>
+                      <span>{isQuoteReady ? `₹${formatInr(totalAmount)}` : "Calculating..."}</span>
                     </div>
-                    <button type="button" className="user-quote-sell-btn" onClick={openScheduleModal}>Sell Now</button>
+                    <button type="button" className="user-quote-sell-btn" disabled={!isQuoteReady || quoteLoading} onClick={openScheduleModal}>Sell Now</button>
                     <div className="user-quote-coupons-row">
                       <span>🎟 Apply Coupons</span>
                       <span>›</span>

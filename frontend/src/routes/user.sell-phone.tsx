@@ -32,6 +32,7 @@ export const Route = createFileRoute("/user/sell-phone")({
 function UserSellPhonePage() {
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const search = useRouterState({ select: (s) => s.location.search });
 
   const [brands, setBrands] = useState<string[]>([]);
   const [brandsLoading, setBrandsLoading] = useState(true);
@@ -41,8 +42,7 @@ function UserSellPhonePage() {
   const [loadedLogos, setLoadedLogos] = useState<Record<string, boolean>>({});
   const [failedLogos, setFailedLogos] = useState<Record<string, boolean>>({});
 
-  const searchString = typeof window !== "undefined" ? window.location.search : "";
-  const queryParams = new URLSearchParams(searchString);
+  const queryParams = new URLSearchParams(search);
   const selectedBrandSlug = queryParams.get("brand");
   const selectedSeries = queryParams.get("series");
   const selectedModel = queryParams.get("model");
