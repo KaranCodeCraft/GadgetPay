@@ -1,5 +1,5 @@
 import { createFileRoute, Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
-import { Coins, Flame, History, IndianRupee, ListChecks, Mail, MapPin, Menu, PackageCheck, PhoneCall, Search, Send, ShieldCheck, Smartphone, Truck, UserRound } from "lucide-react";
+import { Coins, Flame, History, IndianRupee, Instagram, ListChecks, Mail, MapPin, Menu, PackageCheck, PhoneCall, Search, ShieldCheck, Smartphone, Truck, UserRound } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import { clearRoleSession, getActiveRole } from "../lib/auth/role-session";
@@ -38,10 +38,30 @@ const brands = [
 ];
 // const subnavMarqueeItems = ["All", "Sell SmartPhones", "Sell iPads", "Sell Tabs", "More"];
 const faqs = [
-  "Where can I learn the price of my old phone?",
-  "What should I check before selling my device?",
-  "Can I cancel my pickup after booking?",
-  "How long does it take to receive payment?",
+  {
+    question: "How can I check the value of my old device?",
+    answer: "Simply select your device and answer a few questions to receive an instant estimated price.",
+  },
+  {
+    question: "Is the online price final?",
+    answer: "The online price is an estimate. The final price is confirmed after physical inspection.",
+  },
+  {
+    question: "What should I do before selling?",
+    answer: "Back up your data, sign out of accounts, remove SIM/memory cards, disable activation locks and factory reset if possible.",
+  },
+  {
+    question: "Can I cancel or reschedule?",
+    answer: "Yes, before the scheduled pickup.",
+  },
+  {
+    question: "How long does payment take?",
+    answer: "Payment is processed instantly after successful verification.",
+  },
+  {
+    question: "Which devices can I sell?",
+    answer: "Smartphones, iPads, tablets, and other eligible supported devices.",
+  },
 ];
 
 const userReviews = [
@@ -96,31 +116,20 @@ const searchableItems: SearchItem[] = [
   { id: "brand-vivo", label: "Vivo", type: "Brand", href: "/user/sell-phone", keywords: ["vivo"] },
   { id: "brand-oppo", label: "OPPO", type: "Brand", href: "/user/sell-phone", keywords: ["oppo"] },
   { id: "brand-realme", label: "realme", type: "Brand", href: "/user/sell-phone", keywords: ["realme"] },
-  { id: "faq-1", label: "Where can I learn the price of my old phone?", type: "FAQ", href: "#faq", keywords: ["price", "old", "phone", "learn", "value"] },
-  { id: "faq-2", label: "What should I check before selling my device?", type: "FAQ", href: "#faq", keywords: ["check", "before", "selling", "device", "condition"] },
-  { id: "faq-3", label: "Can I cancel my pickup after booking?", type: "FAQ", href: "#faq", keywords: ["cancel", "pickup", "booking"] },
-  { id: "faq-4", label: "How long does it take to receive payment?", type: "FAQ", href: "#faq", keywords: ["payment", "receive", "time", "how long", "payout"] },
+  { id: "faq-1", label: "How can I check the value of my old device?", type: "FAQ", href: "#faq", keywords: ["price", "old", "device", "value", "estimate"] },
+  { id: "faq-2", label: "Is the online price final?", type: "FAQ", href: "#faq", keywords: ["online", "price", "final", "estimate", "inspection"] },
+  { id: "faq-3", label: "What should I do before selling?", type: "FAQ", href: "#faq", keywords: ["before", "selling", "backup", "factory reset", "activation lock"] },
+  { id: "faq-4", label: "Can I cancel or reschedule?", type: "FAQ", href: "#faq", keywords: ["cancel", "reschedule", "pickup", "schedule"] },
+  { id: "faq-5", label: "How long does payment take?", type: "FAQ", href: "#faq", keywords: ["payment", "instant", "verification", "payout"] },
+  { id: "faq-6", label: "Which devices can I sell?", type: "FAQ", href: "#faq", keywords: ["devices", "smartphones", "ipads", "tablets", "supported"] },
   { id: "sell-tablet", label: "Sell Tablet", type: "Page", href: "/user/sell-tablet", keywords: ["tablet", "ipad", "sell", "tab"] },
   { id: "pickup-status", label: "Pickup Status", type: "Page", href: "/user/pickup-status", keywords: ["pickup", "status", "track", "schedule"] },
   { id: "my-listings", label: "My Listings", type: "Page", href: "/user/my-listings", keywords: ["listings", "my", "active", "sold"] },
   { id: "payments", label: "Payments", type: "Page", href: "/user/payments", keywords: ["payments", "payout", "upi", "settlement"] },
 ];
 
-const footerQuickLinks = [
-  { label: "Sell Phone", href: "#sell", icon: Smartphone },
-  { label: "How It Works", href: "#how", icon: PackageCheck },
-  { label: "Top Brands", href: "#top-brands", icon: ShieldCheck },
-  { label: "FAQ", href: "#faq", icon: ListChecks },
-];
-
-const footerServiceLinks = [
-  { label: "Free Pickup", href: "#how", icon: Truck },
-  { label: "Instant Quote", href: "#sell", icon: IndianRupee },
-  { label: "Seller Login", href: "/user/login", icon: UserRound },
-  { label: "Partner Support", href: "#faq", icon: Coins },
-];
-
 const HERO_WORDS = ["Phones", "Tablets", "iPads"] as const;
+const INSTAGRAM_URL = "https://www.instagram.com/gadgetpeofficial?igsh=MWt5ZTRwaGtiMnU3bw%3D%3D&utm_source=qr";
 const USER_TOKEN_KEY = "gadgetpe_user_access_token";
 const USER_REFRESH_KEY = "gadgetpe_user_refresh_token";
 const USER_NAME_KEY = "gadgetpe_user_name";
@@ -192,48 +201,40 @@ function UserFooter() {
     <footer className="gp-user-footer">
       <div className="gp-wrap gp-user-footer-grid">
         <div className="gp-user-footer-brand">
-          <div className="gp-user-footer-logo"><img src="/logo.png" alt="GadgetPe" style={{ height: "60px", width: "auto" }} /></div>
-          <p>Sell phones and tablets with instant quotes, doorstep pickup, and fast payouts across supported pincodes.</p>
+          <div className="gp-user-footer-logo"><img src="/logo.png" alt="GadgetPe" style={{ height: "40px", width: "auto" }} /></div>
+          <h3>Turn Your Device Into Money</h3>
+          <p>GadgetPe is a modern device marketplace that makes selling your old smartphones, iPads, and tablets simple, secure, and rewarding.</p>
           <div className="gp-user-footer-social" aria-label="Contact shortcuts">
-            <a href="#sell" aria-label="Message GadgetPe"><Send size={18} /></a>
+            <a href={INSTAGRAM_URL} target="_blank" rel="noopener noreferrer" aria-label="Instagram GadgetPe"><Instagram size={18} /></a>
             <a href="mailto:support@gadgetpe.com" aria-label="Email GadgetPe"><Mail size={18} /></a>
             <a href="https://wa.me/919311125745" target="_blank" rel="noopener noreferrer" aria-label="WhatsApp GadgetPe"><PhoneCall size={18} /></a>
           </div>
         </div>
         <div className="gp-user-footer-column">
-          <h3>Quick Links</h3>
-          {footerQuickLinks.map((item) => {
-            const Icon = item.icon;
-            return (
-              <a href={item.href} key={item.label}>
-                <Icon size={16} />
-                <span>{item.label}</span>
-              </a>
-            );
-          })}
-        </div>
-        <div className="gp-user-footer-column">
-          <h3>Services</h3>
-          {footerServiceLinks.map((item) => {
-            const Icon = item.icon;
-            return (
-              <a href={item.href} key={item.label}>
-                <Icon size={16} />
-                <span>{item.label}</span>
-              </a>
-            );
-          })}
-        </div>
-        <div className="gp-user-footer-column gp-user-footer-contact">
           <h3>Contact</h3>
           <a href="https://wa.me/919311125745" target="_blank" rel="noopener noreferrer"><PhoneCall size={16} /><span>+91 93111 25745</span></a>
           <a href="mailto:support@gadgetpe.com"><Mail size={16} /><span>support@gadgetpe.com</span></a>
-          <a href="#sell"><MapPin size={16} /><span>Serviceable pincodes across India</span></a>
+          <a href="https://www.gadgetpe.com" target="_blank" rel="noopener noreferrer"><Instagram size={16} /><span>www.gadgetpe.com</span></a>
+        </div>
+        <div className="gp-user-footer-column">
+          <h3>Currently Serving</h3>
+          <div className="gp-user-footer-text-row"><MapPin size={16} /><span>Delhi NCR</span></div>
+        </div>
+        <div className="gp-user-footer-column gp-user-footer-contact">
+          <h3>Legal</h3>
+          <div className="gp-user-footer-legal-links">
+            <a href="/Policy">Privacy Policy</a>
+            <span>|</span>
+            <a href="/Policy">Terms &amp; Conditions</a>
+            <span>|</span>
+            <a href="/Policy">Refund &amp; Cancellation Policy</a>
+            <span>|</span>
+            <a href="/Policy">Partner Policy</a>
+          </div>
         </div>
       </div>
       <div className="gp-wrap gp-user-footer-bottom">
-        <span>© 2026 GadgetPe. All rights reserved.</span>
-        <span>Privacy Policy · Terms · Support</span>
+        <span>© 2026 GadgetPe. All Rights Reserved.</span>
       </div>
     </footer>
   );
@@ -662,7 +663,7 @@ function UserPage() {
                 type="button"
                 className="gp-login"
                 onClick={() => {
-                  void navigate({ to: "/user/login" });
+                  void navigate({ to: "/user/login", search: { redirectTo: "/user" } });
                 }}
               >
                 Login
@@ -802,7 +803,7 @@ function UserPage() {
 
       <section className="hero" id="sell">
         <div>
-          <span className="badge-pill">🏆 #1 Rated Gadget Marketplace</span>
+          <span className="badge-pill">🏆India's Next-Generation Device Marketplace</span>
           <h1 className="h1">
             Sell Your <span className="hero-typeword">{typedText}</span>.
             <br />
@@ -865,18 +866,18 @@ function UserPage() {
           <div className="gp-steps">
             <article>
               <div className="gp-icon">1</div>
-              <h3>Check Price</h3>
-              <p>Select your device and tell us about its condition for an instant quote.</p>
+              <h3>Get an Instant Price Estimate</h3>
+              <p>Choose your device and answer a few quick questions about its condition.</p>
             </article>
             <article>
               <div className="gp-icon">2</div>
-              <h3>Schedule Pickup</h3>
-              <p>Choose a convenient slot and our pickup partner arrives at your doorstep.</p>
+              <h3>Schedule a Free Doorstep Pickup</h3>
+              <p>Select a convenient date and time. Our verified pickup partner will visit your location.</p>
             </article>
             <article>
               <div className="gp-icon">3</div>
-              <h3>Get Paid</h3>
-              <p>After quick verification, payment is processed directly to your account.</p>
+              <h3>Receive Instant Payment</h3>
+              <p>Once your device is verified, payment is processed instantly via UPI or bank transfer.</p>
             </article>
           </div>
         </div>
@@ -963,16 +964,49 @@ function UserPage() {
         </div>
       </section> */}
 
+      <section className="gp-section" id="why-sell">
+        <div className="gp-wrap">
+          <h2>Why Sell with GadgetPe</h2>
+          <div className="gp-why-sell-list" aria-label="Why sell with GadgetPe benefits">
+            {[
+              "Best Market Prices",
+              "Free Doorstep Pickup",
+              "Instant & Secure Payment",
+              "Safe & Transparent Process",
+              "Verified Pickup Partners",
+              "Wide Device Coverage",
+            ].map((item) => (
+              <article key={item}>
+                <p>{item}</p>
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
+
       <section className="gp-section" id="faq">
         <div className="gp-wrap">
           <h2>FAQ</h2>
           <div className="gp-faq-list">
             {faqs.map((item) => (
-              <details key={item}>
-                <summary>{item}</summary>
-                <p>Login or request a quote to manage your device sale, pickup scheduling, and payment updates.</p>
+              <details key={item.question}>
+                <summary>{item.question}</summary>
+                <p>{item.answer}</p>
               </details>
             ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="gp-section gp-soft" id="become-partner">
+        <div className="gp-wrap">
+          <div className="gp-partner-promo">
+            <h2>Become a Partner</h2>
+            <p>
+              Join our growing network of trusted partners and connect with customers looking to sell their old
+              devices. Expand your business with quality leads, streamlined operations, and dedicated support.
+            </p>
+            <a href="/partner" className="gp-partner-promo-link">Explore Partner Program</a>
           </div>
         </div>
       </section>

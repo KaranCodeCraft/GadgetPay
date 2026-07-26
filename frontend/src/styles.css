@@ -2704,6 +2704,62 @@ button {
   color: #666;
 }
 
+#why-sell {
+  background: #05070a;
+}
+
+#why-sell h2 {
+  color: #ffffff;
+  text-align: center;
+}
+
+.gp-why-sell-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  max-width: 780px;
+  margin: 0 auto;
+}
+
+.gp-why-sell-list article {
+  padding: 6px 12px;
+  text-align: center;
+}
+
+.gp-why-sell-list p {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 400;
+  color: #ffffff;
+  text-shadow: 0 0 8px rgba(120, 210, 255, 0.32), 0 0 16px rgba(120, 210, 255, 0.18);
+}
+
+.gp-partner-promo {
+  background: #edf1f6;
+  border-radius: 12px;
+  padding: 20px;
+}
+
+.gp-partner-promo p {
+  margin: 0;
+  max-width: 760px;
+  color: #4b5563;
+  line-height: 1.7;
+}
+
+.gp-partner-promo-link {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 16px;
+  color: #126b52;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.gp-partner-promo-link:hover {
+  text-decoration: underline;
+}
+
 .gp-user-footer {
   background: #05070a;
   color: #cbd5e1;
@@ -2730,6 +2786,13 @@ button {
   color: #94a3b8;
   line-height: 1.65;
   font-size: 14px;
+}
+
+.gp-user-footer-brand h3 {
+  margin: 0 0 10px;
+  color: #ffffff;
+  font-size: 22px;
+  line-height: 1.2;
 }
 
 .gp-user-footer-social {
@@ -2792,6 +2855,33 @@ button {
     transform 180ms ease;
 }
 
+.gp-user-footer-text-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: #94a3b8;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.gp-user-footer-legal-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: #94a3b8;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.gp-user-footer-legal-links a {
+  color: #94a3b8;
+  text-decoration: none;
+}
+
+.gp-user-footer-legal-links a:hover {
+  color: #ffffff;
+}
+
 .gp-user-footer-column a:hover {
   transform: translateX(3px);
 }
@@ -2803,13 +2893,98 @@ button {
 .gp-user-footer-bottom {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
   gap: 16px;
   margin-top: 40px;
   padding-top: 20px;
   border-top: 1px solid #1f2937;
   color: #64748b;
   font-size: 13px;
+}
+
+.gp-policy-page {
+  background: linear-gradient(180deg, #f8fafc 0%, #eef4f8 100%);
+  min-height: 100vh;
+  padding: 36px 0 56px;
+}
+
+.gp-policy-shell {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 0 20px;
+}
+
+.gp-policy-card {
+  background: #ffffff;
+  border: 1px solid #dbe5ee;
+  border-radius: 24px;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.08);
+  padding: 28px;
+}
+
+.gp-policy-card h1 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 32px;
+  line-height: 1.1;
+}
+
+.gp-policy-meta {
+  margin: 10px 0 0;
+  color: #475569;
+  font-size: 15px;
+}
+
+.gp-policy-card h2 {
+  margin: 28px 0 10px;
+  color: #0f172a;
+  font-size: 22px;
+}
+
+.gp-policy-card h3 {
+  margin: 18px 0 8px;
+  color: #0f172a;
+  font-size: 17px;
+}
+
+.gp-policy-card p {
+  margin: 0 0 14px;
+  color: #334155;
+  font-size: 15px;
+  line-height: 1.75;
+}
+
+.gp-policy-card ul {
+  margin: 0 0 16px;
+  padding-left: 20px;
+  color: #334155;
+}
+
+.gp-policy-card li {
+  margin: 0 0 8px;
+  line-height: 1.7;
+}
+
+.gp-policy-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 120px;
+  margin-top: 24px;
+  padding: 12px 18px;
+  border: none;
+  border-radius: 999px;
+  background: #126b52;
+  color: #ffffff;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 180ms ease, transform 180ms ease;
+}
+
+.gp-policy-close:hover {
+  background: #0f5b46;
+  transform: translateY(-1px);
 }
 
 .gp-support-fab {
@@ -2982,6 +3157,7 @@ button {
   }
 
   .gp-steps,
+  .gp-why-sell-list,
   .gp-why-grid,
   .gp-deals,
   .gp-user-footer-grid,
@@ -2999,6 +3175,19 @@ button {
   .gp-user-footer-bottom {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .gp-policy-page {
+    padding: 24px 0 40px;
+  }
+
+  .gp-policy-card {
+    border-radius: 20px;
+    padding: 22px 18px;
+  }
+
+  .gp-policy-card h1 {
+    font-size: 28px;
   }
 
   .gp-brand-logo-wrap {

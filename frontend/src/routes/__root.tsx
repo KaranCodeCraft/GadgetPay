@@ -38,6 +38,7 @@ function GlobalHeader() {
   const hide =
     pathname === "/user" ||
     pathname === "/" ||
+    pathname === "/partner" ||
     pathname.startsWith("/admin") ||
     pathname.startsWith("/partner-page") ||
     pathname.startsWith("/Lead-bucket") ||
