@@ -592,6 +592,25 @@ export type PartnerLead = {
   completionEventAt: string | null;
 };
 
+export type PartnerLeadUnlockOrder = {
+  id: string;
+  leadId: string;
+  partnerId: string;
+  userSellFlowId: string;
+  unlockPrice: number;
+  paymentMethod: string;
+  status: "PENDING_PAYMENT" | "SCREENSHOT_SENT" | "APPROVED" | "REJECTED" | "EXPIRED" | "CLOSED";
+  screenshotStatus: "NOT_SENT" | "SENT";
+  adminNote: string | null;
+  approvedBy: string | null;
+  approvedAt: string | null;
+  rejectedAt: string | null;
+  metadata: unknown;
+  createdAt: string;
+  expiresAt: string;
+  closedAt: string | null;
+};
+
 export type AdminLeadDispositionCount = {
   key: string;
   count: number;
@@ -1031,6 +1050,33 @@ export async function getPartnerLead(token: string, leadId: string): Promise<{ l
   });
 
   return parseResponse<{ lead: PartnerLead }>(response);
+}
+
+export async function getLeadUnlockIntent(
+  token: string,
+  intentId: string,
+): Promise<{ intent: PartnerLeadUnlockOrder; lead: PartnerLead | null }> {
+  const response = await fetch(`${API_BASE}/partner/lead-unlock-intents/${encodeURIComponent(intentId)}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  return parseResponse<{ intent: PartnerLeadUnlockOrder; lead: PartnerLead | null }>(response);
+}
+
+export async function markLeadUnlockScreenshotSent(
+  token: string,
+  intentId: string,
+): Promise<{ intent: PartnerLeadUnlockOrder; message: string }> {
+  const response = await fetch(`${API_BASE}/partner/lead-unlock-intents/${encodeURIComponent(intentId)}/screenshot-sent`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  return parseResponse<{ intent: PartnerLeadUnlockOrder; message: string }>(response);
 }
 
 export async function claimPartnerLead(token: string, leadId: string): Promise<{ lead: PartnerLead }> {
