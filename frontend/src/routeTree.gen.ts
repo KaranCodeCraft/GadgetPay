@@ -12,7 +12,9 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as UserRouteImport } from './routes/user'
 import { Route as PartnerPageRouteImport } from './routes/partner-page'
 import { Route as PartnerRouteImport } from './routes/partner'
+import { Route as AdminRecoveredRouteImport } from './routes/admin-recovered'
 import { Route as AdminRouteImport } from './routes/admin'
+import { Route as PolicyRouteImport } from './routes/Policy'
 import { Route as LeadBucketDetailsRouteImport } from './routes/Lead-bucket-details'
 import { Route as LeadBucketRouteImport } from './routes/Lead-bucket'
 import { Route as LeadAssignmentRouteImport } from './routes/Lead-assignment'
@@ -29,6 +31,7 @@ import { Route as UserLoginRouteImport } from './routes/user.login'
 import { Route as UserListDeviceRouteImport } from './routes/user.list-device'
 import { Route as ServiceLeadsTransactionRouteImport } from './routes/service-Leads/transaction'
 import { Route as PartnerPageCoinsRouteImport } from './routes/partner-page.coins'
+import { Route as LeadBucketUnlockPaymentRouteImport } from './routes/Lead-bucket.Unlock-payment'
 import { Route as ServiceLeadsTransactionIndexRouteImport } from './routes/service-Leads/transaction/index'
 import { Route as UserSellTabletQuoteRouteImport } from './routes/user.sell-tablet.quote'
 import { Route as UserSellTabletDeviceDetailsRouteImport } from './routes/user.sell-tablet.device-details'
@@ -52,9 +55,19 @@ const PartnerRoute = PartnerRouteImport.update({
   path: '/partner',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminRecoveredRoute = AdminRecoveredRouteImport.update({
+  id: '/admin-recovered',
+  path: '/admin-recovered',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AdminRoute = AdminRouteImport.update({
   id: '/admin',
   path: '/admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PolicyRoute = PolicyRouteImport.update({
+  id: '/Policy',
+  path: '/Policy',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LeadBucketDetailsRoute = LeadBucketDetailsRouteImport.update({
@@ -137,6 +150,11 @@ const PartnerPageCoinsRoute = PartnerPageCoinsRouteImport.update({
   path: '/coins',
   getParentRoute: () => PartnerPageRoute,
 } as any)
+const LeadBucketUnlockPaymentRoute = LeadBucketUnlockPaymentRouteImport.update({
+  id: '/Unlock-payment',
+  path: '/Unlock-payment',
+  getParentRoute: () => LeadBucketRoute,
+} as any)
 const ServiceLeadsTransactionIndexRoute =
   ServiceLeadsTransactionIndexRouteImport.update({
     id: '/',
@@ -180,12 +198,15 @@ const ServiceLeadsTransactionPaymentRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/Lead-assignment': typeof LeadAssignmentRoute
-  '/Lead-bucket': typeof LeadBucketRoute
+  '/Lead-bucket': typeof LeadBucketRouteWithChildren
   '/Lead-bucket-details': typeof LeadBucketDetailsRoute
+  '/Policy': typeof PolicyRoute
   '/admin': typeof AdminRoute
+  '/admin-recovered': typeof AdminRecoveredRoute
   '/partner': typeof PartnerRoute
   '/partner-page': typeof PartnerPageRouteWithChildren
   '/user': typeof UserRouteWithChildren
+  '/Lead-bucket/Unlock-payment': typeof LeadBucketUnlockPaymentRoute
   '/partner-page/coins': typeof PartnerPageCoinsRoute
   '/service-Leads/transaction': typeof ServiceLeadsTransactionRouteWithChildren
   '/user/list-device': typeof UserListDeviceRoute
@@ -209,12 +230,15 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/Lead-assignment': typeof LeadAssignmentRoute
-  '/Lead-bucket': typeof LeadBucketRoute
+  '/Lead-bucket': typeof LeadBucketRouteWithChildren
   '/Lead-bucket-details': typeof LeadBucketDetailsRoute
+  '/Policy': typeof PolicyRoute
   '/admin': typeof AdminRoute
+  '/admin-recovered': typeof AdminRecoveredRoute
   '/partner': typeof PartnerRoute
   '/partner-page': typeof PartnerPageRouteWithChildren
   '/user': typeof UserRouteWithChildren
+  '/Lead-bucket/Unlock-payment': typeof LeadBucketUnlockPaymentRoute
   '/partner-page/coins': typeof PartnerPageCoinsRoute
   '/user/list-device': typeof UserListDeviceRoute
   '/user/login': typeof UserLoginRoute
@@ -238,12 +262,15 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/Lead-assignment': typeof LeadAssignmentRoute
-  '/Lead-bucket': typeof LeadBucketRoute
+  '/Lead-bucket': typeof LeadBucketRouteWithChildren
   '/Lead-bucket-details': typeof LeadBucketDetailsRoute
+  '/Policy': typeof PolicyRoute
   '/admin': typeof AdminRoute
+  '/admin-recovered': typeof AdminRecoveredRoute
   '/partner': typeof PartnerRoute
   '/partner-page': typeof PartnerPageRouteWithChildren
   '/user': typeof UserRouteWithChildren
+  '/Lead-bucket/Unlock-payment': typeof LeadBucketUnlockPaymentRoute
   '/partner-page/coins': typeof PartnerPageCoinsRoute
   '/service-Leads/transaction': typeof ServiceLeadsTransactionRouteWithChildren
   '/user/list-device': typeof UserListDeviceRoute
@@ -271,10 +298,13 @@ export interface FileRouteTypes {
     | '/Lead-assignment'
     | '/Lead-bucket'
     | '/Lead-bucket-details'
+    | '/Policy'
     | '/admin'
+    | '/admin-recovered'
     | '/partner'
     | '/partner-page'
     | '/user'
+    | '/Lead-bucket/Unlock-payment'
     | '/partner-page/coins'
     | '/service-Leads/transaction'
     | '/user/list-device'
@@ -300,10 +330,13 @@ export interface FileRouteTypes {
     | '/Lead-assignment'
     | '/Lead-bucket'
     | '/Lead-bucket-details'
+    | '/Policy'
     | '/admin'
+    | '/admin-recovered'
     | '/partner'
     | '/partner-page'
     | '/user'
+    | '/Lead-bucket/Unlock-payment'
     | '/partner-page/coins'
     | '/user/list-device'
     | '/user/login'
@@ -328,10 +361,13 @@ export interface FileRouteTypes {
     | '/Lead-assignment'
     | '/Lead-bucket'
     | '/Lead-bucket-details'
+    | '/Policy'
     | '/admin'
+    | '/admin-recovered'
     | '/partner'
     | '/partner-page'
     | '/user'
+    | '/Lead-bucket/Unlock-payment'
     | '/partner-page/coins'
     | '/service-Leads/transaction'
     | '/user/list-device'
@@ -356,9 +392,11 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   LeadAssignmentRoute: typeof LeadAssignmentRoute
-  LeadBucketRoute: typeof LeadBucketRoute
+  LeadBucketRoute: typeof LeadBucketRouteWithChildren
   LeadBucketDetailsRoute: typeof LeadBucketDetailsRoute
+  PolicyRoute: typeof PolicyRoute
   AdminRoute: typeof AdminRoute
+  AdminRecoveredRoute: typeof AdminRecoveredRoute
   PartnerRoute: typeof PartnerRoute
   PartnerPageRoute: typeof PartnerPageRouteWithChildren
   UserRoute: typeof UserRouteWithChildren
@@ -389,11 +427,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PartnerRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin-recovered': {
+      id: '/admin-recovered'
+      path: '/admin-recovered'
+      fullPath: '/admin-recovered'
+      preLoaderRoute: typeof AdminRecoveredRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/admin': {
       id: '/admin'
       path: '/admin'
       fullPath: '/admin'
       preLoaderRoute: typeof AdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/Policy': {
+      id: '/Policy'
+      path: '/Policy'
+      fullPath: '/Policy'
+      preLoaderRoute: typeof PolicyRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/Lead-bucket-details': {
@@ -508,6 +560,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PartnerPageCoinsRouteImport
       parentRoute: typeof PartnerPageRoute
     }
+    '/Lead-bucket/Unlock-payment': {
+      id: '/Lead-bucket/Unlock-payment'
+      path: '/Unlock-payment'
+      fullPath: '/Lead-bucket/Unlock-payment'
+      preLoaderRoute: typeof LeadBucketUnlockPaymentRouteImport
+      parentRoute: typeof LeadBucketRoute
+    }
     '/service-Leads/transaction/': {
       id: '/service-Leads/transaction/'
       path: '/'
@@ -559,6 +618,18 @@ declare module '@tanstack/react-router' {
     }
   }
 }
+
+interface LeadBucketRouteChildren {
+  LeadBucketUnlockPaymentRoute: typeof LeadBucketUnlockPaymentRoute
+}
+
+const LeadBucketRouteChildren: LeadBucketRouteChildren = {
+  LeadBucketUnlockPaymentRoute: LeadBucketUnlockPaymentRoute,
+}
+
+const LeadBucketRouteWithChildren = LeadBucketRoute._addFileChildren(
+  LeadBucketRouteChildren,
+)
 
 interface PartnerPageRouteChildren {
   PartnerPageCoinsRoute: typeof PartnerPageCoinsRoute
@@ -647,9 +718,11 @@ const ServiceLeadsTransactionRouteWithChildren =
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LeadAssignmentRoute: LeadAssignmentRoute,
-  LeadBucketRoute: LeadBucketRoute,
+  LeadBucketRoute: LeadBucketRouteWithChildren,
   LeadBucketDetailsRoute: LeadBucketDetailsRoute,
+  PolicyRoute: PolicyRoute,
   AdminRoute: AdminRoute,
+  AdminRecoveredRoute: AdminRecoveredRoute,
   PartnerRoute: PartnerRoute,
   PartnerPageRoute: PartnerPageRouteWithChildren,
   UserRoute: UserRouteWithChildren,

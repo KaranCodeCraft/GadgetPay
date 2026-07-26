@@ -4,16 +4,21 @@ import multer from "multer";
 import path from "path";
 import { z } from "zod";
 import { badRequest } from "../../shared/http/errors.js";
+import { conflict } from "../../shared/http/errors.js";
+import { forbidden } from "../../shared/http/errors.js";
 import { notFound } from "../../shared/http/errors.js";
 import { requireAuth, requireRole } from "../../shared/middleware/auth.js";
 import { success } from "../../shared/http/response.js";
 import {
   appendPartnerLeadDispositionEvent,
+  closePartnerLeadUnlockOrder,
   createMediaAsset,
   createPartnerCoinRechargeRequest,
+  createPartnerLeadUnlockIntent,
   enqueueLeadEventOutbox,
   createKycSubmission,
   ensurePartnerCoinWallet,
+  getPartnerLeadUnlockIntentById,
   getLatestKycForPartner,
   getPendingPartnerRechargeRequestByTxnRef,
   getPartnerCoinWallet,
@@ -25,14 +30,17 @@ import {
   listPartnerLeadsForScope,
   listPartnerCoinLedger,
   listPartnerCoinRechargeRequests,
+  listPartnerLeadUnlockIntentsForAdmin,
   listPartnerLeadDispositionTimeline,
   listPartnerActivePickups,
   markPartnerLeadCallStatus,
+  markPartnerLeadUnlockScreenshotSent,
   setPartnerLeadPickupStartedAt,
   savePartnerLeadCompletionEvent,
   savePartnerLeadOnsiteValidation,
   savePartnerLeadPaymentProofMetadata,
   updatePartnerLeadWorkflowStatus,
+  verifyPartnerLeadUnlockIntent,
   verifyPartnerCoinRechargeRequest,
 } from "../../db/repository.js";
 import {
@@ -122,6 +130,47 @@ function assertPartnerCanAccessLead(lead, req) {
   if (lead.partnerId && lead.partnerId !== req.auth.sub) throw notFound("Partner lead not found");
 }
 
+function getLeadUnlockPrice(lead) {
+  const quotePrice = Number(lead?.quote?.sellingPrice);
+  if (!Number.isFinite(quotePrice) || quotePrice < 300) return null;
+  if (quotePrice <= 10000) return 500;
+  if (quotePrice <= 24999) return 800;
+  return 1200;
+}
+
+function partnerHasUnlockedLead(lead, partnerId) {
+  if (!lead || !partnerId) return false;
+  if (lead.partnerId === partnerId && ["ACCEPTED", "IN_PROGRESS", "COMPLETED"].includes(lead.status)) return true;
+  return lead.unlockOrder?.partnerId === partnerId && ["APPROVED", "CLOSED"].includes(lead.unlockOrder.status);
+}
+
+function maskLeadForPartnerList(lead, partnerId) {
+  if (partnerHasUnlockedLead(lead, partnerId)) return lead;
+  return {
+    ...lead,
+    seller: {
+      ...lead.seller,
+      name: null,
+      phone: null,
+      addressLine: null,
+      landmark: null,
+    },
+    pickupSchedule: lead.pickupSchedule
+      ? {
+          ...lead.pickupSchedule,
+          sellerName: null,
+          callingPhoneNumber: null,
+          addressLine: null,
+          landmark: null,
+          primaryDate: null,
+          primaryTime: null,
+          alternateDate: null,
+          alternateTime: null,
+        }
+      : null,
+  };
+}
+
 function toDispositionKey(status) {
   switch (status) {
     case "AVAILABLE": return "CREATED";
@@ -170,14 +219,18 @@ const verifyRechargeRequestSchema = z.object({
   note: z.string().trim().max(240).optional().default(""),
 });
 
-function assertPartnerCoinAccess(partnerId) {
-  const now = nowIso();
-  ensurePartnerCoinWallet(partnerId, now);
-  const wallet = getPartnerCoinWallet(partnerId);
-  if (!wallet || wallet.balance <= 0) {
-    throw badRequest("Insufficient wallet balance. Recharge and wait for admin approval to access leads.");
-  }
-}
+const leadUnlockIntentStatuses = ["PENDING_PAYMENT", "SCREENSHOT_SENT", "APPROVED", "REJECTED", "EXPIRED", "CLOSED"];
+
+const leadUnlockIntentListSchema = z.object({
+  status: z.enum(leadUnlockIntentStatuses).optional(),
+  partnerId: z.string().trim().min(5).max(120).optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional().default(100),
+});
+
+const verifyLeadUnlockIntentSchema = z.object({
+  action: z.enum(["APPROVE", "REJECT"]),
+  note: z.string().trim().max(240).optional().default(""),
+});
 
 export const partnerRouter = Router();
 
@@ -316,12 +369,12 @@ partnerRouter.get("/coins/ledger", requireAuth, requireRole("partner"), (req, re
 
 partnerRouter.get("/lead-bucket", requireAuth, requireRole("partner"), (req, res, next) => {
   try {
-    assertPartnerCoinAccess(req.auth.sub);
     const query = leadListQuerySchema.parse(req.query);
     const bucketRows = listPartnerLeadsForScope({
       pincode: query.pincode,
       leadType: "LEAD_BUCKET",
       status: query.status,
+      viewerPartnerId: req.auth.sub,
       limit: query.limit,
     });
 
@@ -329,10 +382,12 @@ partnerRouter.get("/lead-bucket", requireAuth, requireRole("partner"), (req, res
       pincode: query.pincode,
       leadType: "SERVICE_LEAD",
       status: query.status,
+      viewerPartnerId: req.auth.sub,
       limit: query.limit,
     });
 
     const rows = [...bucketRows, ...scheduledRows]
+      .map((lead) => maskLeadForPartnerList(lead, req.auth.sub))
       .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
 
     res.json(success({ rows, count: rows.length }));
@@ -343,13 +398,13 @@ partnerRouter.get("/lead-bucket", requireAuth, requireRole("partner"), (req, res
 
 partnerRouter.get("/service-leads", requireAuth, requireRole("partner"), (req, res, next) => {
   try {
-    assertPartnerCoinAccess(req.auth.sub);
     const query = leadListQuerySchema.parse(req.query);
     const rows = listPartnerLeadsForScope({
       pincode: query.pincode,
       leadType: "SERVICE_LEAD",
       status: query.status,
       partnerId: req.auth.sub,
+      viewerPartnerId: req.auth.sub,
       date: query.date,
       timeSlot: query.timeSlot,
       limit: query.limit,
@@ -362,9 +417,151 @@ partnerRouter.get("/service-leads", requireAuth, requireRole("partner"), (req, r
 
 partnerRouter.get("/leads/:leadId", requireAuth, requireRole("partner"), (req, res, next) => {
   try {
-    const lead = getPartnerLeadById(req.params.leadId);
+    const lead = getPartnerLeadById(req.params.leadId, { viewerPartnerId: req.auth.sub });
     if (!lead) throw notFound("Partner lead not found");
+    if (!partnerHasUnlockedLead(lead, req.auth.sub)) {
+      throw forbidden("Pay to unlock this lead before viewing details.");
+    }
     res.json(success({ lead }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+partnerRouter.post("/leads/:leadId/unlock-intent", requireAuth, requireRole("partner"), (req, res, next) => {
+  try {
+    const existing = getPartnerLeadById(req.params.leadId, { viewerPartnerId: req.auth.sub });
+    if (!existing) throw notFound("Partner lead not found");
+
+    const unlockPrice = getLeadUnlockPrice(existing);
+    if (!unlockPrice) {
+      throw badRequest("Lead quote is not eligible for paid unlock.");
+    }
+
+    const now = nowIso();
+    const expiresAt = new Date(Date.now() + 4 * 60 * 1000).toISOString();
+    const result = createPartnerLeadUnlockIntent({
+      leadId: existing.id,
+      partnerId: req.auth.sub,
+      unlockPrice,
+      intentId: crypto.randomUUID(),
+      now,
+      expiresAt,
+    });
+
+    if (result.result === "NOT_FOUND") throw notFound("Partner lead not found");
+    if (result.result === "LOCKED_BY_OTHER") throw conflict("This lead payment is already pending with another partner.");
+    if (result.result === "OWNED_BY_OTHER") throw conflict("This lead is already unlocked by another partner.");
+    if (result.result === "INVALID_STATUS") throw badRequest(`Lead cannot be unlocked in ${existing.status} status.`);
+
+    res.json(success({
+      lead: maskLeadForPartnerList(result.lead, req.auth.sub),
+      intent: result.intent,
+      unlockPrice,
+      paymentQrUrl: "/Leadpay.jpeg",
+      expiresAt: result.intent?.expiresAt || expiresAt,
+    }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+partnerRouter.get("/lead-unlock-intents/:intentId([0-9a-fA-F-]{36})", requireAuth, requireRole("partner"), (req, res, next) => {
+  try {
+    const now = nowIso();
+    const intent = getPartnerLeadUnlockIntentById({ intentId: req.params.intentId, partnerId: req.auth.sub, now });
+    if (!intent) throw notFound("Lead unlock payment intent not found");
+    const lead = getPartnerLeadById(intent.leadId, { viewerPartnerId: req.auth.sub });
+    res.json(success({ intent, lead: lead && partnerHasUnlockedLead(lead, req.auth.sub) ? lead : maskLeadForPartnerList(lead, req.auth.sub) }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+partnerRouter.post("/lead-unlock-intents/:intentId([0-9a-fA-F-]{36})/screenshot-sent", requireAuth, requireRole("partner"), (req, res, next) => {
+  try {
+    const intent = markPartnerLeadUnlockScreenshotSent({
+      intentId: req.params.intentId,
+      partnerId: req.auth.sub,
+      now: nowIso(),
+    });
+    if (!intent) throw notFound("Lead unlock payment intent not found");
+    res.json(success({ intent, message: "Screenshot marked as sent. Waiting for admin approval." }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+partnerRouter.get("/lead-unlock-intents/admin", requireAuth, requireRole("admin"), (req, res, next) => {
+  try {
+    const query = leadUnlockIntentListSchema.parse(req.query);
+    const rows = listPartnerLeadUnlockIntentsForAdmin({
+      status: query.status,
+      partnerId: query.partnerId,
+      limit: query.limit,
+      now: nowIso(),
+    });
+    res.json(success({ rows, count: rows.length }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+partnerRouter.patch("/lead-unlock-intents/:intentId([0-9a-fA-F-]{36})/verify", requireAuth, requireRole("admin"), (req, res, next) => {
+  try {
+    const input = verifyLeadUnlockIntentSchema.parse(req.body);
+    const now = nowIso();
+    const result = verifyPartnerLeadUnlockIntent({
+      intentId: req.params.intentId,
+      action: input.action,
+      verifiedBy: req.auth.sub,
+      adminNote: input.note,
+      verifiedAt: now,
+    });
+
+    if (result.result === "NOT_FOUND") throw notFound("Lead unlock payment intent not found");
+    if (result.result === "LEAD_NOT_FOUND") throw notFound("Partner lead not found");
+    if (result.result === "OWNED_BY_OTHER") throw conflict("This lead is already owned by another partner.");
+    if (result.result === "ALREADY_PROCESSED") throw badRequest(`Payment intent is already ${result.intent?.status || "processed"}.`);
+
+    if (result.result === "APPROVED" && result.lead) {
+      appendPartnerLeadDispositionEvent({
+        id: crypto.randomUUID(),
+        leadId: result.lead.id,
+        userSellFlowId: result.lead.userSellFlowId,
+        partnerId: result.lead.partnerId,
+        fromStatus: result.fromStatus,
+        toStatus: result.lead.status,
+        dispositionKey: toDispositionKey(result.lead.status),
+        note: `Lead payment intent approved for ${result.intent.unlockPrice}`,
+        actorRole: "admin",
+        actorId: req.auth.sub,
+        createdAt: now,
+      });
+
+      enqueueLeadEventOutbox({
+        id: crypto.randomUUID(),
+        eventType: "lead.unlock-payment.approved",
+        leadId: result.lead.id,
+        payloadJson: JSON.stringify({
+          leadId: result.lead.id,
+          userSellFlowId: result.lead.userSellFlowId,
+          leadType: result.lead.leadType,
+          fromStatus: result.fromStatus,
+          toStatus: result.lead.status,
+          dispositionKey: "ACCEPTED",
+          partnerId: result.lead.partnerId,
+          pincode: result.lead.pincode,
+          unlockOrderId: result.intent.id,
+          unlockPrice: result.intent.unlockPrice,
+          actorRole: "admin",
+          actorId: req.auth.sub,
+        }),
+        occurredAt: now,
+      });
+    }
+
+    res.json(success({ intent: result.intent, lead: result.lead }));
   } catch (err) {
     next(err);
   }
@@ -462,6 +659,10 @@ partnerRouter.patch("/leads/:leadId/status", requireAuth, requireRole("partner")
         pickupStartedAt: now,
         updatedAt: now,
       });
+    }
+
+    if (finalLead && input.status === "COMPLETED") {
+      closePartnerLeadUnlockOrder({ leadId: existing.id, partnerId: req.auth.sub, closedAt: now });
     }
 
     if (finalLead) {
@@ -912,6 +1113,7 @@ partnerRouter.post("/leads/:leadId/completion", requireAuth, requireRole("partne
       rejectionReason: null,
       updatedAt: now,
     });
+    closePartnerLeadUnlockOrder({ leadId: existing.id, partnerId: req.auth.sub, closedAt: now });
 
     appendPartnerLeadDispositionEvent({
       id: crypto.randomUUID(),

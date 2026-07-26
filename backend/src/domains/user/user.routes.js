@@ -73,6 +73,13 @@ const pickupScheduleBodySchema = z.object({
   pickupSchedule: pickupScheduleSchema,
 });
 
+const rescheduleBodySchema = z.object({
+  primaryDate: z.string().datetime(),
+  primaryTime: z.string().trim().min(3).max(40),
+  alternateDate: z.string().datetime(),
+  alternateTime: z.string().trim().min(3).max(40),
+});
+
 const listQuerySchema = z.object({
   status: z.enum(flowStatuses).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional().default(25),
@@ -461,6 +468,193 @@ userRouter.patch("/sell-flows/:flowId/pickup-schedule", async (req, res, next) =
     }
 
     res.json(success({ flow }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// User reschedule: update pickup dates/times only, preserve address, sync partner lead + disposition
+userRouter.patch("/sell-flows/:flowId/reschedule", async (req, res, next) => {
+  try {
+    const input = rescheduleBodySchema.parse(req.body);
+    const existing = requireFlow(req);
+    if (existing.status === "CANCELLED") throw badRequest("Cancelled sell flow cannot be rescheduled");
+    if (existing.status !== "PICKUP_SCHEDULED") throw badRequest("Only PICKUP_SCHEDULED flows can be rescheduled", { currentStatus: existing.status });
+    if (!existing.pickupSchedule) throw badRequest("No existing pickup schedule found to base reschedule on");
+    const existingLead = getPartnerLeadByFlowId(existing.id);
+    if (existingLead && ["COMPLETED", "CANCELLED"].includes(existingLead.status)) {
+      throw badRequest("Pickup is already " + existingLead.status.toLowerCase() + " and cannot be rescheduled");
+    }
+    const updatedAt = nowIso();
+    const user = getUser(req);
+    const pickupSchedule = {
+      ...existing.pickupSchedule,
+      primaryDate: input.primaryDate,
+      primaryTime: input.primaryTime,
+      alternateDate: input.alternateDate,
+      alternateTime: input.alternateTime,
+      updatedAt,
+    };
+    const flowJson = buildFlowJson({
+      id: existing.id, flowType: existing.flowType, user,
+      selectedModel: existing.selectedModel, deviceDetails: existing.deviceDetails,
+      pickupSchedule, quote: existing.quote,
+      servicePincode: getFlowPincode(existing),
+      status: "PICKUP_SCHEDULED", createdAt: existing.createdAt, updatedAt,
+    });
+    const flow = updateUserSellFlow({
+      id: existing.id, userId: req.auth.sub, status: "PICKUP_SCHEDULED",
+      pickupScheduleJson: JSON.stringify(pickupSchedule),
+      quoteJson: null, flowJson: JSON.stringify(flowJson), updatedAt,
+    });
+    const pincode = getFlowPincode(flow) || existingLead?.pincode;
+    if (pincode) {
+      upsertPartnerLeadFromUserFlow({
+        id: `lead-${flow.id}`, userSellFlowId: flow.id, userId: flow.userId,
+        leadType: existingLead?.leadType || "SERVICE_LEAD",
+        status: existingLead?.status || "AVAILABLE",
+        pincode, city: pickupSchedule.city || existingLead?.city || null,
+        sellerName: pickupSchedule.sellerName || user.name,
+        sellerPhone: pickupSchedule.callingPhoneNumber || user.phone || null,
+        addressLine: pickupSchedule.addressLine || null,
+        landmark: pickupSchedule.landmark || null,
+        selectedModelJson: JSON.stringify(flow.selectedModel),
+        deviceDetailsJson: flow.deviceDetails ? JSON.stringify(flow.deviceDetails) : null,
+        quoteJson: flow.quote ? JSON.stringify(flow.quote) : null,
+        pickupScheduleJson: JSON.stringify(pickupSchedule),
+        flowSnapshotJson: JSON.stringify(flowJson),
+        createdAt: flow.createdAt, updatedAt,
+      });
+      if (existingLead?.id) {
+        appendPartnerLeadDispositionEvent({
+          id: crypto.randomUUID(), leadId: existingLead.id,
+          userSellFlowId: flow.id, partnerId: existingLead.partnerId || null,
+          fromStatus: existingLead.status, toStatus: existingLead.status,
+          dispositionKey: "RESCHEDULE_REQUESTED",
+          note: `Pickup rescheduled by user to ${input.primaryDate.split("T")[0]} ${input.primaryTime}`,
+          actorRole: "user", actorId: req.auth.sub, createdAt: updatedAt,
+        });
+        enqueueLeadEventOutbox({
+          id: crypto.randomUUID(), eventType: "lead.rescheduled", leadId: existingLead.id,
+          payloadJson: JSON.stringify({
+            leadId: existingLead.id, userSellFlowId: flow.id,
+            primaryDate: input.primaryDate, primaryTime: input.primaryTime,
+            alternateDate: input.alternateDate, alternateTime: input.alternateTime,
+            partnerId: existingLead.partnerId || null, actorRole: "user", actorId: req.auth.sub,
+          }),
+          occurredAt: updatedAt,
+        });
+      }
+    }
+    res.json(success({ flow, rescheduled: true }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// User reschedule: update pickup dates/times only, preserve address, sync partner lead + disposition event
+userRouter.patch("/sell-flows/:flowId/reschedule", async (req, res, next) => {
+  try {
+    const input = rescheduleBodySchema.parse(req.body);
+    const existing = requireFlow(req);
+    if (existing.status === "CANCELLED") throw badRequest("Cancelled sell flow cannot be rescheduled");
+    if (existing.status !== "PICKUP_SCHEDULED") throw badRequest("Only scheduled pickups can be rescheduled", { currentStatus: existing.status });
+    if (!existing.pickupSchedule) throw badRequest("No existing pickup schedule found");
+    const existingLead = getPartnerLeadByFlowId(existing.id);
+    if (existingLead && ["COMPLETED", "CANCELLED"].includes(existingLead.status)) {
+      throw badRequest("Pickup is already " + existingLead.status.toLowerCase() + " and cannot be rescheduled");
+    }
+    const updatedAt = nowIso();
+    const user = getUser(req);
+    const pickupSchedule = {
+      ...existing.pickupSchedule,
+      primaryDate: input.primaryDate,
+      primaryTime: input.primaryTime,
+      alternateDate: input.alternateDate,
+      alternateTime: input.alternateTime,
+      updatedAt,
+    };
+    const flowJson = buildFlowJson({
+      id: existing.id, flowType: existing.flowType, user,
+      selectedModel: existing.selectedModel, deviceDetails: existing.deviceDetails,
+      pickupSchedule, quote: existing.quote,
+      servicePincode: getFlowPincode(existing),
+      status: "PICKUP_SCHEDULED", createdAt: existing.createdAt, updatedAt,
+    });
+    const flow = updateUserSellFlow({
+      id: existing.id, userId: req.auth.sub, status: "PICKUP_SCHEDULED",
+      pickupScheduleJson: JSON.stringify(pickupSchedule),
+      quoteJson: null, flowJson: JSON.stringify(flowJson), updatedAt,
+    });
+    const pincode = getFlowPincode(flow) || existingLead?.pincode;
+    if (pincode) {
+      upsertPartnerLeadFromUserFlow({
+        id: `lead-${flow.id}`, userSellFlowId: flow.id, userId: flow.userId,
+        leadType: existingLead?.leadType || "SERVICE_LEAD",
+        status: existingLead?.status || "AVAILABLE",
+        pincode, city: pickupSchedule.city || existingLead?.city || null,
+        sellerName: pickupSchedule.sellerName || user.name,
+        sellerPhone: pickupSchedule.callingPhoneNumber || user.phone || null,
+        addressLine: pickupSchedule.addressLine || null,
+        landmark: pickupSchedule.landmark || null,
+        selectedModelJson: JSON.stringify(flow.selectedModel),
+        deviceDetailsJson: flow.deviceDetails ? JSON.stringify(flow.deviceDetails) : null,
+        quoteJson: flow.quote ? JSON.stringify(flow.quote) : null,
+        pickupScheduleJson: JSON.stringify(pickupSchedule),
+        flowSnapshotJson: JSON.stringify(flowJson),
+        createdAt: flow.createdAt, updatedAt,
+      });
+      if (existingLead?.id) {
+        appendPartnerLeadDispositionEvent({
+          id: crypto.randomUUID(), leadId: existingLead.id,
+          userSellFlowId: flow.id, partnerId: existingLead.partnerId || null,
+          fromStatus: existingLead.status, toStatus: existingLead.status,
+          dispositionKey: "RESCHEDULE_REQUESTED",
+          note: `Pickup rescheduled by user to ${input.primaryDate.split("T")[0]} ${input.primaryTime}`,
+          actorRole: "user", actorId: req.auth.sub, createdAt: updatedAt,
+        });
+        enqueueLeadEventOutbox({
+          id: crypto.randomUUID(), eventType: "lead.rescheduled", leadId: existingLead.id,
+          payloadJson: JSON.stringify({
+            leadId: existingLead.id, userSellFlowId: flow.id,
+            primaryDate: input.primaryDate, primaryTime: input.primaryTime,
+            alternateDate: input.alternateDate, alternateTime: input.alternateTime,
+            partnerId: existingLead.partnerId || null, actorRole: "user", actorId: req.auth.sub,
+          }),
+          occurredAt: updatedAt,
+        });
+      }
+    }
+    res.json(success({ flow, rescheduled: true }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// User-facing: get partner lead pickup/payment status for invoice display
+userRouter.get("/sell-flows/:flowId/lead-status", (req, res, next) => {
+  try {
+    const flow = requireFlow(req);
+    const lead = getPartnerLeadByFlowId(flow.id);
+    if (!lead) return res.json(success({ found: false, lead: null }));
+    res.json(success({
+      found: true,
+      lead: {
+        id: lead.id,
+        status: lead.status,
+        completedAt: lead.completedAt || null,
+        completionEvent: lead.completionEvent || null,
+        paymentProof: lead.paymentProof ? {
+          amountCollected: lead.paymentProof.amountCollected,
+          paymentMode: lead.paymentProof.paymentMode,
+          transactionRef: lead.paymentProof.transactionRef || null,
+          submittedAt: lead.paymentProof.submittedAt,
+          mediaUrl: lead.paymentProof.mediaUrl || null,
+        } : null,
+        paymentSubmittedAt: lead.paymentSubmittedAt || null,
+        onsiteValidation: lead.onsiteValidation || null,
+      },
+    }));
   } catch (err) {
     next(err);
   }

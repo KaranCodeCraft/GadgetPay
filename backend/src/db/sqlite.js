@@ -9,24 +9,84 @@ import { env } from "../config/env.js";
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const defaultDbPath = path.resolve(moduleDir, "../../data/gadgetpe.sqlite");
 const resolvedDbPath = path.resolve(process.cwd(), env.sqlitePath || defaultDbPath);
+// node-sqlite3-wasm (WASM) requires forward-slash paths even on Windows
+const wasmDbPath = resolvedDbPath.replace(/\\/g, "/");
 const resolvedMediaRoot = path.resolve(process.cwd(), env.mediaRoot);
+const isWindows = process.platform === "win32";
+
+function isDatabaseLockedError(error) {
+  const message = error instanceof Error ? error.message : String(error || "");
+  return message.toLowerCase().includes("database is locked");
+}
+
+function sleepMs(ms) {
+  // Use a tiny sync wait because DB initialization in this module is synchronous.
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function cleanupStaleLockArtifacts() {
+  if (!isWindows) return;
+
+  const candidates = [
+    `${resolvedDbPath}.lock`,
+    `${resolvedDbPath}-wal`,
+    `${resolvedDbPath}-shm`,
+    `${resolvedDbPath}-journal`,
+  ];
+
+  for (const candidate of candidates) {
+    try {
+      if (fs.existsSync(candidate)) {
+        const stat = fs.statSync(candidate);
+        if (stat.isDirectory()) {
+          fs.rmSync(candidate, { recursive: true, force: true });
+        } else {
+          fs.rmSync(candidate, { force: true });
+        }
+      }
+    } catch {
+      // Ignore cleanup failures. If another process is genuinely using the DB,
+      // retries below will still surface a lock error.
+    }
+  }
+}
+
+function withLockRetry(action) {
+  const maxAttempts = isWindows ? 6 : 3;
+  let lastError;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return action();
+    } catch (error) {
+      if (!isDatabaseLockedError(error)) throw error;
+      lastError = error;
+      if (attempt === 1) cleanupStaleLockArtifacts();
+      if (attempt < maxAttempts) sleepMs(40 * attempt);
+    }
+  }
+
+  throw lastError;
+}
 
 fs.mkdirSync(path.dirname(resolvedDbPath), { recursive: true });
 fs.mkdirSync(resolvedMediaRoot, { recursive: true });
 
-const wasmDb = new WasmDatabase(resolvedDbPath);
+cleanupStaleLockArtifacts();
+
+const wasmDb = new WasmDatabase(wasmDbPath);
 
 let _savepointId = 0;
 
 const sqlite = {
-  exec(sql) { return wasmDb.exec(sql); },
+  exec(sql) { return withLockRetry(() => wasmDb.exec(sql)); },
   pragma(str) {
     const [key, val] = str.split("=").map(s => s.trim());
     if (val !== undefined) {
-      wasmDb.exec(`PRAGMA ${key} = ${val}`);
+      withLockRetry(() => wasmDb.exec(`PRAGMA ${key} = ${val}`));
       return;
     }
-    return wasmDb.exec(`PRAGMA ${key}`);
+    return withLockRetry(() => wasmDb.exec(`PRAGMA ${key}`));
   },
   prepare(sql) {
     const stmt = wasmDb.prepare(sql);
@@ -79,7 +139,10 @@ const sqlite = {
   close() { wasmDb.close(); },
 };
 
-sqlite.pragma("journal_mode = WAL");
+// WAL mode is not supported by node-sqlite3-wasm (requires OS shared memory).
+// Use DELETE journal mode which works reliably in WASM environments.
+sqlite.pragma("busy_timeout = 5000");
+sqlite.pragma("journal_mode = DELETE");
 
 sqlite.exec(`
   CREATE TABLE IF NOT EXISTS partners (
@@ -326,6 +389,64 @@ sqlite.exec(`
     created_at TEXT NOT NULL,
     FOREIGN KEY(partner_id) REFERENCES partners(id)
   );
+
+  CREATE TABLE IF NOT EXISTS partner_lead_unlocks (
+    id TEXT PRIMARY KEY,
+    lead_id TEXT NOT NULL,
+    partner_id TEXT NOT NULL,
+    user_sell_flow_id TEXT NOT NULL,
+    unlock_price INTEGER NOT NULL,
+    payment_method TEXT NOT NULL DEFAULT 'UPI_QR',
+    status TEXT NOT NULL CHECK(status IN ('PENDING_PAYMENT', 'SCREENSHOT_SENT', 'APPROVED', 'REJECTED', 'EXPIRED', 'CLOSED')),
+    screenshot_status TEXT NOT NULL DEFAULT 'NOT_SENT',
+    admin_note TEXT,
+    approved_by TEXT,
+    approved_at TEXT,
+    rejected_at TEXT,
+    metadata_json TEXT,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    closed_at TEXT,
+    FOREIGN KEY(lead_id) REFERENCES partner_leads(id),
+    FOREIGN KEY(partner_id) REFERENCES partners(id),
+    FOREIGN KEY(user_sell_flow_id) REFERENCES user_sell_flows(id)
+  );
+
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_partner_lead_unlocks_active_lead
+    ON partner_lead_unlocks(lead_id)
+    WHERE status IN ('PENDING_PAYMENT', 'SCREENSHOT_SENT', 'APPROVED');
+
+  CREATE INDEX IF NOT EXISTS idx_partner_lead_unlocks_partner_status
+    ON partner_lead_unlocks(partner_id, status, created_at DESC);
+
+  CREATE TABLE IF NOT EXISTS partner_lead_payment_intents (
+    id TEXT PRIMARY KEY,
+    lead_id TEXT NOT NULL,
+    partner_id TEXT NOT NULL,
+    user_sell_flow_id TEXT NOT NULL,
+    unlock_price INTEGER NOT NULL,
+    payment_method TEXT NOT NULL DEFAULT 'UPI_QR',
+    status TEXT NOT NULL CHECK(status IN ('PENDING_PAYMENT', 'SCREENSHOT_SENT', 'APPROVED', 'REJECTED', 'EXPIRED', 'CLOSED')),
+    screenshot_status TEXT NOT NULL DEFAULT 'NOT_SENT',
+    admin_note TEXT,
+    approved_by TEXT,
+    approved_at TEXT,
+    rejected_at TEXT,
+    metadata_json TEXT,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    closed_at TEXT,
+    FOREIGN KEY(lead_id) REFERENCES partner_leads(id),
+    FOREIGN KEY(partner_id) REFERENCES partners(id),
+    FOREIGN KEY(user_sell_flow_id) REFERENCES user_sell_flows(id)
+  );
+
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_partner_lead_payment_intents_active_lead
+    ON partner_lead_payment_intents(lead_id)
+    WHERE status IN ('PENDING_PAYMENT', 'SCREENSHOT_SENT', 'APPROVED');
+
+  CREATE INDEX IF NOT EXISTS idx_partner_lead_payment_intents_partner_status
+    ON partner_lead_payment_intents(partner_id, status, created_at DESC);
 
   CREATE TABLE IF NOT EXISTS partner_coin_recharge_requests (
     id TEXT PRIMARY KEY,
@@ -719,6 +840,110 @@ ensurePartnerLeadColumn("payment_proof_json", "TEXT");
 ensurePartnerLeadColumn("payment_submitted_at", "TEXT");
 ensurePartnerLeadColumn("completion_event_json", "TEXT");
 ensurePartnerLeadColumn("completion_event_at", "TEXT");
+
+function migratePartnerLeadUnlocksSchema() {
+  return;
+  const table = sqlite
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'partner_lead_unlocks'")
+    .get();
+  if (!table?.sql) return;
+
+  const sqlText = String(table.sql);
+  const needsMigration =
+    sqlText.includes("ledger_entry_id") ||
+    sqlText.includes("UNLOCKED") ||
+    !sqlText.includes("PENDING_PAYMENT") ||
+    !sqlText.includes("expires_at");
+
+  if (!needsMigration) return;
+
+  const columns = sqlite
+    .prepare("PRAGMA table_info(partner_lead_unlocks)")
+    .all()
+    .map((column) => column.name);
+
+  const statusExpr = columns.includes("status")
+    ? "CASE WHEN status = 'CLOSED' THEN 'CLOSED' WHEN status IN ('REFUNDED', 'REJECTED') THEN 'REJECTED' WHEN status = 'EXPIRED' THEN 'EXPIRED' ELSE 'APPROVED' END"
+    : "'PENDING_PAYMENT'";
+  const metadataExpr = columns.includes("metadata_json") ? "metadata_json" : "NULL";
+  const createdAtExpr = columns.includes("created_at") ? "created_at" : "datetime('now')";
+  const closedAtExpr = columns.includes("closed_at") ? "closed_at" : "NULL";
+
+  sqlite.exec("BEGIN TRANSACTION");
+  try {
+    sqlite.exec("ALTER TABLE partner_lead_unlocks RENAME TO partner_lead_unlocks_old");
+
+    sqlite.exec(`
+      CREATE TABLE partner_lead_unlocks (
+        id TEXT PRIMARY KEY,
+        lead_id TEXT NOT NULL,
+        partner_id TEXT NOT NULL,
+        user_sell_flow_id TEXT NOT NULL,
+        unlock_price INTEGER NOT NULL,
+        payment_method TEXT NOT NULL DEFAULT 'UPI_QR',
+        status TEXT NOT NULL CHECK(status IN ('PENDING_PAYMENT', 'SCREENSHOT_SENT', 'APPROVED', 'REJECTED', 'EXPIRED', 'CLOSED')),
+        screenshot_status TEXT NOT NULL DEFAULT 'NOT_SENT',
+        admin_note TEXT,
+        approved_by TEXT,
+        approved_at TEXT,
+        rejected_at TEXT,
+        metadata_json TEXT,
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        closed_at TEXT,
+        FOREIGN KEY(lead_id) REFERENCES partner_leads(id),
+        FOREIGN KEY(partner_id) REFERENCES partners(id),
+        FOREIGN KEY(user_sell_flow_id) REFERENCES user_sell_flows(id)
+      )
+    `);
+
+    sqlite.exec(`
+      INSERT INTO partner_lead_unlocks (
+        id,
+        lead_id,
+        partner_id,
+        user_sell_flow_id,
+        unlock_price,
+        payment_method,
+        status,
+        screenshot_status,
+        metadata_json,
+        created_at,
+        expires_at,
+        closed_at
+      )
+      SELECT
+        id,
+        lead_id,
+        partner_id,
+        user_sell_flow_id,
+        unlock_price,
+        'UPI_QR',
+        ${statusExpr},
+        'NOT_SENT',
+        ${metadataExpr},
+        ${createdAtExpr},
+        datetime(${createdAtExpr}, '+4 minutes'),
+        ${closedAtExpr}
+      FROM partner_lead_unlocks_old
+    `);
+
+    sqlite.exec("DROP TABLE partner_lead_unlocks_old");
+    sqlite.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_partner_lead_unlocks_active_lead
+        ON partner_lead_unlocks(lead_id)
+        WHERE status IN ('PENDING_PAYMENT', 'SCREENSHOT_SENT', 'APPROVED');
+      CREATE INDEX IF NOT EXISTS idx_partner_lead_unlocks_partner_status
+        ON partner_lead_unlocks(partner_id, status, created_at DESC);
+    `);
+    sqlite.exec("COMMIT");
+  } catch (error) {
+    sqlite.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+migratePartnerLeadUnlocksSchema();
 
 const countRows = sqlite.prepare("SELECT COUNT(*) as count FROM serviceability_pincodes").get();
 if (!countRows || countRows.count === 0) {

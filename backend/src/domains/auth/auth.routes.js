@@ -20,20 +20,20 @@ import {
 
 export const authRouter = Router();
 
-authRouter.post("/partner/otp/send", (req, res, next) => {
+authRouter.post("/partner/otp/send", async (req, res, next) => {
   try {
     const input = sendOtpSchema.parse(req.body);
-    const result = sendPartnerOtp(input.phone);
+    const result = await sendPartnerOtp(input.phone);
     res.json(success(result));
   } catch (err) {
     next(err);
   }
 });
 
-authRouter.post("/partner/otp/verify", (req, res, next) => {
+authRouter.post("/partner/otp/verify", async (req, res, next) => {
   try {
     const input = verifyOtpSchema.parse(req.body);
-    const result = verifyPartnerOtp(input);
+    const result = await verifyPartnerOtp(input);
     res.json(success(result));
   } catch (err) {
     next(err);
@@ -60,20 +60,20 @@ authRouter.post("/logout", (req, res, next) => {
   }
 });
 
-authRouter.post("/user/otp/send", (req, res, next) => {
+authRouter.post("/user/otp/send", async (req, res, next) => {
   try {
     const input = sendOtpSchema.parse(req.body);
-    const result = sendUserOtp(input.phone);
+    const result = await sendUserOtp(input.phone);
     res.json(success(result));
   } catch (err) {
     next(err);
   }
 });
 
-authRouter.post("/user/otp/verify", (req, res, next) => {
+authRouter.post("/user/otp/verify", async (req, res, next) => {
   try {
     const input = verifyUserOtpSchema.parse(req.body);
-    const result = verifyUserOtp(input);
+    const result = await verifyUserOtp(input);
     res.json(success(result));
   } catch (err) {
     next(err);

@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+﻿import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
   Activity,
   AlertCircle,
@@ -47,8 +47,6 @@ import {
   listQuoteDeductionRules,
   listKycSubmissions,
   listAdminPartnerCoinRechargeRequests,
-  listAdminLeadUnlockIntents,
-  verifyAdminLeadUnlockIntent,
   listServiceabilityPincodes,
   listServiceabilityUploadHistory,
   previewQuoteDeductions,
@@ -74,7 +72,6 @@ import {
   type PartnerLead,
   type PincodeValidationPreview,
   type PartnerCoinRechargeRequestRow,
-  type AdminLeadUnlockIntentRow,
   type PartnerLeadStatus,
   type QuoteDeductionAnswerGroup,
   type QuoteDeductionRule,
@@ -121,11 +118,11 @@ function formatUploadValidationError(err: unknown) {
   return details.sourceFileName ? `${err.message} (${details.sourceFileName})` : err.message;
 }
 
-export const Route = createFileRoute("/admin")({
+export const Route = createFileRoute("/admin-recovered")({
   component: AdminPage,
 });
 
-//  Types 
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 type NavItem =
   | "Overview"
@@ -268,7 +265,7 @@ function toInr(value: number) {
   return new Intl.NumberFormat("en-IN").format(value);
 }
 
-//  Nav Icon Map 
+// ─── Nav Icon Map ─────────────────────────────────────────────────────────────
 
 const NAV_ICONS: Record<NavItem, ComponentType<{ size?: number; className?: string }>> = {
   Overview: LayoutDashboard,
@@ -298,7 +295,7 @@ const NAV_ITEMS: NavItem[] = [
   "Settings",
 ];
 
-//  Mini Bar Chart 
+// ─── Mini Bar Chart ───────────────────────────────────────────────────────────
 
 function MiniBarChart({ data, color = "var(--green)" }: { data: RevenueBar[]; color?: string }) {
   if (data.length === 0) {
@@ -322,7 +319,7 @@ function MiniBarChart({ data, color = "var(--green)" }: { data: RevenueBar[]; co
   );
 }
 
-//  Donut Chart 
+// ─── Donut Chart ──────────────────────────────────────────────────────────────
 
 function DonutChart({ slices }: { slices: { value: number; color: string; label: string }[] }) {
   const total = slices.reduce((s, x) => s + x.value, 0);
@@ -361,7 +358,7 @@ function DonutChart({ slices }: { slices: { value: number; color: string; label:
   );
 }
 
-//  Stat Card 
+// ─── Stat Card ────────────────────────────────────────────────────────────────
 
 function StatCard({
   label,
@@ -390,7 +387,7 @@ function StatCard({
   );
 }
 
-//  Status Badge 
+// ─── Status Badge ─────────────────────────────────────────────────────────────
 
 const STATUS_COLORS: Record<LeadStatus, string> = {
   Pending: "#f59e0b",
@@ -410,7 +407,7 @@ function StatusBadge({ status }: { status: LeadStatus }) {
   );
 }
 
-//  Section: Overview 
+// ─── Section: Overview ────────────────────────────────────────────────────────
 
 function OverviewSection({
   leads,
@@ -501,7 +498,7 @@ function OverviewSection({
         </div>
 
         <div className="admin-card admin-revenue-card">
-          <h3 className="admin-card-title">Revenue  This Week</h3>
+          <h3 className="admin-card-title">Revenue — This Week</h3>
           <div className="admin-revenue-total">
             Rs. {toInr((overview?.weeklyTrend || []).reduce((s, d) => s + d.value, 0))}
           </div>
@@ -524,7 +521,7 @@ function OverviewSection({
                 <div className="admin-activity-info">
                   <span className="admin-activity-name">{p.partnerName}</span>
                   <span className="admin-activity-meta">
-                    {p.leadsTouched} touched  {p.completedLeads} completed  {p.activeLeads} active
+                    {p.leadsTouched} touched · {p.completedLeads} completed · {p.activeLeads} active
                   </span>
                 </div>
                 <span
@@ -545,7 +542,7 @@ function OverviewSection({
   );
 }
 
-//  Section: Lead Bucket 
+// ─── Section: Lead Bucket ─────────────────────────────────────────────────────
 
 const PAGE_SIZE = 15;
 
@@ -702,7 +699,7 @@ function LeadBucketSection({
             disabled={safePage <= 1}
             onClick={() => setPage((p) => p - 1)}
           >
-             Prev
+            ‹ Prev
           </button>
           <span className="admin-page-info">
             Page {safePage} of {totalPages}
@@ -713,7 +710,7 @@ function LeadBucketSection({
             disabled={safePage >= totalPages}
             onClick={() => setPage((p) => p + 1)}
           >
-            Next 
+            Next ›
           </button>
         </div>
       </div>
@@ -721,7 +718,7 @@ function LeadBucketSection({
   );
 }
 
-//  Section: Lead Disposition 
+// ─── Section: Lead Disposition ────────────────────────────────────────────────
 
 function LeadDispositionSection({
   leads,
@@ -807,7 +804,7 @@ function LeadDispositionSection({
         </div>
 
         <div className="admin-card">
-          <h3 className="admin-card-title">Status  Disposition Heatmap</h3>
+          <h3 className="admin-card-title">Status × Disposition Heatmap</h3>
           <div className="admin-heatmap">
             <div className="admin-heatmap-head">
               <span />
@@ -877,7 +874,7 @@ function LeadDispositionSection({
                   <td>
                     <StatusBadge status={l.status} />
                   </td>
-                  <td>{l.partner ?? <span className="admin-unassigned"></span>}</td>
+                  <td>{l.partner ?? <span className="admin-unassigned">—</span>}</td>
                   <td className="admin-muted">
                     <button
                       type="button"
@@ -934,13 +931,13 @@ function LeadTimelineModal({
         aria-label="Lead disposition timeline"
       >
         <div className="admin-card-toprow">
-          <h3 className="admin-card-title">Timeline  {lead.id}</h3>
+          <h3 className="admin-card-title">Timeline · {lead.id}</h3>
           <button type="button" className="admin-page-btn" onClick={onClose}>
             Close
           </button>
         </div>
         <p className="admin-muted" style={{ marginBottom: 12 }}>
-          {lead.modelName}  {lead.seller}  {lead.pincode}
+          {lead.modelName} · {lead.seller} · {lead.pincode}
         </p>
 
         {loading ? <p className="admin-muted">Loading timeline...</p> : null}
@@ -992,7 +989,7 @@ function LeadTimelineModal({
   );
 }
 
-//  Section: Lead Assignment 
+// ─── Section: Lead Assignment ─────────────────────────────────────────────────
 
 function LeadAssignmentSection({
   leads,
@@ -1101,7 +1098,7 @@ function LeadAssignmentSection({
                 <option value="">-- Pick a lead --</option>
                 {unassigned.slice(0, 15).map((l) => (
                   <option key={l.id} value={l.id}>
-                    {l.id}  {l.phone}  {l.city}
+                    {l.id} · {l.phone} · {l.city}
                   </option>
                 ))}
               </select>
@@ -1148,7 +1145,7 @@ function LeadAssignmentSection({
                   <span className="admin-queue-phone">{l.phone}</span>
                 </div>
                 <div className="admin-queue-meta">
-                  <MapPin size={12} /> {l.city}  {l.pincode}
+                  <MapPin size={12} /> {l.city} · {l.pincode}
                 </div>
                 <span className="admin-queue-badge">Unassigned</span>
               </div>
@@ -1167,7 +1164,7 @@ function LeadAssignmentSection({
   );
 }
 
-//  Section: Location Management 
+// ─── Section: Location Management ────────────────────────────────────────────
 
 function LocationSection() {
   const [rows, setRows] = useState<ServiceabilityRow[]>([]);
@@ -1959,22 +1956,22 @@ const DEVICE_QUESTION_CATALOG: Record<QuoteDeductionAnswerGroup, CatalogQuestion
   nestedPhysicalIssueAnswers: [
     {
       key: "Any Dead spots",
-      label: "Dead spots  where?",
+      label: "Dead spots — where?",
       options: ["Top", "Bottom", "Left side", "Right side", "Multiple areas"],
     },
     {
       key: "Broken or Screen Scratches",
-      label: "Screen damage  how bad?",
+      label: "Screen damage — how bad?",
       options: ["Minor scratches", "Visible scratches", "Cracked glass", "Display bleeding"],
     },
     {
       key: "Dent or Marks on body",
-      label: "Body damage  where?",
+      label: "Body damage — where?",
       options: ["Back panel", "Side frame", "Corners", "Multiple sides"],
     },
     {
       key: "Device Panel Broken / Missing",
-      label: "Panel  what condition?",
+      label: "Panel — what condition?",
       options: [
         "Back panel broken",
         "Back panel missing",
@@ -2083,7 +2080,7 @@ function buildRuleSummary(form: QuoteDeductionRuleForm): string {
   const cap = form.maxDeductionAmount
     ? `, capped at Rs.\u00a0${Number(form.maxDeductionAmount).toLocaleString("en-IN")}`
     : "";
-  return `When ${condition}  deduct ${deductionAmt}${cap}`;
+  return `When ${condition} → deduct ${deductionAmt}${cap}`;
 }
 
 function PriceManagementSection() {
@@ -2601,7 +2598,7 @@ function PriceManagementSection() {
                       style={{ fontWeight: 500, display: "inline-flex", alignItems: "center", gap: 8 }}
                     >
                       <span>
-                        {questions.length} questions  {activeCount} active rules
+                        {questions.length} questions • {activeCount} active rules
                       </span>
                       <ChevronDown size={16} aria-hidden="true" />
                     </span>
@@ -3102,7 +3099,7 @@ function PriceManagementSection() {
   );
 }
 
-//  Section: KYC Queue 
+// ─── Section: KYC Queue ─────────────────────────────────────────────────────
 
 function KycQueueSection() {
   const [rows, setRows] = useState<KycSubmissionRow[]>([]);
@@ -3319,7 +3316,7 @@ function KycQueueSection() {
   );
 }
 
-//  Section: Payments Verification 
+// ─── Section: Payments Verification ─────────────────────────────────────────
 
 function PaymentsVerifySection() {
   const [rows, setRows] = useState<PartnerCoinRechargeRequestRow[]>([]);
@@ -3532,245 +3529,19 @@ function PaymentsVerifySection() {
   );
 }
 
-//  Section: Partners Activity 
+// ─── Section: Partners Activity ───────────────────────────────────────────────
 
 function PartnersSection() {
-  const [search, setSearch] = useState("");
-
-  const filtered = DUMMY_PARTNERS.filter(
-    (p) =>
-      p.name.toLowerCase().includes(search.toLowerCase()) ||
-      p.area.toLowerCase().includes(search.toLowerCase()),
-  );
-
-  return (
-    <div className="admin-section">
-      <h2 className="admin-section-title">Partners Activity</h2>
-
-      <div className="admin-stat-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-        <StatCard
-          label="Total Partners"
-          value={DUMMY_PARTNERS.length}
-          sub="Onboarded"
-          icon={Users}
-          accent="#1d9e75"
-        />
-        <StatCard
-          label="Active Today"
-          value={DUMMY_PARTNERS.filter((p) => p.status === "Active").length}
-          sub="Online now"
-          icon={Activity}
-          accent="#0ea5c9"
-        />
-        <StatCard
-          label="Total Leads Done"
-          value={DUMMY_PARTNERS.reduce((s, p) => s + p.leadsTotal, 0)}
-          sub="All time"
-          icon={CheckCircle2}
-          accent="#1d9e75"
-        />
-        <StatCard
-          label="Total Earnings"
-          value={`Rs. ${toInr(DUMMY_PARTNERS.reduce((s, p) => s + p.earnings, 0))}`}
-          sub="Payouts"
-          icon={IndianRupee}
-          accent="#8b5cf6"
-        />
-      </div>
-
-      <div className="admin-card" style={{ marginTop: 20 }}>
-        <div className="admin-card-toprow">
-          <h3 className="admin-card-title">Partner Directory</h3>
-          <input
-            type="search"
-            placeholder="Search partner or area"
-            className="admin-search-input"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-        <div className="lead-table-wrap" style={{ margin: 0 }}>
-          <table className="lead-table admin-lead-table">
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Name</th>
-                <th>Area</th>
-                <th>Leads Today</th>
-                <th>Total Leads</th>
-                <th>Earnings</th>
-                <th>Rating</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((p) => (
-                <tr key={p.id}>
-                  <td>
-                    <code className="admin-lead-id">{p.id}</code>
-                  </td>
-                  <td className="admin-partner-name">
-                    <div className="admin-avatar-sm">
-                      {p.name
-                        .split(" ")
-                        .map((n) => n[0])
-                        .join("")}
-                    </div>
-                    {p.name}
-                  </td>
-                  <td>{p.area}</td>
-                  <td className="admin-center">{p.leadsToday}</td>
-                  <td className="admin-center">{p.leadsTotal}</td>
-                  <td className="admin-price">Rs. {toInr(p.earnings)}</td>
-                  <td className="admin-center">
-                    <span className="admin-rating">{"".repeat(Math.round(p.rating))}</span>{" "}
-                    {p.rating}
-                  </td>
-                  <td>
-                    <span
-                      className="admin-status-badge"
-                      style={{
-                        background: p.status === "Active" ? "#1d9e7518" : "#ef444418",
-                        color: p.status === "Active" ? "#1d9e75" : "#ef4444",
-                      }}
-                    >
-                      {p.status}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-              {filtered.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="admin-muted">
-                    No partner data available.
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  );
+  return <div className='admin-section'><h2 className='admin-section-title'>Partners Activity</h2><p>Data loading...</p></div>;
 }
 
-//  Section: Revenue 
+// ─── Section: Revenue ─────────────────────────────────────────────────────────
 
 function RevenueSection() {
-  const [period, setPeriod] = useState<"Daily" | "Weekly" | "Monthly">("Daily");
-
-  const data =
-    period === "Daily" ? DAILY_REVENUE : period === "Weekly" ? WEEKLY_REVENUE : MONTHLY_REVENUE;
-  const total = data.reduce((s, d) => s + d.value, 0);
-  const peak = data.length ? Math.max(...data.map((d) => d.value)) : 0;
-  const avg = data.length ? Math.round(total / data.length) : 0;
-
-  return (
-    <div className="admin-section">
-      <h2 className="admin-section-title">Revenue Analytics</h2>
-
-      <div className="admin-stat-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-        <StatCard
-          label="Total (Period)"
-          value={`Rs. ${toInr(total)}`}
-          sub={`${period} view`}
-          icon={IndianRupee}
-          accent="#1d9e75"
-        />
-        <StatCard
-          label="Peak"
-          value={`Rs. ${toInr(peak)}`}
-          sub="Highest single period"
-          icon={TrendingUp}
-          accent="#0ea5c9"
-        />
-        <StatCard
-          label="Average"
-          value={`Rs. ${toInr(avg)}`}
-          sub="Per period avg"
-          icon={BarChart3}
-          accent="#8b5cf6"
-        />
-        <StatCard
-          label="MTD Revenue"
-          value={`Rs. ${toInr(MONTHLY_REVENUE.reduce((s, d) => s + d.value, 0))}`}
-          sub="All months"
-          icon={ArrowUpRight}
-          accent="#f59e0b"
-        />
-      </div>
-
-      <div className="admin-card" style={{ marginTop: 20 }}>
-        <div className="admin-card-toprow">
-          <h3 className="admin-card-title">Revenue Chart</h3>
-          <div className="admin-period-toggle">
-            {(["Daily", "Weekly", "Monthly"] as const).map((p) => (
-              <button
-                key={p}
-                type="button"
-                className={`admin-period-btn${period === p ? " active" : ""}`}
-                onClick={() => setPeriod(p)}
-              >
-                {p}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="admin-revenue-total" style={{ marginBottom: 12 }}>
-          Rs. {toInr(total)}
-          <span className="admin-revenue-label"> total  {data.length} periods</span>
-        </div>
-        <MiniBarChart data={data} color="var(--green)" />
-
-        <table className="lead-table admin-lead-table" style={{ marginTop: 20 }}>
-          <thead>
-            <tr>
-              <th>Period</th>
-              <th>Revenue</th>
-              <th>Share</th>
-              <th>vs Avg</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.map((d) => (
-              <tr key={d.label}>
-                <td>{d.label}</td>
-                <td className="admin-price">Rs. {toInr(d.value)}</td>
-                <td>
-                  <div className="admin-share-bar">
-                    <div
-                      style={{
-                        width: `${total === 0 ? 0 : Math.round((d.value / total) * 100)}%`,
-                        background: "var(--green)",
-                      }}
-                    />
-                  </div>
-                  <span className="admin-muted" style={{ fontSize: 11 }}>
-                    {total === 0 ? 0 : Math.round((d.value / total) * 100)}%
-                  </span>
-                </td>
-                <td style={{ color: d.value >= avg ? "#1d9e75" : "#ef4444", fontWeight: 700 }}>
-                  {avg === 0
-                    ? "-"
-                    : `${d.value >= avg ? "" : ""} ${Math.abs(Math.round(((d.value - avg) / avg) * 100))}%`}
-                </td>
-              </tr>
-            ))}
-            {data.length === 0 ? (
-              <tr>
-                <td colSpan={4} className="admin-muted">
-                  No revenue data available.
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
+  return <div className='admin-section'><h2 className='admin-section-title'>Revenue Analytics</h2><p>Data loading...</p></div>;
 }
 
-//  Section: Settings 
+// ─── Section: Settings ────────────────────────────────────────────────────────
 
 function SettingsSection() {
   const [autoAssign, setAutoAssign] = useState(true);
@@ -3832,7 +3603,7 @@ function SettingsSection() {
             </button>
           </div>
           <button type="button" className="admin-save-btn" onClick={handleSave}>
-            {saved ? " Saved" : "Save Settings"}
+            {saved ? "✓ Saved" : "Save Settings"}
           </button>
         </div>
 
@@ -3854,7 +3625,7 @@ function SettingsSection() {
             <input defaultValue="admin@gadgetpe.in" className="admin-input" type="email" />
           </div>
           <button type="button" className="admin-save-btn" onClick={handleSave}>
-            {saved ? " Updated" : "Update Profile"}
+            {saved ? "✓ Updated" : "Update Profile"}
           </button>
         </div>
       </div>
@@ -3862,7 +3633,7 @@ function SettingsSection() {
   );
 }
 
-//  Root Admin Page 
+// ─── Root Admin Page ──────────────────────────────────────────────────────────
 
 type AdminAuthMode = "login" | "signup";
 
@@ -4099,10 +3870,10 @@ function AdminPage() {
             <div style={{ marginTop: 20 }}>
               <LeadAssignmentSection
                 leads={leads}
-                adminToken={adminToken}
+                adminToken={adminToken!}
                 metrics={assignmentMetrics}
                 onAssigned={() => {
-                  void fetchAdminAnalytics(adminToken);
+                  void fetchAdminAnalytics(adminToken!);
                 }}
               />
             </div>
@@ -4178,7 +3949,7 @@ function AdminPage() {
           onClick={() => setSidebarOpen((v) => !v)}
           aria-label="Toggle sidebar"
         >
-          
+          ☰
         </button>
         <div className="admin-topbar-brand">
           <ShieldUser size={20} />
@@ -4186,7 +3957,7 @@ function AdminPage() {
         </div>
         <div className="admin-topbar-right">
           <span className="admin-topbar-meta">
-            Super Admin  {new Date().toLocaleDateString("en-IN")}
+            Super Admin · {new Date().toLocaleDateString("en-IN")}
           </span>
           <button
             type="button"
@@ -4242,7 +4013,7 @@ function AdminPage() {
             </button>
             {fromDate || toDate ? (
               <span className="admin-date-filter-summary">
-                {fromDate || ""}  {toDate || ""}
+                {fromDate || "…"} → {toDate || "…"}
                 <button
                   type="button"
                   className="admin-date-filter-clear"
@@ -4252,7 +4023,7 @@ function AdminPage() {
                   }}
                   title="Clear dates"
                 >
-                  
+                  ✕
                 </button>
               </span>
             ) : null}

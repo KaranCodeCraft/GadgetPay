@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import jwt from "jsonwebtoken";
+import twilio from "twilio";
 import { env } from "../../config/env.js";
 import { badRequest, unauthorized } from "../../shared/http/errors.js";
 import {
@@ -36,8 +37,87 @@ function getOtpCodeForDev() {
   return "6767";
 }
 
-export function sendPartnerOtp(phone) {
-  const existing = getOtpCode(phone);
+function getOtpProvider() {
+  return String(env.otpProvider || "DEV").toUpperCase();
+}
+
+function isTwilioProviderEnabled() {
+  return getOtpProvider() === "TWILIO";
+}
+
+function assertTwilioConfig() {
+  if (!env.twilioAccountSid || !env.twilioAuthToken || !env.twilioVerifyServiceSid) {
+    throw badRequest("Twilio OTP is not configured. Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN and TWILIO_VERIFY_SERVICE_SID.");
+  }
+}
+
+let _twilioClient;
+let _providerBootLogged = false;
+
+function logOtpProviderOnce() {
+  if (_providerBootLogged) return;
+  _providerBootLogged = true;
+  const provider = getOtpProvider();
+  if (provider === "TWILIO") {
+    console.info(`[OTP] Provider=TWILIO service=${env.twilioVerifyServiceSid}`);
+  } else {
+    console.warn("[OTP] Provider=DEV using local OTP code flow");
+  }
+}
+
+function getTwilioClient() {
+  if (!_twilioClient) {
+    _twilioClient = twilio(env.twilioAccountSid, env.twilioAuthToken);
+  }
+  return _twilioClient;
+}
+
+function toIndianE164(phone) {
+  return `+91${phone}`;
+}
+
+function getOtpStorageKey(role, phone) {
+  return `${role}:${phone}`;
+}
+
+async function sendTwilioVerifyOtp(phone) {
+  logOtpProviderOnce();
+  assertTwilioConfig();
+  const client = getTwilioClient();
+  const verification = await client.verify.v2.services(env.twilioVerifyServiceSid).verifications.create({
+    to: toIndianE164(phone),
+    channel: "sms",
+  });
+
+  return {
+    phone,
+    otpTtlSeconds: env.otpExpiryMinutes * 60,
+    resendAfterSeconds: env.otpResendSeconds,
+    deliveryStatus: verification.status,
+  };
+}
+
+async function verifyTwilioOtp(phone, otp) {
+  assertTwilioConfig();
+  const client = getTwilioClient();
+  const check = await client.verify.v2.services(env.twilioVerifyServiceSid).verificationChecks.create({
+    to: toIndianE164(phone),
+    code: otp,
+  });
+
+  if (check.status !== "approved") {
+    throw unauthorized("Invalid or expired OTP");
+  }
+}
+
+export async function sendPartnerOtp(phone) {
+  logOtpProviderOnce();
+  if (isTwilioProviderEnabled()) {
+    return sendTwilioVerifyOtp(phone);
+  }
+
+  const otpStorageKey = getOtpStorageKey("partner", phone);
+  const existing = getOtpCode(otpStorageKey);
   const now = Date.now();
 
   if (existing && now - existing.sentAt < env.otpResendSeconds * 1000) {
@@ -48,7 +128,7 @@ export function sendPartnerOtp(phone) {
   const expiresAt = now + env.otpExpiryMinutes * 60 * 1000;
 
   upsertOtpCode({
-    phone,
+    phone: otpStorageKey,
     otp,
     sentAt: now,
     expiresAt,
@@ -62,30 +142,37 @@ export function sendPartnerOtp(phone) {
   };
 }
 
-export function verifyPartnerOtp({ phone, otp, name }) {
-  const rec = getOtpCode(phone);
+export async function verifyPartnerOtp({ phone, otp, name }) {
+  const otpStorageKey = getOtpStorageKey("partner", phone);
 
-  if (!rec) {
-    throw unauthorized("OTP not requested for this phone");
+  if (isTwilioProviderEnabled()) {
+    await verifyTwilioOtp(phone, otp);
+    deleteOtpCode(otpStorageKey);
+  } else {
+    const rec = getOtpCode(otpStorageKey);
+
+    if (!rec) {
+      throw unauthorized("OTP not requested for this phone");
+    }
+
+    if (Date.now() > rec.expiresAt) {
+      deleteOtpCode(otpStorageKey);
+      throw unauthorized("OTP expired");
+    }
+
+    if (rec.otp !== otp) {
+      throw unauthorized("Invalid OTP");
+    }
+
+    deleteOtpCode(otpStorageKey);
   }
-
-  if (Date.now() > rec.expiresAt) {
-    deleteOtpCode(phone);
-    throw unauthorized("OTP expired");
-  }
-
-  if (rec.otp !== otp) {
-    throw unauthorized("Invalid OTP");
-  }
-
-  deleteOtpCode(phone);
 
   const partnerId = `partner-${phone}`;
   const existingPartner = getPartnerById(partnerId);
   const partner = {
     id: partnerId,
     phone,
-    name: name || `Partner ${phone.slice(-4)}`,
+    name: name || existingPartner?.name || `Partner ${phone.slice(-4)}`,
     createdAt: existingPartner?.createdAt || nowIso(),
     updatedAt: nowIso(),
   };
@@ -197,8 +284,20 @@ export function adminDevLogin({ key, adminId }) {
   };
 }
 
-export function sendUserOtp(phone) {
-  const existing = getOtpCode(phone);
+export async function sendUserOtp(phone) {
+  logOtpProviderOnce();
+  if (isTwilioProviderEnabled()) {
+    const twilioResult = await sendTwilioVerifyOtp(phone);
+    const existingUser = getUserByPhone(phone);
+    return {
+      ...twilioResult,
+      isNewUser: !existingUser,
+      requiresName: !existingUser,
+    };
+  }
+
+  const otpStorageKey = getOtpStorageKey("user", phone);
+  const existing = getOtpCode(otpStorageKey);
   const now = Date.now();
 
   if (existing && now - existing.sentAt < env.otpResendSeconds * 1000) {
@@ -208,7 +307,7 @@ export function sendUserOtp(phone) {
   const otp = getOtpCodeForDev();
   const expiresAt = now + env.otpExpiryMinutes * 60 * 1000;
 
-  upsertOtpCode({ phone, otp, sentAt: now, expiresAt });
+  upsertOtpCode({ phone: otpStorageKey, otp, sentAt: now, expiresAt });
   const existingUser = getUserByPhone(phone);
 
   return {
@@ -221,17 +320,24 @@ export function sendUserOtp(phone) {
   };
 }
 
-export function verifyUserOtp({ phone, otp, name }) {
-  const rec = getOtpCode(phone);
+export async function verifyUserOtp({ phone, otp, name }) {
+  const otpStorageKey = getOtpStorageKey("user", phone);
 
-  if (!rec) throw unauthorized("OTP not requested for this phone");
-  if (Date.now() > rec.expiresAt) {
-    deleteOtpCode(phone);
-    throw unauthorized("OTP expired");
+  if (isTwilioProviderEnabled()) {
+    await verifyTwilioOtp(phone, otp);
+    deleteOtpCode(otpStorageKey);
+  } else {
+    const rec = getOtpCode(otpStorageKey);
+
+    if (!rec) throw unauthorized("OTP not requested for this phone");
+    if (Date.now() > rec.expiresAt) {
+      deleteOtpCode(otpStorageKey);
+      throw unauthorized("OTP expired");
+    }
+    if (rec.otp !== otp) throw unauthorized("Invalid OTP");
+
+    deleteOtpCode(otpStorageKey);
   }
-  if (rec.otp !== otp) throw unauthorized("Invalid OTP");
-
-  deleteOtpCode(phone);
 
   const userId = `user-${phone}`;
   const now = nowIso();

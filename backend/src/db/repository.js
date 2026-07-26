@@ -547,6 +547,58 @@ function mapPartnerLead(row) {
     paymentSubmittedAt: row.paymentSubmittedAt,
     completionEvent: parseJsonColumn(row.completionEventJson, null),
     completionEventAt: row.completionEventAt,
+    unlockOrder: row.unlockOrder || null,
+  };
+}
+
+function mapPartnerLeadUnlockOrder(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    leadId: row.leadId,
+    partnerId: row.partnerId,
+    userSellFlowId: row.userSellFlowId,
+    unlockPrice: Number(row.unlockPrice || 0),
+    paymentMethod: row.paymentMethod,
+    status: row.status,
+    screenshotStatus: row.screenshotStatus,
+    adminNote: row.adminNote,
+    approvedBy: row.approvedBy,
+    approvedAt: row.approvedAt,
+    rejectedAt: row.rejectedAt,
+    metadata: parseJsonColumn(row.metadataJson, null),
+    createdAt: row.createdAt,
+    expiresAt: row.expiresAt,
+    closedAt: row.closedAt,
+  };
+}
+
+const partnerLeadUnlockSelect = `
+  SELECT
+    id,
+    lead_id as leadId,
+    partner_id as partnerId,
+    user_sell_flow_id as userSellFlowId,
+    unlock_price as unlockPrice,
+    payment_method as paymentMethod,
+    status,
+    screenshot_status as screenshotStatus,
+    admin_note as adminNote,
+    approved_by as approvedBy,
+    approved_at as approvedAt,
+    rejected_at as rejectedAt,
+    metadata_json as metadataJson,
+    created_at as createdAt,
+    expires_at as expiresAt,
+    closed_at as closedAt
+  FROM partner_lead_payment_intents
+`;
+
+function attachPartnerUnlockOrder(lead, partnerId) {
+  if (!lead || !partnerId) return lead;
+  return {
+    ...lead,
+    unlockOrder: getPartnerLeadUnlockOrderForPartner({ leadId: lead.id, partnerId }),
   };
 }
 
@@ -649,12 +701,12 @@ export function getPartnerLeadByFlowId(userSellFlowId) {
   return mapPartnerLead(row);
 }
 
-export function getPartnerLeadById(id) {
+export function getPartnerLeadById(id, options = {}) {
   const row = sqlite.prepare(`${partnerLeadSelect} WHERE id = ?`).get(id);
-  return mapPartnerLead(row);
+  return attachPartnerUnlockOrder(mapPartnerLead(row), options.viewerPartnerId);
 }
 
-export function listPartnerLeadsForScope({ pincode, leadType, status, partnerId, date, timeSlot, limit = 50 }) {
+export function listPartnerLeadsForScope({ pincode, leadType, status, partnerId, viewerPartnerId, date, timeSlot, limit = 50 }) {
   const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
   const clauses = ["pincode = ?", "lead_type = ?", "status != 'CANCELLED'"];
   const params = [pincode, leadType];
@@ -672,7 +724,8 @@ export function listPartnerLeadsForScope({ pincode, leadType, status, partnerId,
   const rows = sqlite
     .prepare(`${partnerLeadSelect} WHERE ${clauses.join(" AND ")} ORDER BY updated_at DESC LIMIT ?`)
     .all(...params, safeLimit)
-    .map(mapPartnerLead);
+    .map(mapPartnerLead)
+    .map((lead) => attachPartnerUnlockOrder(lead, viewerPartnerId));
 
   return rows.filter((lead) => {
     if (date) {
@@ -714,6 +767,223 @@ export function updatePartnerLeadWorkflowStatus({ id, partnerId, status, rejecti
     .run(status, rejectionReason || null, status, updatedAt, status, updatedAt, updatedAt, id, partnerId);
 
   return getPartnerLeadById(id);
+}
+
+export function getPartnerLeadUnlockOrderForPartner({ leadId, partnerId }) {
+  const row = sqlite
+    .prepare(`${partnerLeadUnlockSelect} WHERE lead_id = ? AND partner_id = ? ORDER BY created_at DESC LIMIT 1`)
+    .get(leadId, partnerId);
+  return mapPartnerLeadUnlockOrder(row);
+}
+
+function expireStalePartnerLeadUnlockIntents(now) {
+  sqlite
+    .prepare(`
+      UPDATE partner_lead_payment_intents
+      SET status = 'EXPIRED', admin_note = COALESCE(admin_note, 'Payment window expired')
+      WHERE status IN ('PENDING_PAYMENT', 'SCREENSHOT_SENT') AND expires_at < ?
+    `)
+    .run(now);
+}
+
+export function getPartnerLeadUnlockIntentById({ intentId, partnerId, now }) {
+  if (now) expireStalePartnerLeadUnlockIntents(now);
+  const clauses = ["id = ?"];
+  const params = [intentId];
+  if (partnerId) {
+    clauses.push("partner_id = ?");
+    params.push(partnerId);
+  }
+  const row = sqlite
+    .prepare(`${partnerLeadUnlockSelect} WHERE ${clauses.join(" AND ")}`)
+    .get(...params);
+  return mapPartnerLeadUnlockOrder(row);
+}
+
+export function createPartnerLeadUnlockIntent({ leadId, partnerId, unlockPrice, intentId, now, expiresAt }) {
+  const tx = sqlite.transaction((input) => {
+    expireStalePartnerLeadUnlockIntents(input.now);
+
+    const rawLead = sqlite.prepare(`${partnerLeadSelect} WHERE id = ?`).get(input.leadId);
+    const existingLead = mapPartnerLead(rawLead);
+    if (!existingLead) {
+      return { result: "NOT_FOUND", lead: null, intent: null };
+    }
+
+    const existingUnlock = sqlite
+      .prepare(`${partnerLeadUnlockSelect} WHERE lead_id = ? AND status IN ('PENDING_PAYMENT', 'SCREENSHOT_SENT', 'APPROVED') ORDER BY created_at DESC LIMIT 1`)
+      .get(input.leadId);
+    const intent = mapPartnerLeadUnlockOrder(existingUnlock);
+    if (intent) {
+      if (intent.partnerId === input.partnerId) {
+        return {
+          result: intent.status === "APPROVED" ? "ALREADY_APPROVED" : "EXISTING_INTENT",
+          lead: attachPartnerUnlockOrder(getPartnerLeadById(input.leadId), input.partnerId),
+          intent,
+        };
+      }
+      return { result: "LOCKED_BY_OTHER", lead: existingLead, intent };
+    }
+
+    if (existingLead.partnerId && existingLead.partnerId !== input.partnerId) {
+      return { result: "OWNED_BY_OTHER", lead: existingLead, intent: null };
+    }
+
+    if (existingLead.partnerId === input.partnerId && ["ACCEPTED", "IN_PROGRESS", "COMPLETED"].includes(existingLead.status)) {
+      return {
+        result: "ALREADY_APPROVED",
+        lead: attachPartnerUnlockOrder(existingLead, input.partnerId),
+        intent: getPartnerLeadUnlockOrderForPartner({ leadId: existingLead.id, partnerId: input.partnerId }),
+      };
+    }
+
+    if (existingLead.status !== "AVAILABLE" && !(existingLead.status === "CLAIMED" && existingLead.partnerId === input.partnerId)) {
+      return { result: "INVALID_STATUS", lead: existingLead, intent: null };
+    }
+
+    const metadata = {
+      unlockOrderId: input.intentId,
+      leadId: existingLead.id,
+      partnerId: input.partnerId,
+      userSellFlowId: existingLead.userSellFlowId,
+      quoteSellingPrice: existingLead.quote?.sellingPrice ?? null,
+    };
+
+    sqlite
+      .prepare(`
+        INSERT INTO partner_lead_payment_intents (
+          id, lead_id, partner_id, user_sell_flow_id, unlock_price, payment_method, status, screenshot_status, metadata_json, created_at, expires_at
+        ) VALUES (?, ?, ?, ?, ?, 'UPI_QR', 'PENDING_PAYMENT', 'NOT_SENT', ?, ?, ?)
+      `)
+      .run(
+        input.intentId,
+        existingLead.id,
+        input.partnerId,
+        existingLead.userSellFlowId,
+        input.unlockPrice,
+        JSON.stringify(metadata),
+        input.now,
+        input.expiresAt,
+      );
+
+    const lead = attachPartnerUnlockOrder(getPartnerLeadById(existingLead.id), input.partnerId);
+    const finalIntent = getPartnerLeadUnlockOrderForPartner({ leadId: existingLead.id, partnerId: input.partnerId });
+    return {
+      result: "CREATED",
+      lead,
+      intent: finalIntent,
+    };
+  });
+
+  return tx({ leadId, partnerId, unlockPrice, intentId, now, expiresAt });
+}
+
+export function markPartnerLeadUnlockScreenshotSent({ intentId, partnerId, now }) {
+  expireStalePartnerLeadUnlockIntents(now);
+  sqlite
+    .prepare(`
+      UPDATE partner_lead_payment_intents
+      SET status = 'SCREENSHOT_SENT', screenshot_status = 'SENT'
+      WHERE id = ? AND partner_id = ? AND status = 'PENDING_PAYMENT'
+    `)
+    .run(intentId, partnerId);
+
+  return getPartnerLeadUnlockIntentById({ intentId, partnerId });
+}
+
+export function listPartnerLeadUnlockIntentsForAdmin({ status, partnerId, limit = 100, now }) {
+  expireStalePartnerLeadUnlockIntents(now);
+  const clauses = [];
+  const params = [];
+  if (status) {
+    clauses.push("status = ?");
+    params.push(status);
+  }
+  if (partnerId) {
+    clauses.push("partner_id = ?");
+    params.push(partnerId);
+  }
+  const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+  const safeLimit = Math.min(Math.max(Number(limit) || 100, 1), 200);
+  const rows = sqlite
+    .prepare(`${partnerLeadUnlockSelect} ${where} ORDER BY created_at DESC LIMIT ?`)
+    .all(...params, safeLimit)
+    .map(mapPartnerLeadUnlockOrder);
+
+  return rows.map((intent) => ({
+    ...intent,
+    lead: getPartnerLeadById(intent.leadId),
+  }));
+}
+
+export function verifyPartnerLeadUnlockIntent({ intentId, action, verifiedBy, adminNote, verifiedAt }) {
+  const tx = sqlite.transaction((input) => {
+    expireStalePartnerLeadUnlockIntents(input.verifiedAt);
+    const intent = mapPartnerLeadUnlockOrder(
+      sqlite.prepare(`${partnerLeadUnlockSelect} WHERE id = ?`).get(input.intentId),
+    );
+    if (!intent) return { result: "NOT_FOUND", intent: null, lead: null };
+    if (!["PENDING_PAYMENT", "SCREENSHOT_SENT"].includes(intent.status)) {
+      return { result: "ALREADY_PROCESSED", intent, lead: getPartnerLeadById(intent.leadId, { viewerPartnerId: intent.partnerId }) };
+    }
+
+    const existingLead = getPartnerLeadById(intent.leadId);
+    if (!existingLead) return { result: "LEAD_NOT_FOUND", intent, lead: null };
+    if (existingLead.partnerId && existingLead.partnerId !== intent.partnerId) {
+      return { result: "OWNED_BY_OTHER", intent, lead: existingLead };
+    }
+
+    if (input.action === "REJECT") {
+      sqlite
+        .prepare(`
+          UPDATE partner_lead_payment_intents
+          SET status = 'REJECTED', rejected_at = ?, admin_note = ?
+          WHERE id = ?
+        `)
+        .run(input.verifiedAt, input.adminNote || "Rejected by admin", intent.id);
+      return { result: "REJECTED", intent: getPartnerLeadUnlockIntentById({ intentId: intent.id }), lead: existingLead };
+    }
+
+    sqlite
+      .prepare(`
+        UPDATE partner_lead_payment_intents
+        SET status = 'APPROVED', approved_by = ?, approved_at = ?, admin_note = ?
+        WHERE id = ?
+      `)
+      .run(input.verifiedBy, input.verifiedAt, input.adminNote || "Approved by admin", intent.id);
+
+    sqlite
+      .prepare(`
+        UPDATE partner_leads
+        SET partner_id = ?,
+            status = 'ACCEPTED',
+            claimed_at = COALESCE(claimed_at, ?),
+            updated_at = ?
+        WHERE id = ?
+      `)
+      .run(intent.partnerId, input.verifiedAt, input.verifiedAt, intent.leadId);
+
+    return {
+      result: "APPROVED",
+      intent: getPartnerLeadUnlockIntentById({ intentId: intent.id }),
+      lead: getPartnerLeadById(intent.leadId, { viewerPartnerId: intent.partnerId }),
+      fromStatus: existingLead.status,
+    };
+  });
+
+  return tx({ intentId, action, verifiedBy, adminNote, verifiedAt });
+}
+
+export function closePartnerLeadUnlockOrder({ leadId, partnerId, closedAt }) {
+  sqlite
+    .prepare(`
+      UPDATE partner_lead_payment_intents
+      SET status = 'CLOSED', closed_at = ?
+      WHERE lead_id = ? AND partner_id = ? AND status = 'APPROVED'
+    `)
+    .run(closedAt, leadId, partnerId);
+
+  return getPartnerLeadUnlockOrderForPartner({ leadId, partnerId });
 }
 
 export function setPartnerLeadPickupStartedAt({ id, partnerId, pickupStartedAt, updatedAt }) {
