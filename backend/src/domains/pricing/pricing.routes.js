@@ -1,7 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
 import { success } from "../../shared/http/response.js";
-import { requireAuth, requireRole } from "../../shared/middleware/auth.js";
 import { findDevicePriceByExactMatch, listDistinctBrands, listModelsForBrand } from "../../db/repository.js";
 import { calculateUserQuote } from "./quote-deduction.service.js";
 
@@ -91,7 +90,7 @@ pricingRouter.get("/catalog/models", (req, res, next) => {
   }
 });
 
-pricingRouter.post("/quote-preview", requireAuth, requireRole("user"), (req, res, next) => {
+pricingRouter.post("/quote-preview", (req, res, next) => {
   try {
     const input = quotePreviewSchema.parse(req.body);
     const quote = calculateUserQuote({
