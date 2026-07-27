@@ -128,6 +128,7 @@ const searchableItems: SearchItem[] = [
   { id: "payments", label: "Payments", type: "Page", href: "/user/payments", keywords: ["payments", "payout", "upi", "settlement"] },
 ];
 
+const HERO_WORDS = ["Phones", "Tablets", "iPads"] as const;
 const INSTAGRAM_URL = "https://www.instagram.com/gadgetpeofficial?igsh=MWt5ZTRwaGtiMnU3bw%3D%3D&utm_source=qr";
 const USER_TOKEN_KEY = "gadgetpe_user_access_token";
 const USER_REFRESH_KEY = "gadgetpe_user_refresh_token";
@@ -256,9 +257,10 @@ function UserPage() {
   const [selectedCityName, setSelectedCityName] = useState("");
   const [failedBrandLogos, setFailedBrandLogos] = useState<Record<string, boolean>>({});
   const [sellerName, setSellerName] = useState("Seller");
-  const [searchOpen, setSearchOpen] = useState(false);
+  const [wordIndex, setWordIndex] = useState(0);
+  const [typedText, setTypedText] = useState("");
+  const [isDeleting, setIsDeleting] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [heroArtMissing, setHeroArtMissing] = useState(false);
   const [showSearchResults, setShowSearchResults] = useState(false);
   const [activeReviewIndex, setActiveReviewIndex] = useState(0);
   const searchRef = useRef<HTMLDivElement>(null);
@@ -353,6 +355,34 @@ function UserPage() {
     setIsLoggedIn(Boolean(token));
     setSellerName(storedName);
   }, [pathname]);
+
+  useEffect(() => {
+    const currentWord = HERO_WORDS[wordIndex];
+    const isWordComplete = typedText === currentWord;
+    const isWordCleared = typedText.length === 0;
+
+    const timeout = setTimeout(
+      () => {
+        if (!isDeleting && !isWordComplete) {
+          setTypedText(currentWord.slice(0, typedText.length + 1));
+          return;
+        }
+        if (!isDeleting && isWordComplete) {
+          setIsDeleting(true);
+          return;
+        }
+        if (isDeleting && !isWordCleared) {
+          setTypedText(currentWord.slice(0, typedText.length - 1));
+          return;
+        }
+        setIsDeleting(false);
+        setWordIndex((prev) => (prev + 1) % HERO_WORDS.length);
+      },
+      isDeleting ? 120 : isWordComplete ? 1200 : 180,
+    );
+
+    return () => clearTimeout(timeout);
+  }, [typedText, isDeleting, wordIndex]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -772,53 +802,31 @@ function UserPage() {
       </section> */}
 
       <section className="hero" id="sell">
-        <div className="hero-trust-badge">
-          <HeroIconShield />
-          <span>Trusted • Transparent • Hassle-Free</span>
-        </div>
-
-        <div className="hero-copy">
-          <span className="hero-kicker">✦ The Smartest Way to Sell Your Old Gadgets</span>
-          <h1 className="hero-title">
-            Turn Your Old Device
-            <span>Into Money</span>
+        <div>
+          <span className="badge-pill">🏆India's Next-Generation Device Marketplace</span>
+          <h1 className="h1">
+            Sell Your <span className="hero-typeword">{typedText}</span>.
+            <br />
+            <span style={{ display: "inline-block", whiteSpace: "nowrap" }}>Turn Your Old Device Into Money.</span>
           </h1>
-          <p className="hero-sub">
-            Get the best value for your used smartphones, iPads, tablets and more - quickly,
-            safely and effortlessly with GadgetPe.
-          </p>
-
-          <div className="hero-feature-strip">
-            <span><HeroIconMoney /> <strong>Best Price</strong> Guaranteed</span>
-            <span><HeroIconTruck /> <strong>Free</strong> Doorstep Pickup</span>
-            <span><HeroIconShield /> <strong>100% Safe</strong> & Transparent</span>
-          </div>
-
+          <p className="sub">Best Prices. Free Doorstep Pickup. Instant Payment.</p>
           <div className="cta-row">
             <button
               type="button"
-              className="cta-green hero-main-cta"
+              className="cta-green"
               onClick={() => {
                 void navigate({ to: "/user/sell-phone" });
               }}
             >
-              Sell Your Device Now
+              Sell Now
             </button>
+            {/* <button type="button" className="cta-outline">Browse Gadgets</button> */}
           </div>
-        </div>
-
-        <div className="hero-art" aria-hidden="true">
-          {heroArtMissing ? (
-            <div className="hero-art-fallback" />
-          ) : (
-            <img
-              src="/hero.jpeg"
-              alt=""
-              className="hero-art-image"
-              onError={() => setHeroArtMissing(true)}
-            />
-          )}
-          <div className="hero-art-stage" />
+          <div className="trust-row">
+            <span><HeroIconShield /> Secure</span>
+            <span><HeroIconTruck /> Easy Pickup</span>
+            <span><HeroIconMoney /> Fast Payment</span>
+          </div>
         </div>
       </section>
 
