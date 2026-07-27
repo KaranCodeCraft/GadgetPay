@@ -822,6 +822,84 @@ export async function verifyUserOtp(phone: string, otp: string, name?: string): 
   throw new ApiClientError("OTP verification failed.");
 }
 
+export async function userDevLogin(phone: string, name?: string): Promise<UserAuthResponse> {
+  const response = await fetch(`${API_BASE}/auth/user/dev-login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ phone, name }),
+  });
+  return parseResponse<UserAuthResponse>(response);
+}
+
+export async function partnerDevLogin(phone: string, name?: string): Promise<VerifyOtpResponse> {
+  const response = await fetch(`${API_BASE}/auth/partner/dev-login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ phone, name }),
+  });
+  return parseResponse<VerifyOtpResponse>(response);
+}
+
+export type LeadUnlockIntent = {
+  id: string;
+  leadId: string;
+  partnerId: string;
+  unlockPrice: number;
+  status: "PENDING" | "SCREENSHOT_SENT" | "APPROVED" | "REJECTED" | "EXPIRED";
+  createdAt: string;
+  expiresAt: string;
+  screenshotSentAt?: string;
+  verifiedAt?: string;
+  verifiedBy?: string;
+  adminNote?: string;
+};
+
+export async function createLeadUnlockIntent(
+  token: string,
+  leadId: string
+): Promise<{ lead: PartnerLead; intent: LeadUnlockIntent; unlockPrice: number; paymentQrUrl: string; expiresAt: string }> {
+  const response = await fetch(`${API_BASE}/partner/leads/${leadId}/unlock-intent`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  return parseResponse(response);
+}
+
+export async function listAdminLeadUnlockIntents(
+  token: string,
+  params?: { status?: string; partnerId?: string; limit?: number }
+): Promise<{ rows: LeadUnlockIntent[]; count: number }> {
+  const searchParams = new URLSearchParams();
+  if (params?.status) searchParams.set("status", params.status);
+  if (params?.partnerId) searchParams.set("partnerId", params.partnerId);
+  if (params?.limit) searchParams.set("limit", String(params.limit));
+  const qs = searchParams.toString();
+  const response = await fetch(`${API_BASE}/partner/lead-unlock-intents/admin${qs ? `?${qs}` : ""}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return parseResponse(response);
+}
+
+export async function verifyAdminLeadUnlockIntent(
+  token: string,
+  intentId: string,
+  action: "approve" | "reject",
+  note?: string
+): Promise<{ intent: LeadUnlockIntent; lead?: PartnerLead }> {
+  const response = await fetch(`${API_BASE}/partner/lead-unlock-intents/${intentId}/verify`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ action, note }),
+  });
+  return parseResponse(response);
+}
+
 export async function refreshAccessToken(refreshToken: string): Promise<RefreshAccessTokenResponse> {
   const response = await fetch(`${API_BASE}/auth/refresh`, {
     method: "POST",
