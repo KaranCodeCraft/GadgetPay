@@ -3323,25 +3323,37 @@ function KycQueueSection() {
 
 function PaymentsVerifySection() {
   const [rows, setRows] = useState<PartnerCoinRechargeRequestRow[]>([]);
+  const [unlockRows, setUnlockRows] = useState<AdminLeadUnlockIntentRow[]>([]);
   const [filter, setFilter] = useState<"All" | "PENDING" | "APPROVED" | "REJECTED">("PENDING");
+  const [unlockFilter, setUnlockFilter] = useState<"All" | AdminLeadUnlockIntentRow["status"]>("SCREENSHOT_SENT");
   const [partnerIdSearch, setPartnerIdSearch] = useState("");
   const [adminToken, setAdminToken] = useState<string | null>(() =>
     localStorage.getItem("gadgetpe_admin_access_token"),
   );
   const [loading, setLoading] = useState(false);
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [savingUnlockId, setSavingUnlockId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const fetchRows = async (token: string) => {
     setLoading(true);
     setError(null);
     try {
-      const result = await listAdminPartnerCoinRechargeRequests(token, {
-        status: filter === "All" ? undefined : filter,
-        partnerId: partnerIdSearch.trim() || undefined,
-        limit: 100,
-      });
-      setRows(result.rows);
+      const partnerId = partnerIdSearch.trim() || undefined;
+      const [rechargeResult, unlockResult] = await Promise.all([
+        listAdminPartnerCoinRechargeRequests(token, {
+          status: filter === "All" ? undefined : filter,
+          partnerId,
+          limit: 100,
+        }),
+        listAdminLeadUnlockIntents(token, {
+          status: unlockFilter === "All" ? undefined : unlockFilter,
+          partnerId,
+          limit: 100,
+        }),
+      ]);
+      setRows(rechargeResult.rows);
+      setUnlockRows(unlockResult.rows);
     } catch (err) {
       if (isTokenExpiredError(err)) {
         localStorage.removeItem("gadgetpe_admin_access_token");
@@ -3358,7 +3370,7 @@ function PaymentsVerifySection() {
   useEffect(() => {
     if (!adminToken) return;
     void fetchRows(adminToken);
-  }, [adminToken, filter, partnerIdSearch]);
+  }, [adminToken, filter, unlockFilter, partnerIdSearch]);
 
   const handleVerification = async (requestId: string, action: "APPROVE" | "REJECT") => {
     if (!adminToken) return;
@@ -3391,9 +3403,41 @@ function PaymentsVerifySection() {
     }
   };
 
+  const handleUnlockVerification = async (intentId: string, action: "APPROVE" | "REJECT") => {
+    if (!adminToken) return;
+    setSavingUnlockId(intentId);
+    setError(null);
+    try {
+      await verifyAdminLeadUnlockIntent(adminToken, intentId, {
+        action,
+        note:
+          action === "APPROVE"
+            ? "Lead unlock payment approved by admin"
+            : "Lead unlock payment rejected by admin",
+      });
+      toast.success(
+        action === "APPROVE"
+          ? "Lead unlock approved. Partner can view details."
+          : "Lead unlock request rejected.",
+      );
+      await fetchRows(adminToken);
+    } catch (err) {
+      if (isTokenExpiredError(err)) {
+        localStorage.removeItem("gadgetpe_admin_access_token");
+        setAdminToken(null);
+        setError("Session expired. Please login again.");
+        return;
+      }
+      setError(err instanceof Error ? err.message : "Unable to update lead unlock payment.");
+    } finally {
+      setSavingUnlockId(null);
+    }
+  };
+
   const pendingCount = rows.filter((row) => row.status === "PENDING").length;
   const approvedCount = rows.filter((row) => row.status === "APPROVED").length;
   const rejectedCount = rows.filter((row) => row.status === "REJECTED").length;
+  const pendingUnlockCount = unlockRows.filter((row) => row.status === "SCREENSHOT_SENT" || row.status === "PENDING_PAYMENT").length;
 
   return (
     <div className="admin-section">
@@ -3409,7 +3453,7 @@ function PaymentsVerifySection() {
         />
         <StatCard
           label="Pending"
-          value={pendingCount}
+          value={pendingCount + pendingUnlockCount}
           sub="Needs admin action"
           icon={Clock}
           accent="#f59e0b"
@@ -3519,6 +3563,87 @@ function PaymentsVerifySection() {
                 <tr>
                   <td colSpan={7} className="admin-muted">
                     No recharge requests found.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="admin-bucket-totals" style={{ marginTop: 20 }}>
+        {(["All", "PENDING_PAYMENT", "SCREENSHOT_SENT", "APPROVED", "REJECTED", "EXPIRED", "CLOSED"] as const).map((f) => (
+          <button
+            key={f}
+            type="button"
+            className={`admin-bucket-pill${unlockFilter === f ? " active" : ""}`}
+            onClick={() => setUnlockFilter(f)}
+          >
+            {f === "SCREENSHOT_SENT" ? "ADMIN REVIEW" : f}
+          </button>
+        ))}
+      </div>
+
+      <div className="admin-card" style={{ marginTop: 12 }}>
+        <h3 className="admin-card-title">Lead Unlock Payment Queue</h3>
+        <div className="lead-table-wrap" style={{ margin: 0 }}>
+          <table className="lead-table admin-lead-table">
+            <thead>
+              <tr>
+                <th>Order ID</th>
+                <th>Partner</th>
+                <th>Lead</th>
+                <th>City/Pincode</th>
+                <th>Amount</th>
+                <th>Status</th>
+                <th>Created</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {unlockRows.map((row) => (
+                <tr key={row.id}>
+                  <td>
+                    <code className="admin-lead-id">{row.id.slice(0, 8)}</code>
+                  </td>
+                  <td>{row.partnerId}</td>
+                  <td>{row.lead?.selectedModel.modelName || row.leadId.slice(0, 8)}</td>
+                  <td>{row.lead?.city || row.lead?.seller.city || "-"} / {row.lead?.pincode || "-"}</td>
+                  <td className="admin-price">Rs. {toInr(row.unlockPrice)}</td>
+                  <td>
+                    <span className="admin-status-badge">{row.status === "SCREENSHOT_SENT" ? "ADMIN_REVIEW" : row.status}</span>
+                  </td>
+                  <td className="admin-muted">{new Date(row.createdAt).toLocaleString()}</td>
+                  <td>
+                    {["PENDING_PAYMENT", "SCREENSHOT_SENT"].includes(row.status) ? (
+                      <div className="admin-mode-toggle">
+                        <button
+                          type="button"
+                          className="admin-mode-btn"
+                          disabled={!adminToken || savingUnlockId === row.id}
+                          onClick={() => handleUnlockVerification(row.id, "APPROVE")}
+                        >
+                          {savingUnlockId === row.id ? "Saving..." : "Approve"}
+                        </button>
+                        <button
+                          type="button"
+                          className="admin-mode-btn"
+                          disabled={!adminToken || savingUnlockId === row.id}
+                          onClick={() => handleUnlockVerification(row.id, "REJECT")}
+                        >
+                          {savingUnlockId === row.id ? "Saving..." : "Reject"}
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="admin-muted">{row.adminNote || "-"}</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {unlockRows.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="admin-muted">
+                    No lead unlock payment requests found.
                   </td>
                 </tr>
               ) : null}

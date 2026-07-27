@@ -741,6 +741,23 @@ export function listPartnerLeadsForScope({ pincode, leadType, status, partnerId,
   });
 }
 
+export function listPartnerLeadsForPartner({ partnerId, status, limit = 50 }) {
+  const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
+  const clauses = ["partner_id = ?", "status != 'CANCELLED'"];
+  const params = [partnerId];
+
+  if (status) {
+    clauses.push("status = ?");
+    params.push(status);
+  }
+
+  return sqlite
+    .prepare(`${partnerLeadSelect} WHERE ${clauses.join(" AND ")} ORDER BY updated_at DESC LIMIT ?`)
+    .all(...params, safeLimit)
+    .map(mapPartnerLead)
+    .map((lead) => attachPartnerUnlockOrder(lead, partnerId));
+}
+
 export function claimPartnerLead({ id, partnerId, updatedAt }) {
   const result = sqlite
     .prepare(
@@ -765,6 +782,25 @@ export function updatePartnerLeadWorkflowStatus({ id, partnerId, status, rejecti
        WHERE id = ? AND partner_id = ?`,
     )
     .run(status, rejectionReason || null, status, updatedAt, status, updatedAt, updatedAt, id, partnerId);
+
+  return getPartnerLeadById(id);
+}
+
+export function releasePartnerLeadToBucket({ id, partnerId, updatedAt }) {
+  sqlite
+    .prepare(
+      `UPDATE partner_leads
+       SET partner_id = NULL,
+           status = 'AVAILABLE',
+           rejection_reason = NULL,
+           claimed_at = NULL,
+           cancelled_at = NULL,
+           pickup_started_at = NULL,
+           call_status = NULL,
+           updated_at = ?
+       WHERE id = ? AND partner_id = ? AND status IN ('ACCEPTED', 'IN_PROGRESS')`,
+    )
+    .run(updatedAt, id, partnerId);
 
   return getPartnerLeadById(id);
 }
@@ -2311,6 +2347,9 @@ export function listPartnerLeadDispositionSummary({
 }
 
 export function getPartnerDashboardMetrics({ partnerId, pincode, now = new Date() }) {
+  const dayStart = new Date(now);
+  dayStart.setHours(0, 0, 0, 0);
+
   const weekStart = new Date(now);
   weekStart.setDate(weekStart.getDate() - 7);
 
@@ -2322,7 +2361,9 @@ export function getPartnerDashboardMetrics({ partnerId, pincode, now = new Date(
     `SELECT
       SUM(CASE WHEN lead_type = 'LEAD_BUCKET' AND status != 'CANCELLED' THEN 1 ELSE 0 END) as leadBucket,
       SUM(CASE WHEN lead_type = 'SERVICE_LEAD' AND status != 'CANCELLED' THEN 1 ELSE 0 END) as serviceLeads,
+      SUM(CASE WHEN created_at >= ? AND status != 'CANCELLED' THEN 1 ELSE 0 END) as todayLeads,
       SUM(CASE WHEN created_at >= ? AND status != 'CANCELLED' THEN 1 ELSE 0 END) as weeklyLeads,
+      SUM(CASE WHEN created_at >= ? AND status != 'CANCELLED' THEN 1 ELSE 0 END) as monthlyLeads,
       SUM(CASE
             WHEN status = 'COMPLETED' AND completed_at >= ?
             THEN COALESCE(
@@ -2335,7 +2376,7 @@ export function getPartnerDashboardMetrics({ partnerId, pincode, now = new Date(
       SUM(CASE WHEN status IN ('CLAIMED', 'ACCEPTED', 'IN_PROGRESS', 'COMPLETED') THEN 1 ELSE 0 END) as progressedLeads
     FROM partner_leads
     WHERE partner_id = ? AND pincode = ?`
-  ).get(weekStart.toISOString(), monthStart.toISOString(), partnerId, pincode) || {};
+  ).get(dayStart.toISOString(), weekStart.toISOString(), monthStart.toISOString(), monthStart.toISOString(), partnerId, pincode) || {};
 
   const latestKyc = sqlite.prepare(
     `SELECT verification_status as verificationStatus
@@ -2352,7 +2393,9 @@ export function getPartnerDashboardMetrics({ partnerId, pincode, now = new Date(
 
   return {
     onboardingProgress: Math.min(onboardingProgress, 100),
+    todayLeads: Number(leadAgg.todayLeads || 0),
     weeklyLeads: Number(leadAgg.weeklyLeads || 0),
+    monthlyLeads: Number(leadAgg.monthlyLeads || 0),
     monthlyEarnings: Math.round(Number(leadAgg.monthlyEarnings || 0)),
     leadBucket: Number(leadAgg.leadBucket || 0),
     serviceLeads: Number(leadAgg.serviceLeads || 0),

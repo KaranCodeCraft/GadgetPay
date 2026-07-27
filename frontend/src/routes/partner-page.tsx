@@ -1,13 +1,7 @@
 import { Link, Outlet, createFileRoute, useLocation, useNavigate } from "@tanstack/react-router";
 import {
-  CircleHelp,
-  Coins,
   LogOut,
   MapPin,
-  PiggyBank,
-  Settings,
-  Sparkles,
-  TrendingUp,
   UserRound,
   Users,
 } from "lucide-react";
@@ -22,7 +16,6 @@ import {
   getPartnerDashboard,
   getPartnerKycStatus,
   listPartnerActivePickups,
-  listPartnerCoinRechargeRequests,
   logoutSession,
   resolvePartnerScope,
   type PartnerDashboardResponse,
@@ -35,32 +28,20 @@ export const Route = createFileRoute("/partner-page")({
 
 const sidebarItems = [
   "Profile",
-  "Progress",
-  "Refer",
-  "Earnings",
-  "Coins",
-  "Settings",
-  "FAQ",
-  "Help",
 ] as const;
 
 type SidebarItem = (typeof sidebarItems)[number];
 
 const navIcons: Record<SidebarItem, ComponentType<{ size?: number; className?: string }>> = {
   Profile: UserRound,
-  Progress: TrendingUp,
-  Refer: Users,
-  Earnings: PiggyBank,
-  Coins,
-  Settings,
-  FAQ: CircleHelp,
-  Help: Sparkles,
 };
 
 const defaultMetrics: PartnerDashboardResponse["metrics"] = {
   onboardingProgress: 0,
   coins: 0,
+  todayLeads: 0,
   weeklyLeads: 0,
+  monthlyLeads: 0,
   monthlyEarnings: 0,
   leadBucket: 0,
   serviceLeads: 0,
@@ -71,6 +52,19 @@ const PARTNER_REFRESH_TOKEN_KEY = "gadgetpe_partner_refresh_token";
 const PARTNER_ACCESS_TOKEN_KEY = "gadgetpe_partner_access_token";
 const LEGACY_PARTNER_ACCESS_TOKEN_KEY = "gadgetpe_access_token";
 const SERVICE_LEADS_DATE_KEY = "gadgetpe_service_leads_date";
+
+function formatMetricValue(value: number) {
+  return value > 0 ? value : "-";
+}
+
+function formatLeadDate(value: string | null | undefined) {
+  if (!value) return "-";
+  return new Date(value).toLocaleString("en-IN");
+}
+
+function getLeadDisplayAmount(lead: PartnerLead) {
+  return lead.onsiteValidation?.revisedQuote ?? lead.paymentProof?.amountCollected ?? lead.quote?.sellingPrice ?? lead.selectedModel.listedPrice ?? 0;
+}
 
 type PartnerScopeSnapshot = {
   pincode: string;
@@ -97,8 +91,6 @@ function PartnerDashboardPage() {
   const [scopeError, setScopeError] = useState<string | null>(null);
   const [scopeLocation, setScopeLocation] = useState<{ state: string; district: string } | null>(null);
   const [isApplyingScope, setIsApplyingScope] = useState(false);
-  const [showWalletGuardModal, setShowWalletGuardModal] = useState(false);
-  const [pendingRechargeCount, setPendingRechargeCount] = useState(0);
   const [kpi, setKpi] = useState<PartnerDashboardResponse["metrics"]>(defaultMetrics);
   const [activePickup, setActivePickup] = useState<PartnerLead | null>(null);
   const [activePickupElapsed, setActivePickupElapsed] = useState("--");
@@ -252,28 +244,34 @@ function PartnerDashboardPage() {
   }, [navigate]);
 
   useEffect(() => {
-    const loadWalletState = async () => {
+    const loadDashboardState = async () => {
       const accessToken = getPartnerAccessToken();
       if (!accessToken) return;
 
       try {
-        const [coinBalance, rechargeRequests] = await Promise.all([
-          getPartnerCoinBalance(accessToken),
-          listPartnerCoinRechargeRequests(accessToken, { status: "PENDING", limit: 20 }),
-        ]);
+        if (selectedPincode && serviceabilityStatus === "ACTIVE") {
+          const [dashboard, coinBalance] = await Promise.all([
+            getPartnerDashboard(selectedPincode, accessToken),
+            getPartnerCoinBalance(accessToken),
+          ]);
+          setKpi({ ...dashboard.metrics, coins: coinBalance.balance });
+          setPartnerName(dashboard.partner.name || "Partner");
+          return;
+        }
+
+        const coinBalance = await getPartnerCoinBalance(accessToken);
         setKpi((current) => ({ ...current, coins: coinBalance.balance }));
-        setPendingRechargeCount(rechargeRequests.count);
       } catch {
         // Keep the dashboard usable; auth/KYC checks handle session redirects.
       }
     };
 
-    void loadWalletState();
+    void loadDashboardState();
 
-    const handleFocus = () => void loadWalletState();
+    const handleFocus = () => void loadDashboardState();
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") {
-        void loadWalletState();
+        void loadDashboardState();
       }
     };
 
@@ -284,7 +282,7 @@ function PartnerDashboardPage() {
       window.removeEventListener("focus", handleFocus);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [location.pathname]);
+  }, [location.pathname, selectedPincode, serviceabilityStatus]);
 
   useEffect(() => {
     const bootstrapDashboard = async () => {
@@ -294,14 +292,12 @@ function PartnerDashboardPage() {
       }
 
       try {
-        const [dashboard, coinBalance, rechargeRequests] = await Promise.all([
+        const [dashboard, coinBalance] = await Promise.all([
           getPartnerDashboard(selectedPincode, accessToken),
           getPartnerCoinBalance(accessToken),
-          listPartnerCoinRechargeRequests(accessToken, { status: "PENDING", limit: 20 }),
         ]);
         setKpi({ ...dashboard.metrics, coins: coinBalance.balance });
         setPartnerName(dashboard.partner.name || "Partner");
-        setPendingRechargeCount(rechargeRequests.count);
       } catch {
         // Ignore bootstrap dashboard error; user can retry via Apply flow.
       }
@@ -312,9 +308,6 @@ function PartnerDashboardPage() {
 
   const handleRestrictedNavigation = (event: React.MouseEvent<HTMLAnchorElement>) => {
     if (serviceabilityStatus === "ACTIVE") {
-      if (effectiveCoins > 0) return;
-      event.preventDefault();
-      setShowWalletGuardModal(true);
       return;
     }
 
@@ -393,6 +386,21 @@ function PartnerDashboardPage() {
     return () => clearInterval(timer);
   }, [activePickup?.pickupStartedAt, activePickup?.claimedAt, activePickup?.updatedAt]);
 
+  const renderActivePanel = () => {
+    return (
+      <section className="partner-detail-card partner-profile-panel">
+        <h2>
+          <UserRound size={14} />
+          <span>Profile</span>
+        </h2>
+        <p>Name: {partnerName}</p>
+        <p>Pincode: {selectedPincode || "Not set"}</p>
+        <p>Serviceability: {serviceabilityStatus}</p>
+        <p>Coins: {effectiveCoins}</p>
+      </section>
+    );
+  };
+
   if (location.pathname !== "/partner-page") {
     return <Outlet />;
   }
@@ -411,12 +419,7 @@ function PartnerDashboardPage() {
         ☰
       </button>
 
-        <div className="partner-top-logo"><img src="/logo.png" alt="GadgetPe" style={{ height: "45px", width: "auto" }} /></div>
-
-        <div className="partner-coin-badge" aria-label="Coin balance">
-          <Coins size={13} />
-          <span>{effectiveCoins}</span>
-        </div>
+        <div className="partner-top-logo"><img src="/logo.png" alt="GadgetPe" style={{ height: "90px", width: "auto" }} /></div>
 
         <div
           className={`partner-sidebar-backdrop${isSidebarOpen ? " open" : ""}`}
@@ -426,7 +429,7 @@ function PartnerDashboardPage() {
 
         <aside className={`partner-sidebar${isSidebarOpen ? " open" : ""}`}>
         <div className="partner-sidebar-head">
-          <div className="partner-sidebar-brand"><img src="/logo.png" alt="GadgetPe" style={{ height: "45px", width: "auto" }} /></div>
+          <div className="partner-sidebar-brand"><img src="/logo.png" alt="GadgetPe" style={{ height: "90px", width: "auto" }} /></div>
           <button
             type="button"
             className="partner-close-menu"
@@ -473,17 +476,6 @@ function PartnerDashboardPage() {
             {/* <p>Data refreshed for pincode {selectedPincode} at {refreshedAt}.</p>
             {scopeLocation ? <p>{scopeLocation.district}, {scopeLocation.state}</p> : null}
             <p>Serviceability: {serviceabilityStatus}</p> */}
-            {effectiveCoins === 0 ? (
-              <button
-                type="button"
-                className="partner-recharge-alert"
-                onClick={() => {
-                  void navigate({ to: "/partner-page/coins" });
-                }}
-              >
-                Recharge Coins to Get Leads
-              </button>
-            ) : null}
             {scopeError ? <p className="partner-auth-error">{scopeError}</p> : null}
             {activePickup ? (
               <div className="lead-booking-box partner-active-pickup-alert" style={{ marginTop: 10 }}>
@@ -557,81 +549,58 @@ function PartnerDashboardPage() {
           </div>
         </div>
 
-        <div className="partner-lead-actions">
-          <aside className="partner-right-tiles" aria-label="Lead summary">
-            <Link
-              to="/Lead-bucket"
-              className="partner-flash-tile partner-flash-button"
-              onClick={handleRestrictedNavigation}
-              aria-disabled={serviceabilityStatus !== "ACTIVE"}
-            >
-              <h3>Click for Lead Bucket</h3>
-            </Link>
-            <Link
-              to="/service-Leads"
-              className="partner-flash-tile partner-flash-button"
-              onClick={handleServiceLeadsNavigation}
-              aria-disabled={serviceabilityStatus !== "ACTIVE"}
-            >
-              <h3>Service Leads Today</h3>
-            </Link>
-          </aside>
-        </div>
+        {renderActivePanel()}
 
-        <div className="partner-kpi-grid partner-kpi-grid-vertical">
-          <article>
-            <h2>
-              <Users size={14} />
-              <span>Weekly Leads</span>
-            </h2>
-            <p>{kpi.weeklyLeads}</p>
-          </article>
-          <article>
-            <h2>
-              <Coins size={14} />
-              <span>Coins</span>
-            </h2>
-            <p>{effectiveCoins}</p>
-          </article>
-        </div>
+        {activeItem === "Profile" ? (
+          <>
+            <div className="partner-lead-actions">
+              <aside className="partner-right-tiles" aria-label="Lead summary">
+                <Link
+                  to="/Lead-bucket"
+                  className="partner-flash-tile partner-flash-button"
+                  onClick={handleRestrictedNavigation}
+                  aria-disabled={serviceabilityStatus !== "ACTIVE"}
+                >
+                  <h3>Click for Lead Bucket</h3>
+                </Link>
+                <Link
+                  to="/service-Leads"
+                  className="partner-flash-tile partner-flash-button"
+                  onClick={handleServiceLeadsNavigation}
+                  aria-disabled={serviceabilityStatus !== "ACTIVE"}
+                >
+                  <h3>Service Leads Today</h3>
+                </Link>
+              </aside>
+            </div>
 
-        <article className="partner-detail-card">
-          <h2>{activeItem} Details</h2>
-          {/* <p>
-            This section updates as a single-page dashboard panel. Changing the pincode from the top-right panel
-            refreshes all partner stats and contextual details for your selected location.
-          </p> */}
-        </article>
+            <div className="partner-kpi-grid partner-kpi-grid-vertical">
+              <article>
+                <h2>
+                  <Users size={14} />
+                  <span>Today's Leads</span>
+                </h2>
+                <p>{formatMetricValue(kpi.todayLeads)}</p>
+              </article>
+              <article>
+                <h2>
+                  <Users size={14} />
+                  <span>Weekly Leads</span>
+                </h2>
+                <p>{formatMetricValue(kpi.weeklyLeads)}</p>
+              </article>
+              <article>
+                <h2>
+                  <Users size={14} />
+                  <span>Monthly Leads</span>
+                </h2>
+                <p>{formatMetricValue(kpi.monthlyLeads)}</p>
+              </article>
+            </div>
+          </>
+        ) : null}
         </section>
 
-        {showWalletGuardModal ? (
-          <div className="partner-modal-backdrop" role="dialog" aria-modal="true" aria-label="Wallet recharge required">
-          <section className="partner-modal-card">
-            <h2>Wallet Recharge Required</h2>
-            <p>Dear Partner, please wallet recharge to get leads and pickup devices.</p>
-            {pendingRechargeCount > 0 ? <p>You already have {pendingRechargeCount} recharge request(s) pending admin approval.</p> : null}
-            <div className="partner-modal-actions">
-              <button
-                type="button"
-                className="partner-submit-btn"
-                onClick={() => {
-                  setShowWalletGuardModal(false);
-                  void navigate({ to: "/partner-page/coins" });
-                }}
-              >
-                Wallet Recharge
-              </button>
-              <button
-                type="button"
-                className="partner-upload-btn"
-                onClick={() => setShowWalletGuardModal(false)}
-              >
-                Cancel
-              </button>
-            </div>
-          </section>
-          </div>
-        ) : null}
       </main>
       <PartnerDashboardCompactFooter />
       <SupportFab />

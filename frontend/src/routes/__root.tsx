@@ -42,7 +42,8 @@ function GlobalHeader() {
     pathname.startsWith("/admin") ||
     pathname.startsWith("/partner-page") ||
     pathname.startsWith("/Lead-bucket") ||
-    pathname.startsWith("/Lead-assignment");
+    pathname.startsWith("/Lead-assignment") ||
+    pathname.startsWith("/service-Leads");
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -274,6 +275,17 @@ function RootComponent() {
     return () => {
       window.cancelAnimationFrame(frameId);
     };
+  }, []);
+
+  useEffect(() => {
+    const dismissToastsOnPageClick = (event: PointerEvent) => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (target?.closest("[data-sonner-toast], [data-sonner-toaster]")) return;
+      toast.dismiss();
+    };
+
+    window.addEventListener("pointerdown", dismissToastsOnPageClick, true);
+    return () => window.removeEventListener("pointerdown", dismissToastsOnPageClick, true);
   }, []);
 
   if (isAppStarting) {

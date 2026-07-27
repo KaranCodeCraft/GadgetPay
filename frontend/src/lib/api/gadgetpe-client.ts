@@ -141,6 +141,14 @@ type SendUserOtpResponse = {
   requiresName: boolean;
 };
 
+type SendPartnerOtpResponse = {
+  phone: string;
+  otpTtlSeconds: number;
+  resendAfterSeconds: number;
+  devOtp?: string;
+  deliveryStatus?: string;
+};
+
 export type PartnerDashboardResponse = {
   partner: {
     id: string;
@@ -154,7 +162,9 @@ export type PartnerDashboardResponse = {
   metrics: {
     onboardingProgress: number;
     coins: number;
+    todayLeads: number;
     weeklyLeads: number;
+    monthlyLeads: number;
     monthlyEarnings: number;
     leadBucket: number;
     serviceLeads: number;
@@ -590,6 +600,36 @@ export type PartnerLead = {
     completedAt: string;
   } | null;
   completionEventAt: string | null;
+  unlockOrder?: PartnerLeadUnlockOrder | null;
+};
+
+export type UserDealInvoice = {
+  id: string;
+  leadId: string;
+  userSellFlowId: string;
+  status: "DEAL_CLOSED";
+  modelName: string | null;
+  listedPrice: number;
+  finalAmount: number;
+  deductions: {
+    listedPrice: number;
+    totalDeductionPercent: number;
+    totalDeductionAmount: number;
+    finalAssessedPrice: number;
+    issues: Array<{ description: string; deductionPercent: number }>;
+  } | null;
+  payment: {
+    amountCollected: number;
+    paymentMode: "UPI" | "BANK_TRANSFER" | "CASH" | "OTHER";
+    transactionRef: string | null;
+    submittedAt: string;
+  } | null;
+  partner: {
+    id: string;
+    name: string;
+    phone: string | null;
+  };
+  completedAt: string;
 };
 
 export type PartnerLeadUnlockOrder = {
@@ -609,6 +649,10 @@ export type PartnerLeadUnlockOrder = {
   createdAt: string;
   expiresAt: string;
   closedAt: string | null;
+};
+
+export type AdminLeadUnlockIntentRow = PartnerLeadUnlockOrder & {
+  lead: PartnerLead | null;
 };
 
 export type AdminLeadDispositionCount = {
@@ -740,7 +784,7 @@ async function parseResponse<T>(response: Response): Promise<T> {
   return json.data;
 }
 
-export async function sendPartnerOtp(phone: string): Promise<void> {
+export async function sendPartnerOtp(phone: string): Promise<SendPartnerOtpResponse> {
   const response = await fetch(`${API_BASE}/auth/partner/otp/send`, {
     method: "POST",
     headers: {
@@ -749,7 +793,7 @@ export async function sendPartnerOtp(phone: string): Promise<void> {
     body: JSON.stringify({ phone }),
   });
 
-  await parseResponse(response);
+  return parseResponse<SendPartnerOtpResponse>(response);
 }
 
 export async function verifyPartnerOtp(phone: string, otp: string, name?: string): Promise<VerifyOtpResponse> {
@@ -762,6 +806,54 @@ export async function verifyPartnerOtp(phone: string, otp: string, name?: string
   });
 
   return parseResponse<VerifyOtpResponse>(response);
+}
+
+export async function partnerDevLogin(phone: string, name?: string): Promise<VerifyOtpResponse> {
+  const response = await fetch(`${API_BASE}/auth/partner/dev-login`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ phone, name }),
+  });
+
+  return parseResponse<VerifyOtpResponse>(response);
+}
+
+export async function userDevLogin(phone: string, name?: string): Promise<UserAuthResponse> {
+  const candidates = buildOtpApiCandidates();
+  let lastError: unknown = null;
+  const resolvedName = name?.trim() || `User ${phone.slice(-4)}`;
+
+  for (const base of candidates) {
+    try {
+      const response = await fetch(`${base}/auth/user/dev-login`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ phone, name: resolvedName }),
+      });
+
+      return await parseResponse<UserAuthResponse>(response);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  // Backward-compatible fallback for environments where /auth/user/dev-login route
+  // is not yet live but the regular OTP endpoints are available.
+  try {
+    await sendUserOtp(phone);
+    return await verifyUserOtp(phone, "6767", resolvedName);
+  } catch (error) {
+    lastError = error;
+  }
+
+  if (lastError instanceof Error) {
+    throw lastError;
+  }
+  throw new ApiClientError("Failed to use dev OTP bypass.");
 }
 
 export async function sendUserOtp(phone: string): Promise<SendUserOtpResponse> {
@@ -966,6 +1058,16 @@ export async function getUserSellFlow(token: string, flowId: string): Promise<{ 
   return parseResponse<{ flow: UserSellFlow }>(response);
 }
 
+export async function getUserSellFlowInvoice(token: string, flowId: string): Promise<{ invoice: UserDealInvoice }> {
+  const response = await fetch(`${API_BASE}/user/sell-flows/${encodeURIComponent(flowId)}/invoice`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  return parseResponse<{ invoice: UserDealInvoice }>(response);
+}
+
 export async function cancelUserSellFlow(token: string, flowId: string): Promise<{ flow: UserSellFlow }> {
   const response = await fetch(`${API_BASE}/user/sell-flows/${encodeURIComponent(flowId)}/cancel`, {
     method: "POST",
@@ -1042,6 +1144,23 @@ export async function listPartnerServiceLeads(
   return parseResponse<{ rows: PartnerLead[]; count: number }>(response);
 }
 
+export async function listPartnerOwnedLeads(
+  token: string,
+  filters: { status?: Extract<PartnerLeadStatus, "ACCEPTED" | "IN_PROGRESS" | "COMPLETED" | "REJECTED">; limit?: number } = {},
+): Promise<{ rows: PartnerLead[]; count: number }> {
+  const params = new URLSearchParams();
+  if (filters.status) params.set("status", filters.status);
+  if (filters.limit) params.set("limit", String(filters.limit));
+
+  const response = await fetch(`${API_BASE}/partner/my-leads?${params.toString()}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  return parseResponse<{ rows: PartnerLead[]; count: number }>(response);
+}
+
 export async function getPartnerLead(token: string, leadId: string): Promise<{ lead: PartnerLead }> {
   const response = await fetch(`${API_BASE}/partner/leads/${encodeURIComponent(leadId)}`, {
     headers: {
@@ -1063,6 +1182,20 @@ export async function getLeadUnlockIntent(
   });
 
   return parseResponse<{ intent: PartnerLeadUnlockOrder; lead: PartnerLead | null }>(response);
+}
+
+export async function createLeadUnlockIntent(
+  token: string,
+  leadId: string,
+): Promise<{ intent: PartnerLeadUnlockOrder; lead: PartnerLead | null; unlockPrice: number; paymentQrUrl: string; expiresAt: string }> {
+  const response = await fetch(`${API_BASE}/partner/leads/${encodeURIComponent(leadId)}/unlock-intent`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  return parseResponse<{ intent: PartnerLeadUnlockOrder; lead: PartnerLead | null; unlockPrice: number; paymentQrUrl: string; expiresAt: string }>(response);
 }
 
 export async function markLeadUnlockScreenshotSent(
@@ -1125,6 +1258,37 @@ export async function updatePartnerLeadCallStatus(
   });
 
   return parseResponse<{ lead: PartnerLead }>(response);
+}
+
+export async function sendPartnerLeadCustomerOtp(
+  token: string,
+  leadId: string,
+): Promise<{ phone: string; otpTtlSeconds: number; resendAfterSeconds: number; devOtp?: string }> {
+  const response = await fetch(`${API_BASE}/partner/leads/${encodeURIComponent(leadId)}/customer-otp/send`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  return parseResponse<{ phone: string; otpTtlSeconds: number; resendAfterSeconds: number; devOtp?: string }>(response);
+}
+
+export async function verifyPartnerLeadCustomerOtp(
+  token: string,
+  leadId: string,
+  otp: string,
+): Promise<{ phone: string; verified: boolean }> {
+  const response = await fetch(`${API_BASE}/partner/leads/${encodeURIComponent(leadId)}/customer-otp/verify`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ otp }),
+  });
+
+  return parseResponse<{ phone: string; verified: boolean }>(response);
 }
 
 export async function listPartnerActivePickups(
@@ -1398,6 +1562,43 @@ export async function verifyPartnerCoinRechargeRequest(
   });
 
   return parseResponse<{ request: PartnerCoinRechargeRequestRow }>(response);
+}
+
+export async function listAdminLeadUnlockIntents(
+  token: string,
+  filters: { status?: PartnerLeadUnlockOrder["status"]; partnerId?: string; limit?: number } = {},
+): Promise<{ rows: AdminLeadUnlockIntentRow[]; count: number }> {
+  const params = new URLSearchParams();
+  if (filters.status) params.set("status", filters.status);
+  if (filters.partnerId) params.set("partnerId", filters.partnerId);
+  if (typeof filters.limit === "number") params.set("limit", String(filters.limit));
+
+  const qs = params.toString();
+  const response = await fetch(`${API_BASE}/partner/lead-unlock-intents/admin${qs ? `?${qs}` : ""}`, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  return parseResponse<{ rows: AdminLeadUnlockIntentRow[]; count: number }>(response);
+}
+
+export async function verifyAdminLeadUnlockIntent(
+  token: string,
+  intentId: string,
+  input: { action: "APPROVE" | "REJECT"; note?: string },
+): Promise<{ intent: PartnerLeadUnlockOrder; lead: PartnerLead | null }> {
+  const response = await fetch(`${API_BASE}/partner/lead-unlock-intents/${encodeURIComponent(intentId)}/verify`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(input),
+  });
+
+  return parseResponse<{ intent: PartnerLeadUnlockOrder; lead: PartnerLead | null }>(response);
 }
 
 export async function listAdminLeads(

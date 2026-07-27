@@ -2,6 +2,8 @@ import { Router } from "express";
 import { success } from "../../shared/http/response.js";
 import {
   adminDevLogin,
+  partnerDevLogin,
+  userDevLogin,
   refreshAccessToken,
   sendPartnerOtp,
   sendUserOtp,
@@ -11,6 +13,8 @@ import {
 } from "./auth.service.js";
 import {
   adminDevLoginSchema,
+  partnerDevLoginSchema,
+  userDevLoginSchema,
   refreshTokenSchema,
   sendOtpSchema,
   verifyOtpSchema,
@@ -34,6 +38,26 @@ authRouter.post("/partner/otp/verify", async (req, res, next) => {
   try {
     const input = verifyOtpSchema.parse(req.body);
     const result = await verifyPartnerOtp(input);
+    res.json(success(result));
+  } catch (err) {
+    next(err);
+  }
+});
+
+authRouter.post("/partner/dev-login", (req, res, next) => {
+  try {
+    const input = partnerDevLoginSchema.parse(req.body);
+    const result = partnerDevLogin(input);
+    res.json(success(result));
+  } catch (err) {
+    next(err);
+  }
+});
+
+authRouter.post("/user/dev-login", (req, res, next) => {
+  try {
+    const input = userDevLoginSchema.parse(req.body);
+    const result = userDevLogin(input);
     res.json(success(result));
   } catch (err) {
     next(err);

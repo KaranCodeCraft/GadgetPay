@@ -2,13 +2,15 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent } from "react";
 import { activateRoleSession, clearRoleSession, getActiveRole } from "../lib/auth/role-session";
 import { PartnerSharedFooter, SupportFab } from "../components/partner-footer-and-support";
-import { getPartnerKycStatus, sendPartnerOtp, submitPartnerKycMetadata, verifyPartnerOtp } from "../lib/api/gadgetpe-client";
+import { getPartnerKycStatus, partnerDevLogin, sendPartnerOtp, submitPartnerKycMetadata, verifyPartnerOtp } from "../lib/api/gadgetpe-client";
 
 export const Route = createFileRoute("/partner")({
   component: PartnerAuthPage,
 });
 
 type IdentityProof = "Aadhar" | "Voter ID" | "Driving License" | "PAN Card" | "Passport";
+
+const isDevOtpBypassEnabled = import.meta.env.DEV;
 
 function PartnerAuthPage() {
   const navigate = useNavigate();
@@ -22,6 +24,7 @@ function PartnerAuthPage() {
   const [signupPhone, setSignupPhone] = useState("");
   const [signupOtp, setSignupOtp] = useState("");
   const [signupStep, setSignupStep] = useState<"phone" | "otp">("phone");
+  const [devSignupAuth, setDevSignupAuth] = useState<Awaited<ReturnType<typeof partnerDevLogin>> | null>(null);
   const [fullName, setFullName] = useState("");
   const [age, setAge] = useState("");
   const [address, setAddress] = useState("");
@@ -36,6 +39,10 @@ function PartnerAuthPage() {
   const [isSendingOtp, setIsSendingOtp] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [latestKycUrl, setLatestKycUrl] = useState<string | null>(null);
+
+  const hasSignupBasics = fullName.trim().length > 0 && age.trim().length > 0;
+  const hasSignupAddressProof = hasSignupBasics && address.trim().length > 0 && aadharNumber.trim().length === 12;
+  const canSendSignupOtp = hasSignupAddressProof && signupPhone.trim().length >= 10;
 
   useEffect(() => {
     const activeRole = getActiveRole();
@@ -115,6 +122,83 @@ function PartnerAuthPage() {
     }
   };
 
+  const handleDevLoginOtpBypass = async () => {
+    const phone = loginPhone.trim();
+    if (phone.length < 10) {
+      setError("Please enter a valid phone number.");
+      return;
+    }
+
+    setError(null);
+    setNotice(null);
+    setIsSendingOtp(true);
+
+    try {
+      const result = await partnerDevLogin(phone);
+
+      localStorage.setItem("gadgetpe_access_token", result.accessToken);
+      localStorage.setItem("gadgetpe_partner_access_token", result.accessToken);
+      localStorage.setItem("gadgetpe_refresh_token", result.refreshToken);
+      localStorage.setItem("gadgetpe_partner_refresh_token", result.refreshToken);
+      localStorage.setItem("gadgetpe_partner_name", result.partner.name);
+      activateRoleSession("partner");
+
+      setNotice("Dev login successful.");
+      window.location.assign("/partner-page");
+    } catch (apiError) {
+      setError(apiError instanceof Error ? apiError.message : "Failed to use dev OTP bypass.");
+    } finally {
+      setIsSendingOtp(false);
+    }
+  };
+
+  const handleDevSignupOtpBypass = async () => {
+    if (!fullName.trim()) {
+      setError("Please enter full name as per Aadhar.");
+      return;
+    }
+    if (!age.trim()) {
+      setError("Please enter your age.");
+      return;
+    }
+    if (!address.trim()) {
+      setError("Please enter your address.");
+      return;
+    }
+    if (!aadharNumber.trim() || aadharNumber.trim().length !== 12) {
+      setError("Please enter a valid 12-digit Aadhar number.");
+      return;
+    }
+    if (signupPhone.trim().length < 10) {
+      setError("Please enter a valid phone number.");
+      return;
+    }
+
+    setError(null);
+    setNotice(null);
+    setIsSendingOtp(true);
+
+    try {
+      const result = await partnerDevLogin(signupPhone.trim(), fullName.trim());
+
+      localStorage.setItem("gadgetpe_access_token", result.accessToken);
+      localStorage.setItem("gadgetpe_partner_access_token", result.accessToken);
+      localStorage.setItem("gadgetpe_refresh_token", result.refreshToken);
+      localStorage.setItem("gadgetpe_partner_refresh_token", result.refreshToken);
+      localStorage.setItem("gadgetpe_partner_name", result.partner.name);
+      activateRoleSession("partner");
+
+      setDevSignupAuth(result);
+      setSignupOtp("6767");
+      setSignupStep("otp");
+      setNotice("Dev registration bypass enabled. Upload identity image and submit.");
+    } catch (apiError) {
+      setError(apiError instanceof Error ? apiError.message : "Failed to use dev registration bypass.");
+    } finally {
+      setIsSendingOtp(false);
+    }
+  };
+
   const handleResendLoginOtp = async () => {
     if (loginPhone.trim().length < 10) {
       setError("Please enter a valid phone number.");
@@ -138,6 +222,22 @@ function PartnerAuthPage() {
 
   const handleSendSignupOtp = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!fullName.trim()) {
+      setError("Please enter full name as per Aadhar.");
+      return;
+    }
+    if (!age.trim()) {
+      setError("Please enter your age.");
+      return;
+    }
+    if (!address.trim()) {
+      setError("Please enter your address.");
+      return;
+    }
+    if (!aadharNumber.trim() || aadharNumber.trim().length !== 12) {
+      setError("Please enter a valid 12-digit Aadhar number.");
+      return;
+    }
     if (signupPhone.trim().length < 10) {
       setError("Please enter a valid phone number.");
       return;
@@ -149,6 +249,7 @@ function PartnerAuthPage() {
 
     try {
       await sendPartnerOtp(signupPhone.trim());
+      setDevSignupAuth(null);
       setSignupStep("otp");
       setNotice("OTP sent. Please enter OTP to complete signup.");
     } catch (apiError) {
@@ -194,7 +295,7 @@ function PartnerAuthPage() {
     setIsSubmitting(true);
 
     try {
-      const result = await verifyPartnerOtp(signupPhone.trim(), signupOtp.trim(), fullName.trim());
+      const result = devSignupAuth ?? (await verifyPartnerOtp(signupPhone.trim(), signupOtp.trim(), fullName.trim()));
 
       localStorage.setItem("gadgetpe_access_token", result.accessToken);
       localStorage.setItem("gadgetpe_partner_access_token", result.accessToken);
@@ -233,6 +334,7 @@ function PartnerAuthPage() {
 
     try {
       await sendPartnerOtp(signupPhone.trim());
+      setDevSignupAuth(null);
       setNotice(`OTP sent again to ${signupPhone.trim()}.`);
     } catch (apiError) {
       setError(apiError instanceof Error ? apiError.message : "Failed to resend OTP.");
@@ -274,6 +376,7 @@ function PartnerAuthPage() {
               setTab("signup");
               setSignupStep("phone");
               setSignupOtp("");
+                setDevSignupAuth(null);
               setError(null);
               setNotice(null);
             }}
@@ -307,6 +410,16 @@ function PartnerAuthPage() {
               <button type="submit" className="partner-submit-btn" disabled={isSendingOtp}>
                 {isSendingOtp ? "Sending OTP..." : "Send OTP"}
               </button>
+              {isDevOtpBypassEnabled ? (
+                <button
+                  type="button"
+                  className="partner-inline-link-btn"
+                  onClick={handleDevLoginOtpBypass}
+                  disabled={isSendingOtp}
+                >
+                  Dev login bypass
+                </button>
+              ) : null}
             </form>
           ) : (
             <form className="partner-auth-form" onSubmit={handleLogin}>
@@ -379,57 +492,75 @@ function PartnerAuthPage() {
                 />
               </label>
 
-              <label>
-                Address
-                <textarea
-                  placeholder="Enter your address"
-                  value={address}
-                  onChange={(event) => setAddress(event.target.value)}
-                  required
-                  rows={3}
-                />
-              </label>
+              {hasSignupBasics ? (
+                <>
+                  <label>
+                    Address
+                    <textarea
+                      placeholder="Enter your address"
+                      value={address}
+                      onChange={(event) => setAddress(event.target.value)}
+                      required
+                      rows={3}
+                    />
+                  </label>
 
-              <label>
-                Aadhar Number
-                <input
-                  type="text"
-                  placeholder="Enter 12-digit Aadhar number"
-                  value={aadharNumber}
-                  maxLength={12}
-                  onChange={(event) => setAadharNumber(event.target.value)}
-                  required
-                />
-              </label>
+                  <label>
+                    Aadhar Number
+                    <input
+                      type="text"
+                      placeholder="Enter 12-digit Aadhar number"
+                      value={aadharNumber}
+                      maxLength={12}
+                      onChange={(event) => setAadharNumber(event.target.value.replace(/\D/g, ""))}
+                      required
+                    />
+                  </label>
+                </>
+              ) : null}
 
-              <label>
-                GST Number (Optional)
-                <input
-                  type="text"
-                  placeholder="Enter GST number"
-                  value={gstNumber}
-                  onChange={(event) => setGstNumber(event.target.value)}
-                />
-              </label>
+              {hasSignupAddressProof ? (
+                <>
+                  <label>
+                    GST Number (Optional)
+                    <input
+                      type="text"
+                      placeholder="Enter GST number"
+                      value={gstNumber}
+                      onChange={(event) => setGstNumber(event.target.value)}
+                    />
+                  </label>
 
-              <label>
-                Phone Number
-                <input
-                  type="tel"
-                  placeholder="Enter your phone"
-                  value={signupPhone}
-                  maxLength={10}
-                  onChange={(event) => setSignupPhone(event.target.value)}
-                  required
-                />
-              </label>
+                  <label>
+                    Phone Number
+                    <input
+                      type="tel"
+                      placeholder="Enter your phone"
+                      value={signupPhone}
+                      maxLength={10}
+                      onChange={(event) => setSignupPhone(event.target.value.replace(/\D/g, ""))}
+                      required
+                    />
+                  </label>
+                </>
+              ) : null}
 
               {error && <div className="partner-auth-error">{error}</div>}
               {notice && <div className="partner-otp-hint">{notice}</div>}
 
-              <button type="submit" className="partner-submit-btn" disabled={isSendingOtp}>
+              <button type="submit" className="partner-submit-btn" disabled={isSendingOtp || !canSendSignupOtp}>
                 {isSendingOtp ? "Sending..." : "Send OTP"}
               </button>
+              {isDevOtpBypassEnabled ? (
+                <button
+                  type="button"
+                  className="partner-inline-link-btn"
+                  onClick={handleDevSignupOtpBypass}
+                  disabled={isSendingOtp || !canSendSignupOtp}
+                >
+                  Dev registration bypass
+                </button>
+              ) : null}
             </form>
           ) : (
             <form className="partner-auth-form" onSubmit={handleSignup}>
@@ -463,6 +594,7 @@ function PartnerAuthPage() {
                   onClick={() => {
                     setSignupStep("phone");
                     setSignupOtp("");
+                    setDevSignupAuth(null);
                     setError(null);
                     setNotice(null);
                   }}
@@ -511,13 +643,13 @@ function PartnerAuthPage() {
 
         {isModalOpen && (
           <div className="partner-modal-backdrop" role="dialog" aria-modal="true">
-          <div className="partner-modal-card">
+          <div className="partner-modal-card partner-registration-success-modal">
             <h2>Registration Submitted</h2>
             <p>
-              Thank you for registering. Aapka KYC admin review me gaya hai. Approval ke baad aap /partner
-              se login karke /partner-page access kar paayenge.
+              Thank you for registering. Your KYC has been sent for admin review. Once approved,
+              you can log in from /partner and access /partner-page.
             </p>
-            <div className="partner-modal-actions">
+            <div className="partner-modal-actions partner-registration-success-actions">
               <button
                 type="button"
                 className="partner-submit-btn"

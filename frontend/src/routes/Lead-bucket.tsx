@@ -1,10 +1,9 @@
-import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
+import { Link, Outlet, createFileRoute, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { getActiveRole } from "../lib/auth/role-session";
 import {
-  claimPartnerLead,
-  getPartnerCoinBalance,
+  createLeadUnlockIntent,
   listPartnerLeadBucket,
   updatePartnerLeadStatus,
   type PartnerLead,
@@ -40,6 +39,32 @@ function formatSlot(dateValue?: string | null, timeValue?: string | null) {
   return timeValue ? `${dateText} ${timeValue}` : dateText;
 }
 
+function getLeadPreviewPrice(lead: PartnerLead) {
+  return lead.quote?.sellingPrice ?? lead.selectedModel.listedPrice ?? 0;
+}
+
+function getLeadUnlockPrice(lead: PartnerLead) {
+  const quotePrice = getLeadPreviewPrice(lead);
+  if (!Number.isFinite(quotePrice) || quotePrice < 300) return null;
+  if (quotePrice <= 10000) return 500;
+  if (quotePrice <= 24999) return 800;
+  return 1200;
+}
+
+function isUnlockApproved(lead: PartnerLead, currentPartnerId: string) {
+  if (lead.partnerId === currentPartnerId && ["ACCEPTED", "IN_PROGRESS", "COMPLETED"].includes(lead.status)) return true;
+  return lead.unlockOrder?.partnerId === currentPartnerId && ["APPROVED", "CLOSED"].includes(lead.unlockOrder.status);
+}
+
+function isUnlockPending(lead: PartnerLead, currentPartnerId: string) {
+  return lead.unlockOrder?.partnerId === currentPartnerId && ["PENDING_PAYMENT", "SCREENSHOT_SENT"].includes(lead.unlockOrder.status);
+}
+
+function lockedValue(value: string | null | undefined, isLocked: boolean) {
+  if (isLocked) return "XX";
+  return value || "-";
+}
+
 function decodeJwtSub(token: string) {
   try {
     const parts = token.split(".");
@@ -58,12 +83,24 @@ function decodeJwtSub(token: string) {
 }
 
 function LeadBucketPage() {
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+
+  if (pathname.startsWith("/Lead-bucket/Unlock-payment")) {
+    return <Outlet />;
+  }
+
+  return <LeadBucketContent />;
+}
+
+function LeadBucketContent() {
   const navigate = useNavigate();
   const [page, setPage] = useState(1);
   const [leads, setLeads] = useState<PartnerLead[]>([]);
   const [loading, setLoading] = useState(false);
   const [scopePincode, setScopePincode] = useState("");
-  const [acceptingLeadId, setAcceptingLeadId] = useState<string | null>(null);
+  const [unlockingLeadId, setUnlockingLeadId] = useState<string | null>(null);
+  const [cancellingLeadId, setCancellingLeadId] = useState<string | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<PartnerLead | null>(null);
   const [currentPartnerId, setCurrentPartnerId] = useState("");
 
   const loadLeadBucket = useCallback(async (token: string, pincode: string) => {
@@ -118,13 +155,6 @@ function LeadBucketPage() {
           return;
         }
 
-        const wallet = await getPartnerCoinBalance(token);
-        if (wallet.balance <= 0) {
-          toast.error("Wallet recharge is required to access Lead Bucket.");
-          window.location.href = "/partner-page";
-          return;
-        }
-
         const pincode = scope.pincode || "";
         setScopePincode(pincode);
         await loadLeadBucket(token, pincode);
@@ -136,34 +166,7 @@ function LeadBucketPage() {
 
   }, [navigate, loadLeadBucket]);
 
-  const canAcceptLead = useCallback(
-    (lead: PartnerLead) => {
-      if (lead.status === "AVAILABLE") return true;
-      if (lead.status === "CLAIMED" && currentPartnerId && lead.partnerId === currentPartnerId) return true;
-      return false;
-    },
-    [currentPartnerId],
-  );
-
-  const getAcceptLabel = useCallback(
-    (lead: PartnerLead, isAccepting: boolean) => {
-      if (isAccepting) return "Accepting...";
-      if (lead.status === "AVAILABLE") return "Accept";
-      if (lead.status === "CLAIMED") {
-        if (currentPartnerId && lead.partnerId === currentPartnerId) return "Accept";
-        return "Claimed";
-      }
-      if (lead.status === "ACCEPTED") return "Accepted";
-      if (lead.status === "IN_PROGRESS") return "In Progress";
-      if (lead.status === "COMPLETED") return "Completed";
-      if (lead.status === "REJECTED") return "Rejected";
-      if (lead.status === "CANCELLED") return "Cancelled";
-      return "Accept";
-    },
-    [currentPartnerId],
-  );
-
-  const handleAccept = useCallback(
+  const handleUnlockLead = useCallback(
     async (lead: PartnerLead) => {
       const token = localStorage.getItem(PARTNER_TOKEN_KEY);
       if (!token) {
@@ -178,48 +181,50 @@ function LeadBucketPage() {
         return;
       }
 
-      setAcceptingLeadId(lead.id);
+      setUnlockingLeadId(lead.id);
       try {
-        if (lead.status === "AVAILABLE") {
-          await claimPartnerLead(token, lead.id);
-          await updatePartnerLeadStatus(token, lead.id, { status: "ACCEPTED" });
-        } else if (lead.status === "CLAIMED") {
-          const partnerId = currentPartnerId || decodeJwtSub(token);
-          if (!partnerId || lead.partnerId !== partnerId) {
-            toast.error("Only the claiming partner can accept this lead.");
-            return;
-          }
-          await updatePartnerLeadStatus(token, lead.id, { status: "ACCEPTED" });
-        } else if (lead.status === "ACCEPTED") {
-          toast.error("This lead is already accepted.");
-          return;
-        } else if (lead.status === "IN_PROGRESS") {
-          toast.error("This lead is already in progress.");
-          return;
-        } else if (lead.status === "COMPLETED") {
-          toast.error("This lead is already completed.");
-          return;
-        } else if (lead.status === "REJECTED") {
-          toast.error("This lead has been rejected.");
-          return;
-        } else if (lead.status === "CANCELLED") {
-          toast.error("This lead has been cancelled.");
-          return;
-        } else {
-          toast.error("Only AVAILABLE or your CLAIMED leads can be accepted.");
-          return;
-        }
-
-        toast.success("Lead accepted.");
-        await loadLeadBucket(token, scopePincode);
+        const result = await createLeadUnlockIntent(token, lead.id);
+        await navigate({ to: "/Lead-bucket/Unlock-payment", search: { intentId: result.intent.id, leadId: lead.id } });
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Unable to accept lead.");
+        toast.error(err instanceof Error ? err.message : "Unable to unlock lead.");
       } finally {
-        setAcceptingLeadId(null);
+        setUnlockingLeadId(null);
       }
     },
-    [scopePincode, currentPartnerId, loadLeadBucket],
+    [scopePincode, navigate],
   );
+
+  const handleCancelAcceptedLead = useCallback(async () => {
+    if (!cancelTarget) return;
+
+    const token = localStorage.getItem(PARTNER_TOKEN_KEY);
+    if (!token) {
+      toast.error("Please login as partner first.");
+      window.location.href = "/partner";
+      return;
+    }
+
+    if (!scopePincode) {
+      toast.error("Select an ACTIVE pincode on Partner page first.");
+      window.location.href = "/partner-page";
+      return;
+    }
+
+    setCancellingLeadId(cancelTarget.id);
+    try {
+      await updatePartnerLeadStatus(token, cancelTarget.id, {
+        status: "CANCELLED",
+        reason: "Partner cancelled accepted lead",
+      });
+      toast.success("Lead cancelled and returned to Lead Bucket.");
+      setCancelTarget(null);
+      await loadLeadBucket(token, scopePincode);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Unable to cancel lead.");
+    } finally {
+      setCancellingLeadId(null);
+    }
+  }, [cancelTarget, scopePincode, loadLeadBucket]);
 
   const totalPages = Math.max(1, Math.ceil(leads.length / PAGE_SIZE));
   const safePage = useMemo(() => Math.min(page, totalPages), [page, totalPages]);
@@ -229,6 +234,14 @@ function LeadBucketPage() {
 
   return (
     <main className="partner-simple-page lead-bucket-page">
+      <div className="partner-subpage-topbar">
+        <Link to="/partner-page" className="partner-subpage-hamburger" aria-label="Open partner navigation">
+          ☰
+        </Link>
+        <Link to="/partner-page" className="partner-subpage-logo" aria-label="Go to partner dashboard">
+          <img src="/logo.png" alt="GadgetPe" />
+        </Link>
+      </div>
       <section className="partner-simple-card partner-lead-card lead-bucket-card">
         <h1>Lead Bucket</h1>
         <p>Showing {leads.length === 0 ? 0 : start + 1} - {Math.min(end, leads.length)} of {leads.length} leads</p>
@@ -253,37 +266,69 @@ function LeadBucketPage() {
             <tbody>
               {pageRows.length > 0 ? (
                 pageRows.map((row, index) => {
-                  const canAccept = canAcceptLead(row);
-                  const isAccepting = acceptingLeadId === row.id;
-                  const acceptLabel = getAcceptLabel(row, isAccepting);
+                  const isUnlocked = isUnlockApproved(row, currentPartnerId);
+                  const isPending = isUnlockPending(row, currentPartnerId);
+                  const isLocked = !isUnlocked;
+                  const unlockPrice = getLeadUnlockPrice(row);
+                  const isUnlocking = unlockingLeadId === row.id;
+                  const isCancelling = cancellingLeadId === row.id;
+                  const canCancel = isUnlocked && row.status === "ACCEPTED" && currentPartnerId && row.partnerId === currentPartnerId;
+                  const canUnlock = row.status === "AVAILABLE" || (row.status === "CLAIMED" && row.partnerId === currentPartnerId);
 
                   return (
                     <tr key={`${row.id}-${index}`}>
                       <td data-label="Model">{row.selectedModel.modelName}</td>
-                      <td data-label="Seller">{row.seller.name || "-"}</td>
-                      <td data-label="Phone">{row.seller.phone || "-"}</td>
+                      <td data-label="Seller">{lockedValue(row.seller.name, isLocked)}</td>
+                      <td data-label="Phone">{lockedValue(row.seller.phone, isLocked)}</td>
                       <td data-label="City">{row.seller.city || row.city || "-"}</td>
                       <td data-label="Pincode">{row.pincode}</td>
-                      <td data-label="Quote">Rs. {formatInr(row.quote?.sellingPrice ?? row.selectedModel.listedPrice ?? 0)}</td>
+                      <td data-label="Quote">Rs. {formatInr(getLeadPreviewPrice(row))}</td>
                       <td data-label="Primary Pickup">{formatSlot(row.pickupSchedule?.primaryDate, row.pickupSchedule?.primaryTime)}</td>
-                      <td data-label="Alternate Pickup">{formatSlot(row.pickupSchedule?.alternateDate, row.pickupSchedule?.alternateTime)}</td>
-                      <td data-label="Status">{row.status}</td>
+                      <td data-label="Alternate Pickup">{isLocked ? "XX" : formatSlot(row.pickupSchedule?.alternateDate, row.pickupSchedule?.alternateTime)}</td>
+                      <td data-label="Status">{isLocked ? "XX" : row.status}</td>
                       <td data-label="Actions" className="lead-bucket-action-cell">
                         <div className="lead-decision-row lead-bucket-action-row" style={{ marginTop: 0 }}>
-                          <button
-                            type="button"
-                            className="lead-book-btn lead-bucket-accept-btn"
-                            onClick={() => {
-                              void handleAccept(row);
-                            }}
-                            disabled={isAccepting}
-                            title={!canAccept && !isAccepting ? `Not actionable in ${row.status} state` : undefined}
-                          >
-                            {acceptLabel}
-                          </button>
-                          <Link to="/Lead-bucket-details" search={{ leadId: row.id }} className="lead-view-btn lead-view-link lead-bucket-details-btn">
-                            View Details
-                          </Link>
+                          {isPending ? (
+                            <button type="button" className="lead-pending-btn lead-bucket-pending-btn" disabled>
+                              Admin approval pending
+                            </button>
+                          ) : isLocked ? (
+                            <>
+                              <button
+                                type="button"
+                                className="lead-book-btn lead-bucket-unlock-btn"
+                                onClick={() => {
+                                  void handleUnlockLead(row);
+                                }}
+                                disabled={isUnlocking || !canUnlock || !unlockPrice}
+                                title={!canUnlock ? `Not unlockable in ${row.status} state` : undefined}
+                              >
+                                {isUnlocking ? "Opening..." : "Unlock Lead"}
+                              </button>
+                              {unlockPrice ? (
+                                <p className="lead-unlock-price-label">Pay Rs. {formatInr(unlockPrice)} to unlock lead</p>
+                              ) : null}
+                            </>
+                          ) : null}
+                          {canCancel ? (
+                            <button
+                              type="button"
+                              className="lead-cancel-btn lead-bucket-cancel-btn"
+                              onClick={() => setCancelTarget(row)}
+                              disabled={isCancelling}
+                            >
+                              {isCancelling ? "Cancelling..." : "Cancel Lead"}
+                            </button>
+                          ) : null}
+                          {isUnlocked ? (
+                            <Link to="/Lead-bucket-details" search={{ leadId: row.id }} className="lead-view-btn lead-view-link lead-bucket-details-btn">
+                              View Details
+                            </Link>
+                          ) : (
+                            <span className="lead-view-btn lead-view-link lead-bucket-details-btn lead-bucket-details-disabled" aria-disabled="true">
+                              View Details
+                            </span>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -310,6 +355,22 @@ function LeadBucketPage() {
 
         <Link to="/partner-page" className="partner-simple-link">Back to Partner Page</Link>
       </section>
+      {cancelTarget ? (
+        <div className="lead-cancel-modal-overlay" role="presentation">
+          <div className="lead-cancel-modal" role="dialog" aria-modal="true" aria-labelledby="cancel-lead-title">
+            <h2 id="cancel-lead-title">Are you sure?</h2>
+            <p>This accepted lead will be cancelled</p>
+            <div className="lead-cancel-modal-actions">
+              <button type="button" className="lead-cancel-modal-secondary" onClick={() => setCancelTarget(null)} disabled={cancellingLeadId === cancelTarget.id}>
+                Cancel
+              </button>
+              <button type="button" className="lead-book-btn" onClick={() => { void handleCancelAcceptedLead(); }} disabled={cancellingLeadId === cancelTarget.id}>
+                {cancellingLeadId === cancelTarget.id ? "Cancelling..." : "OK"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }

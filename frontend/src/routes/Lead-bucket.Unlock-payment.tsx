@@ -14,7 +14,6 @@ export const Route = createFileRoute("/Lead-bucket/Unlock-payment")({
 
 const PARTNER_TOKEN_KEY = "gadgetpe_partner_access_token";
 const LEGACY_PARTNER_TOKEN_KEY = "gadgetpe_access_token";
-const WHATSAPP_SCREENSHOT_URL = "https://api.whatsapp.com/send/?phone=919311125745&text&type=phone";
 const QR_DISPLAY_MS = 4 * 60 * 1000;
 
 function getPartnerToken() {
@@ -48,7 +47,7 @@ function LeadUnlockPaymentPage() {
     if (intent.status === "REJECTED") return "Payment rejected";
     if (isExpired) return "QR expired";
     if (waitingForAdmin || intent.status === "SCREENSHOT_SENT") return "Waiting for admin approval";
-    return "Complete payment and send screenshot to admin";
+    return "Complete payment and confirm for admin approval";
   }, [intent, isExpired, waitingForAdmin]);
 
   const loadIntent = async (options: { redirectOnApprove?: boolean } = {}) => {
@@ -112,20 +111,23 @@ function LeadUnlockPaymentPage() {
     return () => window.clearInterval(poller);
   }, [intentId, isApproved]);
 
-  const handleSendScreenshot = async () => {
+  const handleConfirmPayment = async () => {
     const token = getPartnerToken();
     if (!token || !intentId) return;
 
     activateRoleSession("partner");
 
-    window.open(WHATSAPP_SCREENSHOT_URL, "_blank", "noopener,noreferrer");
     setWaitingForAdmin(true);
+    setLoading(true);
     try {
       const result = await markLeadUnlockScreenshotSent(token, intentId);
       setIntent(result.intent);
-      toast.success("Screenshot marked as sent. Waiting for admin approval.");
+      toast.success("Payment confirmation sent. Waiting for admin approval.");
+      await navigate({ to: "/Lead-bucket" });
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Unable to mark screenshot as sent.");
+      toast.error(err instanceof Error ? err.message : "Unable to confirm payment.");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -165,8 +167,8 @@ function LeadUnlockPaymentPage() {
                 Re-show QR
               </button>
             ) : null}
-            <button type="button" className="lead-book-btn" onClick={handleSendScreenshot} disabled={loading || isApproved || intent?.status === "REJECTED"}>
-              Send Screenshot to admin
+            <button type="button" className="lead-book-btn" onClick={handleConfirmPayment} disabled={loading || isApproved || intent?.status === "REJECTED"}>
+              {loading ? "Confirming..." : "Confirm Payment"}
             </button>
           </div>
 

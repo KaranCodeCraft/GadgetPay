@@ -660,6 +660,20 @@ userRouter.get("/sell-flows/:flowId/lead-status", (req, res, next) => {
   }
 });
 
+userRouter.get("/sell-flows/:flowId/invoice", (req, res, next) => {
+  try {
+    const flow = requireFlow(req);
+    const lead = getPartnerLeadByFlowId(flow.id);
+    if (!lead || lead.status !== "COMPLETED" || !lead.completionEvent?.invoice) {
+      throw notFound("Invoice not found");
+    }
+
+    res.json(success({ invoice: lead.completionEvent.invoice }));
+  } catch (err) {
+    next(err);
+  }
+});
+
 userRouter.post("/sell-flows/:flowId/cancel", (req, res, next) => {
   try {
     const updatedAt = nowIso();

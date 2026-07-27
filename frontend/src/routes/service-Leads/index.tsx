@@ -2,7 +2,7 @@ import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { clearRoleSession, getActiveRole } from "../../lib/auth/role-session";
-import { getPartnerCoinBalance, listPartnerServiceLeads, type PartnerLead } from "../../lib/api/gadgetpe-client";
+import { listPartnerServiceLeads, type PartnerLead } from "../../lib/api/gadgetpe-client";
 
 export const Route = createFileRoute("/service-Leads/")({
   component: ServiceLeadsPage,
@@ -95,13 +95,6 @@ function ServiceLeadsPage() {
           return;
         }
 
-        const wallet = await getPartnerCoinBalance(token);
-        if (wallet.balance <= 0) {
-          toast.error("Wallet recharge is required to access Service Leads.");
-          window.location.href = "/partner-page";
-          return;
-        }
-
         setScopePincode(scope.pincode || "");
       } catch {
         toast.error("Invalid tenant scope. Please select pincode again.");
@@ -148,6 +141,14 @@ function ServiceLeadsPage() {
 
   return (
     <main className="partner-simple-page service-leads-page">
+      <div className="partner-subpage-topbar">
+        <Link to="/partner-page" className="partner-subpage-hamburger" aria-label="Open partner navigation">
+          ☰
+        </Link>
+        <Link to="/partner-page" className="partner-subpage-logo" aria-label="Go to partner dashboard">
+          <img src="/logo.png" alt="GadgetPe" />
+        </Link>
+      </div>
       <section className="partner-simple-card partner-lead-card service-leads-card">
         <h1>Service Leads</h1>
         <p>Start Today's Leads: only selected-date primary pickup leads are shown.</p>

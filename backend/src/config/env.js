@@ -11,6 +11,9 @@ const dotenvResult = dotenv.config({ path: envFilePath });
 const envFromFile = dotenvResult.parsed || {};
 
 function otpEnv(key, fallback = "") {
+  if (process.env.NODE_ENV === "test" && Object.prototype.hasOwnProperty.call(process.env, key)) {
+    return process.env[key];
+  }
   if (Object.prototype.hasOwnProperty.call(envFromFile, key)) {
     return envFromFile[key];
   }

@@ -48,5 +48,17 @@ smoke-result.*
 test-results/
 frontend/test-results/
 
+# Test source files
+**/test/
+**/tests/
+**/*.test.js
+**/*.test.mjs
+**/*.test.ts
+**/*.test.tsx
+**/*.spec.js
+**/*.spec.mjs
+**/*.spec.ts
+**/*.spec.tsx
+
 # Frontend build output copied into backend for unified serving
 backend/public/

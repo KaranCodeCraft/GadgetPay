@@ -6,9 +6,12 @@ import {
   claimPartnerLead,
   completePartnerLead,
   getPartnerLead,
+  sendPartnerLeadCustomerOtp,
   submitPartnerOnsiteValidation,
+  submitPartnerPaymentProofMetadata,
   updatePartnerLeadCallStatus,
   updatePartnerLeadStatus,
+  verifyPartnerLeadCustomerOtp,
   type PartnerLead,
 } from "../../../lib/api/gadgetpe-client";
 
@@ -19,6 +22,7 @@ export const Route = createFileRoute("/service-Leads/transaction/")({
 const PARTNER_TOKEN_KEY = "gadgetpe_partner_access_token";
 const LEGACY_PARTNER_TOKEN_KEY = "gadgetpe_access_token";
 const REQUIRED_VALIDATION_PHOTO_COUNT = 6;
+const isCustomerOtpBypassEnabled = import.meta.env.DEV;
 
 function getPartnerToken() {
   if (typeof window === "undefined") return null;
@@ -53,6 +57,20 @@ type ValidationPhotoSlot = {
   type: string;
   previewUrl: string;
 };
+
+type ObservedIssueRow = {
+  id: string;
+  description: string;
+  deductionPercent: number;
+};
+
+function createObservedIssueRow(): ObservedIssueRow {
+  return {
+    id: `issue-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    description: "",
+    deductionPercent: 1,
+  };
+}
 
 function formatFieldLabel(path: string) {
   return path
@@ -105,9 +123,8 @@ function ServiceLeadTransactionPage() {
   const [lead, setLead] = useState<PartnerLead | null>(null);
   const [callDone, setCallDone] = useState(false);
   const [validationResult, setValidationResult] = useState<"PASS" | "FAIL" | "NEEDS_REWORK">("PASS");
-  const [observedIssues, setObservedIssues] = useState("");
+  const [observedIssueRows, setObservedIssueRows] = useState<ObservedIssueRow[]>(() => [createObservedIssueRow()]);
   const [validationNotes, setValidationNotes] = useState("");
-  const [revisedQuote, setRevisedQuote] = useState("");
   const [completionRemarks, setCompletionRemarks] = useState("");
   const [finishing, setFinishing] = useState(false);
   const [rejecting, setRejecting] = useState(false);
@@ -117,6 +134,16 @@ function ServiceLeadTransactionPage() {
   const [validationPhotos, setValidationPhotos] = useState<ValidationPhotoSlot[]>([]);
   const [showRejectConfirm, setShowRejectConfirm] = useState(false);
   const [rejectConfirmChecked, setRejectConfirmChecked] = useState(false);
+  const [customerOtp, setCustomerOtp] = useState("");
+  const [customerOtpSent, setCustomerOtpSent] = useState(false);
+  const [customerOtpVerified, setCustomerOtpVerified] = useState(false);
+  const [customerOtpLoading, setCustomerOtpLoading] = useState(false);
+  const [customerOtpDevCode, setCustomerOtpDevCode] = useState<string | null>(null);
+  const [paymentFile, setPaymentFile] = useState<File | null>(null);
+  const [paymentMode, setPaymentMode] = useState<"UPI" | "BANK_TRANSFER" | "CASH" | "OTHER">("UPI");
+  const [paymentTransactionRef, setPaymentTransactionRef] = useState("");
+  const [paymentNotes, setPaymentNotes] = useState("");
+  const [paymentSaving, setPaymentSaving] = useState(false);
 
   const loadLead = async () => {
     const activeRole = getActiveRole();
@@ -146,6 +173,19 @@ function ServiceLeadTransactionPage() {
 
   useEffect(() => {
     void loadLead();
+  }, [search.leadId]);
+
+  useEffect(() => {
+    setCustomerOtp("");
+    setCustomerOtpSent(false);
+    setCustomerOtpVerified(false);
+    setCustomerOtpLoading(false);
+    setCustomerOtpDevCode(null);
+    setPaymentFile(null);
+    setPaymentMode("UPI");
+    setPaymentTransactionRef("");
+    setPaymentNotes("");
+    setPaymentSaving(false);
   }, [search.leadId]);
 
   const updateWorkflow = async (nextStatus: "IN_PROGRESS" | "COMPLETED" | "REJECTED") => {
@@ -202,6 +242,11 @@ function ServiceLeadTransactionPage() {
     if (!lead?.deviceDetails) return [] as ValidationRow[];
     return flattenDeviceDetails(lead.deviceDetails);
   }, [lead?.deviceDetails]);
+
+  const listedPrice = lead?.quote?.sellingPrice ?? lead?.selectedModel.listedPrice ?? 0;
+  const totalDeductionPercent = observedIssueRows.reduce((sum, row) => sum + row.deductionPercent, 0);
+  const totalDeductionAmount = Math.round((listedPrice * totalDeductionPercent) / 100);
+  const finalAssessedPrice = Math.max(0, listedPrice - totalDeductionAmount);
 
   useEffect(() => {
     if (!validationRows.length) {
@@ -293,15 +338,27 @@ function ServiceLeadTransactionPage() {
       })),
     });
 
+    const observedIssues = observedIssueRows
+      .map((row) => ({
+        description: row.description.trim(),
+        deductionPercent: row.deductionPercent,
+      }))
+      .filter((row) => row.description);
+
+    checklist.__deductions = JSON.stringify({
+      listedPrice,
+      totalDeductionPercent,
+      totalDeductionAmount,
+      finalAssessedPrice,
+      issues: observedIssues,
+    });
+
     try {
       const result = await submitPartnerOnsiteValidation(token, lead.id, {
         result: validationResult,
         checklist,
-        observedIssues: observedIssues
-          .split("\n")
-          .map((line) => line.trim())
-          .filter(Boolean),
-        revisedQuote: revisedQuote.trim() ? Number(revisedQuote) : undefined,
+        observedIssues: observedIssues.map((row) => `${row.description} (Deduction: ${row.deductionPercent}%)`),
+        revisedQuote: finalAssessedPrice,
         notes: validationNotes.trim() || undefined,
         photos: uploadedPhotos.map((photo) => photo.file),
       });
@@ -323,7 +380,7 @@ function ServiceLeadTransactionPage() {
     setFinishing(true);
     try {
       const result = await completePartnerLead(token, lead.id, {
-        finalAmount: lead.paymentProof?.amountCollected ?? lead.quote?.sellingPrice ?? 0,
+        finalAmount: lead.onsiteValidation?.revisedQuote ?? lead.paymentProof?.amountCollected ?? finalAssessedPrice,
         handoverChecklist: {
           callDone,
           validationSaved: Boolean(lead.onsiteValidation),
@@ -399,11 +456,14 @@ function ServiceLeadTransactionPage() {
 
   const uploadedPhotoCount = validationPhotos.length;
 
-  const canSchedulePickup = lead?.status === "ACCEPTED" || lead?.status === "IN_PROGRESS";
+  const canSchedulePickup = lead?.status === "ACCEPTED";
+  const showActivePickupAlert = lead?.status === "IN_PROGRESS";
   const canValidate = lead?.status === "ACCEPTED" || lead?.status === "IN_PROGRESS";
-  const canSaveValidation = canValidate && uploadedPhotoCount >= REQUIRED_VALIDATION_PHOTO_COUNT;
-  const canPay = Boolean(lead?.onsiteValidation) && lead?.onsiteValidation?.result === "PASS";
-  const canFinish = Boolean(lead?.paymentProof) && Boolean(lead?.onsiteValidation) && lead?.status === "IN_PROGRESS";
+  const customerPhone = lead?.seller.phone || lead?.pickupSchedule?.callingPhoneNumber || "";
+  const canRequestCustomerOtp = Boolean(lead && canValidate && customerPhone);
+  const canSaveValidation = customerOtpVerified && canValidate && uploadedPhotoCount >= REQUIRED_VALIDATION_PHOTO_COUNT;
+  const canPay = customerOtpVerified && Boolean(lead?.onsiteValidation) && lead?.onsiteValidation?.result === "PASS";
+  const canFinish = customerOtpVerified && Boolean(lead?.paymentProof) && Boolean(lead?.onsiteValidation) && lead?.status === "IN_PROGRESS";
 
   useEffect(() => {
     if (lead?.completionEvent?.handoverChecklist && typeof lead.completionEvent.handoverChecklist === "object") {
@@ -429,16 +489,103 @@ function ServiceLeadTransactionPage() {
     }
   };
 
+  const handleSendCustomerOtp = async () => {
+    if (!lead) return;
+    const token = getPartnerToken();
+    if (!token) {
+      forcePartnerLoginRedirect();
+      return;
+    }
+
+    setCustomerOtpLoading(true);
+    try {
+      const result = await sendPartnerLeadCustomerOtp(token, lead.id);
+      setCustomerOtpSent(true);
+      setCustomerOtpDevCode(result.devOtp || null);
+      toast.success(`OTP sent to ${result.phone}.`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Unable to send customer OTP.");
+    } finally {
+      setCustomerOtpLoading(false);
+    }
+  };
+
+  const handleVerifyCustomerOtp = async () => {
+    if (!lead) return;
+    const token = getPartnerToken();
+    if (!token) {
+      forcePartnerLoginRedirect();
+      return;
+    }
+
+    setCustomerOtpLoading(true);
+    try {
+      await verifyPartnerLeadCustomerOtp(token, lead.id, customerOtp.trim());
+      setCustomerOtpVerified(true);
+      setCustomerOtpDevCode(null);
+      toast.success("Customer OTP verified. Gadget information unlocked.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Unable to verify customer OTP.");
+    } finally {
+      setCustomerOtpLoading(false);
+    }
+  };
+
+  const handleBypassCustomerOtp = () => {
+    if (!canRequestCustomerOtp) {
+      toast.error("Customer OTP can be bypassed only after this lead is ready for validation.");
+      return;
+    }
+
+    setCustomerOtp("6767");
+    setCustomerOtpSent(true);
+    setCustomerOtpVerified(true);
+    setCustomerOtpDevCode(null);
+    toast.success("Customer OTP bypassed. Gadget information unlocked.");
+  };
+
+  const handleSubmitPaymentProof = async () => {
+    if (!lead || !paymentFile) return;
+    const token = getPartnerToken();
+    if (!token) {
+      forcePartnerLoginRedirect();
+      return;
+    }
+
+    setPaymentSaving(true);
+    try {
+      const result = await submitPartnerPaymentProofMetadata(token, lead.id, {
+        file: paymentFile,
+        amountCollected: lead.onsiteValidation?.revisedQuote ?? finalAssessedPrice,
+        paymentMode,
+        transactionRef: paymentTransactionRef.trim() || undefined,
+        notes: paymentNotes.trim() || undefined,
+      });
+      setLead(result.lead);
+      setPaymentFile(null);
+      toast.success("Payment screenshot uploaded. You can finish this transaction now.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Unable to upload payment screenshot.");
+    } finally {
+      setPaymentSaving(false);
+    }
+  };
+
   return (
-    <main className="partner-simple-page">
+    <main className="partner-simple-page service-lead-transaction-page">
+      <div className="partner-subpage-topbar">
+        <Link to="/partner-page" className="partner-subpage-hamburger" aria-label="Open partner navigation">
+          ☰
+        </Link>
+        <Link to="/partner-page" className="partner-subpage-logo" aria-label="Go to partner dashboard">
+          <img src="/logo.png" alt="GadgetPe" />
+        </Link>
+      </div>
       <section className="partner-simple-card partner-lead-card">
         <h1>Service Lead Transaction</h1>
-        <p>Manage pickup workflow for scheduled lead</p>
 
         <div className="lead-transaction-head">
           <div>
-            <h2>{lead?.selectedModel.modelName || "No transaction selected"}</h2>
-            <p>{lead ? `${lead.seller.name || "Seller"} | ${lead.seller.phone || "-"} | ${lead.status}` : "Open this page from a live service lead to continue."}</p>
             <section className="lead-booking-box lead-inline-timebox">
               <h3>Listed Pickup Time</h3>
               <p>{lead?.pickupSchedule?.primaryDate?.slice(0, 10) || "-"} | {lead?.pickupSchedule?.primaryTime || "-"}</p>
@@ -448,17 +595,25 @@ function ServiceLeadTransactionPage() {
           <div className="lead-price-flash">Rs. {formatInr(lead?.quote?.sellingPrice ?? 0)}</div>
         </div>
 
-        <section className="lead-booking-box">
-          <h3>1. Schedule Pickup</h3>
-          <div className="lead-decision-row">
-            <button type="button" className="lead-book-btn" onClick={() => { void ensureInProgress(); }} disabled={!canSchedulePickup}>Start Pickup</button>
-            <span className="lead-hint">Allowed for ACCEPTED leads only.</span>
-          </div>
-        </section>
+        {showActivePickupAlert ? (
+          <section className="lead-booking-box partner-active-pickup-alert">
+            <h3>Active Pickup Alert</h3>
+            <p>You have scheduled pickup: {lead?.seller.name || "Customer"} | {lead?.selectedModel.modelName || "Selected device"}</p>
+            <p>Elapsed: {elapsedLabel} | Status: {lead?.status}</p>
+          </section>
+        ) : (
+          <section className="lead-booking-box">
+            <h3>1. Schedule Pickup</h3>
+            <div className="lead-decision-row">
+              <button type="button" className="lead-book-btn" onClick={() => { void ensureInProgress(); }} disabled={!canSchedulePickup}>Start Pickup</button>
+              <span className="lead-hint">Allowed for ACCEPTED leads only.</span>
+            </div>
+          </section>
+        )}
 
         <section className="lead-booking-box">
           <h3>2. Call Customer</h3>
-          <div className="lead-decision-row">
+          <div className="lead-decision-row lead-call-action-row">
             {lead?.seller.phone ? <a className="lead-view-btn lead-view-link" href={`tel:${lead.seller.phone}`}>Call {lead.seller.phone}</a> : <span className="lead-view-disabled">Customer number unavailable</span>}
             <button type="button" className="lead-book-btn" onClick={() => { void handleMarkCalled(); }} disabled={!lead?.seller.phone}>Mark Called</button>
             <span className="lead-hint">Attempts: {lead?.callAttemptCount ?? 0}{lead?.lastCalledAt ? ` | Last called: ${new Date(lead.lastCalledAt).toLocaleString("en-IN")}` : ""}</span>
@@ -468,8 +623,44 @@ function ServiceLeadTransactionPage() {
         <section className="lead-demo-panel">
           <div className="lead-accordion-body">
             <h3>3. Validate Gadget Information</h3>
-            <p className="lead-hint">User submitted details are prefilled. Verify and submit final onsite validation.</p>
+            <p className="lead-hint">Verify customer OTP before opening submitted gadget details and final workflow actions.</p>
 
+            <div className="lead-customer-otp-box">
+              <div className="lead-booking-calendar lead-field-stack">
+                <label htmlFor="customer-phone">Customer Number</label>
+                <input id="customer-phone" type="tel" value={customerPhone} readOnly placeholder="Customer number unavailable" />
+              </div>
+              <div className="lead-decision-row lead-call-action-row">
+                <button type="button" className="lead-view-btn" onClick={() => { void handleSendCustomerOtp(); }} disabled={!canRequestCustomerOtp || customerOtpLoading || customerOtpVerified}>
+                  {customerOtpSent ? "Resend OTP" : "Send OTP"}
+                </button>
+                <input
+                  type="text"
+                  className="lead-otp-input"
+                  value={customerOtp}
+                  onChange={(event) => setCustomerOtp(event.target.value.replace(/\D/g, "").slice(0, 6))}
+                  placeholder="Enter OTP"
+                  disabled={!customerOtpSent || customerOtpVerified}
+                />
+                <button type="button" className="lead-book-btn" onClick={() => { void handleVerifyCustomerOtp(); }} disabled={!customerOtpSent || customerOtpVerified || customerOtp.length < 4 || customerOtpLoading}>
+                  {customerOtpVerified ? "Verified" : "Verify OTP"}
+                </button>
+                {isCustomerOtpBypassEnabled && !customerOtpVerified ? (
+                  <button
+                    type="button"
+                    className="lead-otp-bypass-link"
+                    onClick={handleBypassCustomerOtp}
+                    disabled={!canRequestCustomerOtp || customerOtpLoading}
+                  >
+                    Bypass OTP
+                  </button>
+                ) : null}
+                {customerOtpDevCode ? <span className="lead-hint">Dev OTP: {customerOtpDevCode}</span> : null}
+              </div>
+            </div>
+
+            {customerOtpVerified ? (
+              <>
             <div className="lead-device-table-wrap">
               <table className="lead-device-table lead-validation-table">
                 <thead>
@@ -545,6 +736,59 @@ function ServiceLeadTransactionPage() {
               </table>
             </div>
 
+            <div className="lead-observed-issues-box">
+              <div className="lead-photo-upload-head">
+                <strong>Observed Issues</strong>
+                <span className="lead-hint">Deduction % is strict from 1 to 5 per issue.</span>
+              </div>
+              <div className="lead-observed-issue-list">
+                {observedIssueRows.map((row, index) => (
+                  <div className="lead-observed-issue-row" key={row.id}>
+                    <div className="lead-booking-calendar lead-field-stack">
+                      <label htmlFor={`observed-issue-${row.id}`}>Issue {index + 1}</label>
+                      <input
+                        id={`observed-issue-${row.id}`}
+                        type="text"
+                        value={row.description}
+                        onChange={(event) => {
+                          const description = event.target.value;
+                          setObservedIssueRows((prev) => prev.map((item) => item.id === row.id ? { ...item, description } : item));
+                        }}
+                        placeholder="Enter observed issue"
+                      />
+                    </div>
+                    <div className="lead-booking-calendar lead-field-stack lead-deduction-field">
+                      <label htmlFor={`deduction-${row.id}`}>Deduction %</label>
+                      <select
+                        id={`deduction-${row.id}`}
+                        className="lead-select"
+                        value={row.deductionPercent}
+                        onChange={(event) => {
+                          const deductionPercent = Number(event.target.value);
+                          setObservedIssueRows((prev) => prev.map((item) => item.id === row.id ? { ...item, deductionPercent } : item));
+                        }}
+                      >
+                        {[1, 2, 3, 4, 5].map((value) => <option key={value} value={value}>{value}%</option>)}
+                      </select>
+                    </div>
+                    {observedIssueRows.length > 1 ? (
+                      <button
+                        type="button"
+                        className="lead-view-btn lead-remove-issue-btn"
+                        onClick={() => setObservedIssueRows((prev) => prev.filter((item) => item.id !== row.id))}
+                      >
+                        Remove
+                      </button>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+              <div className="lead-decision-row">
+                <button type="button" className="lead-view-btn" onClick={() => setObservedIssueRows((prev) => [...prev, createObservedIssueRow()])}>Add More</button>
+                <span className="lead-hint">Total deduction: {totalDeductionPercent}% | Rs. {formatInr(totalDeductionAmount)}</span>
+              </div>
+            </div>
+
             <div className="lead-photo-upload-section">
               <div className="lead-photo-upload-head">
                 <strong>Device Photos</strong>
@@ -592,27 +836,23 @@ function ServiceLeadTransactionPage() {
             </div>
 
             <div className="lead-booking-calendar lead-field-stack">
+              <label htmlFor="revised-quote">Final Assessed Price</label>
+              <input id="revised-quote" type="number" value={finalAssessedPrice} readOnly />
+              <span className="lead-hint">Listed price Rs. {formatInr(listedPrice)} minus {totalDeductionPercent}% deduction.</span>
+            </div>
+
+            <div className="lead-booking-calendar lead-field-stack">
+              <label htmlFor="validation-notes">Validation Notes</label>
+              <textarea id="validation-notes" value={validationNotes} onChange={(event) => setValidationNotes(event.target.value)} className="lead-textarea" />
+            </div>
+
+            <div className="lead-booking-calendar lead-field-stack">
               <label htmlFor="validation-result">Validation Result</label>
               <select id="validation-result" className="lead-select" value={validationResult} onChange={(event) => setValidationResult(event.target.value as "PASS" | "FAIL" | "NEEDS_REWORK")}> 
                 <option value="PASS">PASS</option>
                 <option value="FAIL">FAIL</option>
                 <option value="NEEDS_REWORK">NEEDS_REWORK</option>
               </select>
-            </div>
-
-            <div className="lead-booking-calendar lead-field-stack">
-              <label htmlFor="revised-quote">Final Assessed Price</label>
-              <input id="revised-quote" type="number" value={revisedQuote} onChange={(event) => setRevisedQuote(event.target.value)} placeholder="Enter revised quote (optional)" />
-            </div>
-
-            <div className="lead-booking-calendar lead-field-stack">
-              <label htmlFor="observed-issues">Observed Issues (one per line)</label>
-              <textarea id="observed-issues" value={observedIssues} onChange={(event) => setObservedIssues(event.target.value)} className="lead-textarea" />
-            </div>
-
-            <div className="lead-booking-calendar lead-field-stack">
-              <label htmlFor="validation-notes">Validation Notes</label>
-              <textarea id="validation-notes" value={validationNotes} onChange={(event) => setValidationNotes(event.target.value)} className="lead-textarea" />
             </div>
 
             <div className="lead-decision-row">
@@ -630,50 +870,104 @@ function ServiceLeadTransactionPage() {
               </button>
               {!canSaveValidation ? <span className="lead-hint">Upload {REQUIRED_VALIDATION_PHOTO_COUNT} photos to enable Save Validation.</span> : null}
             </div>
+              </>
+            ) : null}
           </div>
         </section>
 
-        <section className="lead-booking-box">
-          <h3>4. Pay To User</h3>
-          <div className="lead-decision-row">
-            <button
-              type="button"
-              className="lead-book-btn"
-              disabled={!canPay}
-              onClick={() => {
-                if (!lead) return;
-                void navigate({ to: "/service-Leads/transaction/payment", search: { leadId: lead.id } });
-              }}
-            >
-              Upload Payment Screenshot
-            </button>
-            {lead?.paymentProof ? <span className="lead-hint">Payment proof metadata saved.</span> : <span className="lead-hint">Submit validation first.</span>}
-          </div>
-        </section>
+        {customerOtpVerified ? (
+          <>
+            <section className="lead-booking-box">
+              <h3>4. Pay To User</h3>
+              <div className="lead-booking-calendar lead-field-stack">
+                <label htmlFor="payment-proof-file">Payment Screenshot</label>
+                <input
+                  id="payment-proof-file"
+                  type="file"
+                  accept="image/*,.pdf"
+                  onChange={(event) => setPaymentFile(event.target.files?.[0] ?? null)}
+                  disabled={!canPay || paymentSaving}
+                />
+                {paymentFile ? <span className="lead-hint">Selected: {paymentFile.name}</span> : null}
+              </div>
 
-        <section className="lead-booking-box">
-          <h3>5. Finish</h3>
-          <div className="lead-booking-calendar lead-field-stack">
-            <label htmlFor="completion-remarks">Completion remarks</label>
-            <textarea id="completion-remarks" value={completionRemarks} onChange={(event) => setCompletionRemarks(event.target.value)} className="lead-textarea" />
-          </div>
-          <div className="lead-decision-row">
-            <button type="button" className="lead-book-btn" onClick={() => { void handleFinish(); }} disabled={!canFinish || finishing}>{finishing ? "Finishing..." : "Finish"}</button>
-          </div>
-        </section>
+              <div className="lead-booking-calendar lead-field-stack">
+                <label htmlFor="payment-mode">Payment Mode</label>
+                <select
+                  id="payment-mode"
+                  className="lead-select"
+                  value={paymentMode}
+                  onChange={(event) => setPaymentMode(event.target.value as "UPI" | "BANK_TRANSFER" | "CASH" | "OTHER")}
+                  disabled={!canPay || paymentSaving}
+                >
+                  <option value="UPI">UPI</option>
+                  <option value="BANK_TRANSFER">BANK_TRANSFER</option>
+                  <option value="CASH">CASH</option>
+                  <option value="OTHER">OTHER</option>
+                </select>
+              </div>
+
+              <div className="lead-booking-calendar lead-field-stack">
+                <label htmlFor="payment-transaction-ref">Transaction Reference</label>
+                <input
+                  id="payment-transaction-ref"
+                  type="text"
+                  value={paymentTransactionRef}
+                  onChange={(event) => setPaymentTransactionRef(event.target.value)}
+                  disabled={!canPay || paymentSaving}
+                />
+              </div>
+
+              <div className="lead-booking-calendar lead-field-stack">
+                <label htmlFor="payment-notes">Payment Notes</label>
+                <textarea
+                  id="payment-notes"
+                  value={paymentNotes}
+                  onChange={(event) => setPaymentNotes(event.target.value)}
+                  className="lead-textarea"
+                  disabled={!canPay || paymentSaving}
+                />
+              </div>
+
+              <div className="lead-decision-row">
+                <button
+                  type="button"
+                  className="lead-book-btn"
+                  disabled={!canPay || !paymentFile || paymentSaving}
+                  onClick={() => { void handleSubmitPaymentProof(); }}
+                >
+                  {paymentSaving ? "Uploading..." : "Upload Payment Screenshot"}
+                </button>
+                {lead?.paymentProof ? <span className="lead-hint">Payment proof metadata saved.</span> : <span className="lead-hint">Submit validation first.</span>}
+              </div>
+            </section>
+
+            <section className="lead-booking-box">
+              <h3>5. Finish</h3>
+              <div className="lead-booking-calendar lead-field-stack">
+                <label htmlFor="completion-remarks">Completion remarks</label>
+                <textarea id="completion-remarks" value={completionRemarks} onChange={(event) => setCompletionRemarks(event.target.value)} className="lead-textarea" />
+              </div>
+              <div className="lead-decision-row">
+                <button type="button" className="lead-book-btn" onClick={() => { void handleFinish(); }} disabled={!canFinish || finishing}>{finishing ? "Finishing..." : "Finish"}</button>
+              </div>
+            </section>
+          </>
+        ) : null}
 
         {showSuccess && (
           <div className="lead-confirm-backdrop" role="dialog" aria-modal="true">
-            <div className="lead-confirm-card">
+            <div className="lead-confirm-card lead-deal-closed-card">
               <div className="success-burst" aria-hidden="true">
                 <span className="ring r1" />
                 <span className="ring r2" />
                 <span className="ring r3" />
               </div>
-              <h3>Congratulations on your sale.</h3>
-              <p>Lead workflow is completed successfully.</p>
+              <div className="lead-confetti" aria-hidden="true"><span /><span /><span /><span /><span /></div>
+              <h3>Deal Closed</h3>
+              <p>Invoice details are now available to the user.</p>
               <div className="lead-decision-row lead-decision-row-modal">
-                <button type="button" className="lead-book-btn" onClick={() => { setShowSuccess(false); void navigate({ to: "/service-Leads" }); }}>Back to Service Leads</button>
+                <button type="button" className="lead-book-btn" onClick={() => { setShowSuccess(false); void navigate({ to: "/partner-page" }); }}>OK</button>
               </div>
             </div>
           </div>

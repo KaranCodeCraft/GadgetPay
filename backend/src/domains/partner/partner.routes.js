@@ -9,6 +9,7 @@ import { forbidden } from "../../shared/http/errors.js";
 import { notFound } from "../../shared/http/errors.js";
 import { requireAuth, requireRole } from "../../shared/middleware/auth.js";
 import { success } from "../../shared/http/response.js";
+import { sendUserOtp, verifyUserOtp } from "../auth/auth.service.js";
 import {
   appendPartnerLeadDispositionEvent,
   closePartnerLeadUnlockOrder,
@@ -27,6 +28,7 @@ import {
   getPartnerById,
   claimPartnerLead,
   getPartnerLeadById,
+  listPartnerLeadsForPartner,
   listPartnerLeadsForScope,
   listPartnerCoinLedger,
   listPartnerCoinRechargeRequests,
@@ -35,6 +37,7 @@ import {
   listPartnerActivePickups,
   markPartnerLeadCallStatus,
   markPartnerLeadUnlockScreenshotSent,
+  releasePartnerLeadToBucket,
   setPartnerLeadPickupStartedAt,
   savePartnerLeadCompletionEvent,
   savePartnerLeadOnsiteValidation,
@@ -116,6 +119,10 @@ const callStatusSchema = z.object({
   note: z.string().trim().max(300).optional(),
 });
 
+const customerOtpVerifySchema = z.object({
+  otp: z.string().regex(/^\d{4,6}$/),
+});
+
 const activePickupQuerySchema = z.object({
   pincode: z.string().regex(/^\d{6}$/).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional().default(20),
@@ -162,8 +169,6 @@ function maskLeadForPartnerList(lead, partnerId) {
           callingPhoneNumber: null,
           addressLine: null,
           landmark: null,
-          primaryDate: null,
-          primaryTime: null,
           alternateDate: null,
           alternateTime: null,
         }
@@ -191,7 +196,7 @@ function hasPendingPaymentForCompletedLead(lead) {
 function isAllowedTransition(fromStatus, toStatus) {
   const allowed = {
     CLAIMED: ["ACCEPTED"],
-    ACCEPTED: ["IN_PROGRESS", "REJECTED", "CANCELLED"],
+    ACCEPTED: ["AVAILABLE", "IN_PROGRESS", "REJECTED", "CANCELLED"],
     IN_PROGRESS: ["COMPLETED", "REJECTED", "CANCELLED"],
   };
   return Array.isArray(allowed[fromStatus]) && allowed[fromStatus].includes(toStatus);
@@ -409,6 +414,25 @@ partnerRouter.get("/service-leads", requireAuth, requireRole("partner"), (req, r
       timeSlot: query.timeSlot,
       limit: query.limit,
     });
+    res.json(success({ rows, count: rows.length }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+partnerRouter.get("/my-leads", requireAuth, requireRole("partner"), (req, res, next) => {
+  try {
+    const query = z.object({
+      status: z.enum(["ACCEPTED", "IN_PROGRESS", "COMPLETED", "REJECTED"]).optional(),
+      limit: z.coerce.number().int().min(1).max(100).optional().default(50),
+    }).parse(req.query);
+
+    const rows = listPartnerLeadsForPartner({
+      partnerId: req.auth.sub,
+      status: query.status,
+      limit: query.limit,
+    });
+
     res.json(success({ rows, count: rows.length }));
   } catch (err) {
     next(err);
@@ -643,13 +667,16 @@ partnerRouter.patch("/leads/:leadId/status", requireAuth, requireRole("partner")
     }
 
     const now = nowIso();
-    const lead = updatePartnerLeadWorkflowStatus({
-      id: existing.id,
-      partnerId: req.auth.sub,
-      status: input.status,
-      rejectionReason: input.reason,
-      updatedAt: now,
-    });
+    const releasesLeadToBucket = (existing.status === "ACCEPTED" && input.status === "CANCELLED") || input.status === "REJECTED";
+    const lead = releasesLeadToBucket
+      ? releasePartnerLeadToBucket({ id: existing.id, partnerId: req.auth.sub, updatedAt: now })
+      : updatePartnerLeadWorkflowStatus({
+          id: existing.id,
+          partnerId: req.auth.sub,
+          status: input.status,
+          rejectionReason: input.reason,
+          updatedAt: now,
+        });
 
     let finalLead = lead;
     if (lead && input.status === "IN_PROGRESS") {
@@ -666,16 +693,16 @@ partnerRouter.patch("/leads/:leadId/status", requireAuth, requireRole("partner")
     }
 
     if (finalLead) {
-      const dispositionKey = toDispositionKey(finalLead.status);
+      const dispositionKey = input.status === "REJECTED" ? "REJECTED" : releasesLeadToBucket ? "CANCELLED" : toDispositionKey(finalLead.status);
       appendPartnerLeadDispositionEvent({
         id: crypto.randomUUID(),
         leadId: finalLead.id,
         userSellFlowId: finalLead.userSellFlowId,
-        partnerId: finalLead.partnerId,
+        partnerId: releasesLeadToBucket ? req.auth.sub : finalLead.partnerId,
         fromStatus: existing.status,
         toStatus: finalLead.status,
         dispositionKey,
-        note: input.reason || null,
+        note: input.reason || (input.status === "REJECTED" ? "Partner rejected and released lead" : releasesLeadToBucket ? "Partner cancelled accepted lead" : null),
         actorRole: "partner",
         actorId: req.auth.sub,
         createdAt: now,
@@ -692,11 +719,11 @@ partnerRouter.patch("/leads/:leadId/status", requireAuth, requireRole("partner")
           fromStatus: existing.status,
           toStatus: finalLead.status,
           dispositionKey,
-          partnerId: finalLead.partnerId,
+          partnerId: releasesLeadToBucket ? req.auth.sub : finalLead.partnerId,
           pincode: finalLead.pincode,
           actorRole: "partner",
           actorId: req.auth.sub,
-          note: input.reason || null,
+          note: input.reason || (input.status === "REJECTED" ? "Partner rejected and released lead" : releasesLeadToBucket ? "Partner cancelled accepted lead" : null),
         }),
         occurredAt: now,
       });
@@ -732,7 +759,6 @@ partnerRouter.patch("/leads/:leadId/call-status", requireAuth, requireRole("part
       calledAt: now,
       updatedAt: now,
     });
-
     appendPartnerLeadDispositionEvent({
       id: crypto.randomUUID(),
       leadId: existing.id,
@@ -768,6 +794,60 @@ partnerRouter.patch("/leads/:leadId/call-status", requireAuth, requireRole("part
     });
 
     res.json(success({ lead }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+partnerRouter.post("/leads/:leadId/customer-otp/send", requireAuth, requireRole("partner"), async (req, res, next) => {
+  try {
+    const lead = getPartnerLeadById(req.params.leadId);
+    assertPartnerCanAccessLead(lead, req);
+
+    if (!lead.partnerId || lead.partnerId !== req.auth.sub) {
+      throw forbidden("Only the assigned partner can verify customer OTP for this lead.");
+    }
+    if (!["ACCEPTED", "IN_PROGRESS"].includes(lead.status)) {
+      throw badRequest("Customer OTP is available only for active service leads.");
+    }
+
+    const phone = lead.seller?.phone || lead.pickupSchedule?.callingPhoneNumber;
+    if (!phone || !/^\d{10}$/.test(phone)) {
+      throw badRequest("Customer phone number is unavailable for this lead.");
+    }
+
+    const result = await sendUserOtp(phone);
+    res.json(success({
+      phone: result.phone,
+      otpTtlSeconds: result.otpTtlSeconds,
+      resendAfterSeconds: result.resendAfterSeconds,
+      devOtp: result.devOtp,
+    }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+partnerRouter.post("/leads/:leadId/customer-otp/verify", requireAuth, requireRole("partner"), async (req, res, next) => {
+  try {
+    const input = customerOtpVerifySchema.parse(req.body);
+    const lead = getPartnerLeadById(req.params.leadId);
+    assertPartnerCanAccessLead(lead, req);
+
+    if (!lead.partnerId || lead.partnerId !== req.auth.sub) {
+      throw forbidden("Only the assigned partner can verify customer OTP for this lead.");
+    }
+    if (!["ACCEPTED", "IN_PROGRESS"].includes(lead.status)) {
+      throw badRequest("Customer OTP is available only for active service leads.");
+    }
+
+    const phone = lead.seller?.phone || lead.pickupSchedule?.callingPhoneNumber;
+    if (!phone || !/^\d{10}$/.test(phone)) {
+      throw badRequest("Customer phone number is unavailable for this lead.");
+    }
+
+    await verifyUserOtp({ phone, otp: input.otp });
+    res.json(success({ phone, verified: true }));
   } catch (err) {
     next(err);
   }
@@ -1089,11 +1169,35 @@ partnerRouter.post("/leads/:leadId/completion", requireAuth, requireRole("partne
     }
 
     const now = nowIso();
+    const partner = getPartnerById(req.auth.sub);
+    const invoice = {
+      id: `invoice-${existing.id}`,
+      leadId: existing.id,
+      userSellFlowId: existing.userSellFlowId,
+      status: "DEAL_CLOSED",
+      modelName: existing.selectedModel?.modelName || null,
+      listedPrice: existing.quote?.sellingPrice ?? existing.selectedModel?.listedPrice ?? 0,
+      finalAmount: input.finalAmount,
+      deductions: existing.onsiteValidation?.checklist?.__deductions ? JSON.parse(existing.onsiteValidation.checklist.__deductions) : null,
+      payment: existing.paymentProof ? {
+        amountCollected: existing.paymentProof.amountCollected,
+        paymentMode: existing.paymentProof.paymentMode,
+        transactionRef: existing.paymentProof.transactionRef || null,
+        submittedAt: existing.paymentProof.submittedAt,
+      } : null,
+      partner: {
+        id: req.auth.sub,
+        name: partner?.name || "Partner",
+        phone: partner?.phone || req.auth.phone || null,
+      },
+      completedAt: now,
+    };
     const completionPayload = {
       completionCode: input.completionCode || null,
       handoverChecklist: input.handoverChecklist,
       finalAmount: input.finalAmount,
       remarks: input.remarks || null,
+      invoice,
       completedBy: req.auth.sub,
       completedAt: now,
     };

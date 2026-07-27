@@ -2,7 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import { activateRoleSession, getActiveRole } from "../lib/auth/role-session";
-import { ApiClientError, sendUserOtp, verifyUserOtp } from "../lib/api/gadgetpe-client";
+import { ApiClientError, sendUserOtp, userDevLogin, verifyUserOtp } from "../lib/api/gadgetpe-client";
 
 export const Route = createFileRoute("/user/login")({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -16,6 +16,7 @@ const USER_REFRESH_KEY = "gadgetpe_user_refresh_token";
 const USER_NAME_KEY = "gadgetpe_user_name";
 const USER_ID_KEY = "gadgetpe_user_id";
 const USER_POST_LOGIN_SELL_MODAL_FLAG_KEY = "gadgetpe_user_post_login_sell_modal";
+const isDevOtpBypassEnabled = import.meta.env.DEV;
 
 function getSafeRedirectPath(redirectTo: string | undefined): string | null {
   if (!redirectTo || !redirectTo.startsWith("/")) {
@@ -116,6 +117,36 @@ function UserLoginPage() {
     }
   };
 
+  const handleDevOtpBypass = async () => {
+    const trimmedPhone = phone.trim();
+    if (!/^\d{10}$/.test(trimmedPhone)) {
+      setError("Enter a valid 10-digit phone number.");
+      return;
+    }
+
+    setError(null);
+    setIsSendingOtp(true);
+    try {
+      const result = await userDevLogin(trimmedPhone, nameInput.trim() || undefined);
+      localStorage.setItem(USER_TOKEN_KEY, result.accessToken);
+      localStorage.setItem(USER_REFRESH_KEY, result.refreshToken);
+      localStorage.setItem(USER_NAME_KEY, result.user.name);
+      localStorage.setItem(USER_ID_KEY, result.user.id);
+      if (!safeRedirectTo) {
+        localStorage.setItem(USER_POST_LOGIN_SELL_MODAL_FLAG_KEY, "1");
+      }
+      activateRoleSession("user");
+      toast.success(`Dev login successful. Welcome, ${result.user.name}!`);
+      await navigate({ to: safeRedirectTo ?? "/user" });
+    } catch (apiError) {
+      const message = apiError instanceof ApiClientError ? apiError.message : "Failed to use dev OTP bypass.";
+      setError(message);
+      toast.error(message);
+    } finally {
+      setIsSendingOtp(false);
+    }
+  };
+
   return (
     <main className="user-seller-page">
       <div className="user-auth-overlay user-login-overlay user-login-route-overlay" role="dialog" aria-modal="true">
@@ -156,6 +187,16 @@ function UserLoginPage() {
                   {isSendingOtp ? "Sending..." : "Send OTP"}
                 </button>
               </div>
+              {isDevOtpBypassEnabled ? (
+                <button
+                  type="button"
+                  className="user-auth-bypass-link"
+                  onClick={() => void handleDevOtpBypass()}
+                  disabled={isSendingOtp}
+                >
+                  Use dev OTP bypass
+                </button>
+              ) : null}
             </form>
           )}
 

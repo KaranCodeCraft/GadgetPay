@@ -22,6 +22,7 @@ import {
   saveUserDeviceDetails,
   saveUserPickupSchedule,
   sendUserOtp,
+  userDevLogin,
   verifyUserOtp,
   type UserSellFlowDeviceDetails,
   type UserSellFlowQuote,
@@ -41,6 +42,7 @@ const USER_REFRESH_KEY = "gadgetpe_user_refresh_token";
 const USER_NAME_KEY = "gadgetpe_user_name";
 const USER_ID_KEY = "gadgetpe_user_id";
 const USER_SCOPE_KEY = "gadgetpe_user_scope";
+const isDevOtpBypassEnabled = import.meta.env.DEV;
 
 const timeSlots = [
   "11:00 AM - 12:00 PM",
@@ -200,6 +202,22 @@ function UserSellPhoneQuotePage() {
   const [whatsappAlerts, setWhatsappAlerts] = useState(true);
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
+
+  const applyVerifiedUserSession = (result: Awaited<ReturnType<typeof userDevLogin>> | Awaited<ReturnType<typeof verifyUserOtp>>, phone: string) => {
+    window.localStorage.setItem(USER_TOKEN_KEY, result.accessToken);
+    window.localStorage.setItem(USER_REFRESH_KEY, result.refreshToken);
+    window.localStorage.setItem(USER_NAME_KEY, result.user.name);
+    window.localStorage.setItem(USER_ID_KEY, result.user.id);
+    window.localStorage.setItem("gadgetpe_user_phone", result.user.phone);
+    activateRoleSession("user");
+    setVerifiedToken(result.accessToken);
+    setVerifiedUser(result.user);
+    setCallingPhoneNumber(phone);
+    if (!sellerName.trim()) {
+      setSellerName(result.user.name || "");
+    }
+    setIsPhoneVerified(true);
+  };
 
   const loadBackendQuotePreview = async (model: SelectedModel | null) => {
     const apiSelectedModel = getApiSelectedModel(model);
@@ -443,19 +461,7 @@ function UserSellPhoneQuotePage() {
     setIsQuoteVerifyingOtp(true);
     try {
       const result = await verifyUserOtp(phone, trimmedOtp, sellerName.trim() || undefined);
-      window.localStorage.setItem(USER_TOKEN_KEY, result.accessToken);
-      window.localStorage.setItem(USER_REFRESH_KEY, result.refreshToken);
-      window.localStorage.setItem(USER_NAME_KEY, result.user.name);
-      window.localStorage.setItem(USER_ID_KEY, result.user.id);
-      window.localStorage.setItem("gadgetpe_user_phone", result.user.phone);
-      activateRoleSession("user");
-      setVerifiedToken(result.accessToken);
-      setVerifiedUser(result.user);
-      setCallingPhoneNumber(phone);
-      if (!sellerName.trim()) {
-        setSellerName(result.user.name || "");
-      }
-      setIsPhoneVerified(true);
+      applyVerifiedUserSession(result, phone);
       void loadBackendQuotePreview(selectedModel);
       setAuthError(null);
     } catch (err) {
@@ -463,6 +469,30 @@ function UserSellPhoneQuotePage() {
       setAuthError(message);
     } finally {
       setIsQuoteVerifyingOtp(false);
+    }
+  };
+
+  const handleDevOtpBypass = async () => {
+    const phone = quoteAccessPhone.trim();
+    if (!/^\d{10}$/.test(phone)) {
+      setAuthError("Enter a valid 10-digit phone number.");
+      return;
+    }
+
+    setAuthError(null);
+    setIsQuoteSendingOtp(true);
+    try {
+      const result = await userDevLogin(phone, sellerName.trim() || undefined);
+      applyVerifiedUserSession(result, phone);
+      setQuoteOtpSent(false);
+      setQuoteAccessOtp("6767");
+      void loadBackendQuotePreview(selectedModel);
+      toast.success("Dev OTP bypass enabled.");
+    } catch (err) {
+      const message = err instanceof ApiClientError || err instanceof Error ? err.message : "Unable to use dev OTP bypass.";
+      setAuthError(message);
+    } finally {
+      setIsQuoteSendingOtp(false);
     }
   };
 
@@ -577,6 +607,16 @@ function UserSellPhoneQuotePage() {
                   </button>
                 )}
               </div>
+              {isDevOtpBypassEnabled ? (
+                <button
+                  type="button"
+                  className="user-auth-bypass-link"
+                  onClick={() => void handleDevOtpBypass()}
+                  disabled={isQuoteSendingOtp || isQuoteVerifyingOtp}
+                >
+                  Use dev OTP bypass
+                </button>
+              ) : null}
             </section>
           ) : (
             <>

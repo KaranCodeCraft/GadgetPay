@@ -284,6 +284,92 @@ export function adminDevLogin({ key, adminId }) {
   };
 }
 
+export function partnerDevLogin({ phone, name }) {
+  if (env.nodeEnv === "production") {
+    throw unauthorized("Partner dev login is disabled in production");
+  }
+
+  const partnerId = `partner-${phone}`;
+  const existingPartner = getPartnerById(partnerId);
+  const partner = {
+    id: partnerId,
+    phone,
+    name: name || existingPartner?.name || `Partner ${phone.slice(-4)}`,
+    createdAt: existingPartner?.createdAt || nowIso(),
+    updatedAt: nowIso(),
+  };
+
+  const persistedPartner = upsertPartner(partner);
+  const accessToken = issueAccessToken({
+    sub: partnerId,
+    role: "partner",
+    phone,
+  });
+
+  const refreshTokenId = crypto.randomUUID();
+  const refreshToken = issueRefreshToken({
+    sub: partnerId,
+    role: "partner",
+    tokenId: refreshTokenId,
+  });
+
+  saveRefreshToken({
+    tokenId: refreshTokenId,
+    subjectId: partnerId,
+    role: "partner",
+    createdAt: nowIso(),
+  });
+
+  return {
+    partner: persistedPartner,
+    accessToken,
+    refreshToken,
+  };
+}
+
+export function userDevLogin({ phone, name }) {
+  if (env.nodeEnv === "production") {
+    throw unauthorized("User dev login is disabled in production");
+  }
+
+  const userId = `user-${phone}`;
+  const existingUser = getUserByPhone(phone);
+  const user = {
+    id: existingUser?.id || userId,
+    phone,
+    name: name || existingUser?.name || `User ${phone.slice(-4)}`,
+    createdAt: existingUser?.createdAt || nowIso(),
+    updatedAt: nowIso(),
+  };
+
+  const persistedUser = upsertUser(user);
+  const accessToken = issueAccessToken({
+    sub: userId,
+    role: "user",
+    phone,
+  });
+
+  const refreshTokenId = crypto.randomUUID();
+  const refreshToken = issueRefreshToken({
+    sub: userId,
+    role: "user",
+    tokenId: refreshTokenId,
+  });
+
+  saveRefreshToken({
+    tokenId: refreshTokenId,
+    subjectId: userId,
+    role: "user",
+    createdAt: nowIso(),
+  });
+
+  return {
+    user: persistedUser,
+    accessToken,
+    refreshToken,
+  };
+}
+
 export async function sendUserOtp(phone) {
   logOtpProviderOnce();
   if (isTwilioProviderEnabled()) {

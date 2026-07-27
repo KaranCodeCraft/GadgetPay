@@ -15,6 +15,7 @@ process.env.SQLITE_PATH = testDbPath;
 process.env.JWT_ACCESS_SECRET = "test-access-secret";
 process.env.JWT_REFRESH_SECRET = "test-refresh-secret";
 process.env.ADMIN_DEV_KEY = "admin-dev-key";
+process.env.OTP_PROVIDER = "DEV";
 
 const { app } = await import("../src/app.js");
 
@@ -427,121 +428,6 @@ test("partner token cannot access admin quote deduction APIs", async () => {
   assert.equal(response.body.error.code, "FORBIDDEN");
 });
 
-test("user sell flow becomes pincode scoped partner lead bucket and service lead", async () => {
-  const userSession = await createUserSession("8000000105");
-  const partnerSession = await createPartnerSession("9000000105");
-  const adminToken = await createAdminToken();
-
-  await approvePartnerWalletRecharge({
-    partnerToken: partnerSession.accessToken,
-    adminToken,
-    txnRef: "TXN-9000000105",
-  });
-
-  const create = await request(app)
-    .post("/api/v1/user/sell-flows")
-    .set("Authorization", `Bearer ${userSession.accessToken}`)
-    .send({
-      servicePincode: "560001",
-      selectedModel: {
-        brandSlug: "apple",
-        modelId: "iphone-14",
-        modelName: "iPhone 14",
-        listedPrice: 46200,
-      },
-    })
-    .expect(200);
-
-  const flowId = create.body.data.flow.id;
-
-  await request(app)
-    .patch(`/api/v1/user/sell-flows/${flowId}/device-details`)
-    .set("Authorization", `Bearer ${userSession.accessToken}`)
-    .send({
-      deviceDetails: {
-        basicFunctionality: { canMakeCalls: "yes", touchWorking: "yes" },
-        physicalIssues: [],
-        accessoriesAndOwnership: { originalBox: "yes" },
-      },
-    })
-    .expect(200);
-
-  await request(app)
-    .post(`/api/v1/user/sell-flows/${flowId}/quote`)
-    .set("Authorization", `Bearer ${userSession.accessToken}`)
-    .expect(200);
-
-  const bucket = await request(app)
-    .get("/api/v1/partner/lead-bucket?pincode=560001")
-    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
-    .expect(200);
-
-  const bucketLead = bucket.body.data.rows.find((row) => row.userSellFlowId === flowId);
-  assert.equal(Boolean(bucketLead), true);
-  assert.equal(bucketLead.leadType, "LEAD_BUCKET");
-  assert.equal(bucketLead.selectedModel.modelName, "iPhone 14");
-
-  const otherScope = await request(app)
-    .get("/api/v1/partner/lead-bucket?pincode=110001")
-    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
-    .expect(200);
-
-  assert.equal(otherScope.body.data.count, 0);
-
-  await request(app)
-    .patch(`/api/v1/user/sell-flows/${flowId}/pickup-schedule`)
-    .set("Authorization", `Bearer ${userSession.accessToken}`)
-    .send({
-      pickupSchedule: {
-        pincode: "560001",
-        primaryDate: "2026-07-15T00:00:00.000Z",
-        primaryTime: "10:00 AM - 12:00 PM",
-        alternateDate: "2026-07-16T00:00:00.000Z",
-        alternateTime: "2:00 PM - 4:00 PM",
-        sellerName: "Test User",
-        callingPhoneNumber: "8000000105",
-        addressLine: "House 5, Test Street",
-        landmark: "Near Metro",
-        city: "Bengaluru",
-      },
-    })
-    .expect(200);
-
-  const serviceLeads = await request(app)
-    .get("/api/v1/partner/service-leads?pincode=560001&date=2026-07-15&timeSlot=10%3A00%20AM%20-%2012%3A00%20PM")
-    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
-    .expect(200);
-
-  const serviceLead = serviceLeads.body.data.rows.find((row) => row.userSellFlowId === flowId);
-  assert.equal(Boolean(serviceLead), true);
-  assert.equal(serviceLead.leadType, "SERVICE_LEAD");
-  assert.equal(serviceLead.pickupSchedule.callingPhoneNumber, "8000000105");
-
-  const leadId = serviceLead.id;
-  const detail = await request(app)
-    .get(`/api/v1/partner/leads/${leadId}`)
-    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
-    .expect(200);
-
-  assert.equal(detail.body.data.lead.id, leadId);
-
-  const claimed = await request(app)
-    .post(`/api/v1/partner/leads/${leadId}/claim`)
-    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
-    .expect(200);
-
-  assert.equal(claimed.body.data.lead.status, "CLAIMED");
-  assert.equal(claimed.body.data.lead.partnerId, "partner-9000000105");
-
-  const accepted = await request(app)
-    .patch(`/api/v1/partner/leads/${leadId}/status`)
-    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
-    .send({ status: "ACCEPTED" })
-    .expect(200);
-
-  assert.equal(accepted.body.data.lead.status, "ACCEPTED");
-});
-
 test("user cancellation marks partner lead cancelled and user token cannot access partner leads", async () => {
   const userSession = await createUserSession("8000000106");
   const partnerSession = await createPartnerSession("9000000106");
@@ -603,6 +489,120 @@ test("user cancellation marks partner lead cancelled and user token cannot acces
     .expect(200);
 
   assert.equal(visible.body.data.count, 0);
+});
+
+test("partner unlock payment gates lead details until admin approval", async () => {
+  const userSession = await createUserSession("8000000116");
+  const partnerSession = await createPartnerSession("9000000116");
+  const adminToken = await createAdminToken();
+
+  const create = await request(app)
+    .post("/api/v1/user/sell-flows")
+    .set("Authorization", `Bearer ${userSession.accessToken}`)
+    .send({
+      servicePincode: "560001",
+      selectedModel: {
+        brandSlug: "asus",
+        modelId: "rog-phone-test",
+        modelName: "Rog Phone Test",
+        listedPrice: 7020,
+      },
+    })
+    .expect(200);
+
+  const flowId = create.body.data.flow.id;
+
+  await request(app)
+    .patch(`/api/v1/user/sell-flows/${flowId}/device-details`)
+    .set("Authorization", `Bearer ${userSession.accessToken}`)
+    .send({
+      deviceDetails: {
+        basicFunctionality: { canMakeCalls: "yes", touchWorking: "yes" },
+        physicalIssues: [],
+      },
+    })
+    .expect(200);
+
+  await request(app)
+    .post(`/api/v1/user/sell-flows/${flowId}/quote`)
+    .set("Authorization", `Bearer ${userSession.accessToken}`)
+    .expect(200);
+
+  await request(app)
+    .patch(`/api/v1/user/sell-flows/${flowId}/pickup-schedule`)
+    .set("Authorization", `Bearer ${userSession.accessToken}`)
+    .send({
+      pickupSchedule: {
+        pincode: "560001",
+        primaryDate: "2026-07-26T00:00:00.000Z",
+        primaryTime: "5:00 PM - 6:00 PM",
+        alternateDate: "2026-07-27T00:00:00.000Z",
+        alternateTime: "1:00 PM - 2:00 PM",
+        sellerName: "Masked Seller",
+        callingPhoneNumber: "8000000116",
+        addressLine: "House 16, Test Street",
+        landmark: "Near Test Park",
+        city: "Bengaluru",
+      },
+    })
+    .expect(200);
+
+  const bucket = await request(app)
+    .get("/api/v1/partner/lead-bucket?pincode=560001")
+    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
+    .expect(200);
+
+  const lockedLead = bucket.body.data.rows.find((row) => row.userSellFlowId === flowId);
+  assert.equal(Boolean(lockedLead), true);
+  assert.equal(lockedLead.selectedModel.modelName, "Rog Phone Test");
+  assert.equal(lockedLead.city, "Bengaluru");
+  assert.equal(lockedLead.pincode, "560001");
+  assert.equal(lockedLead.quote.sellingPrice, 7020);
+  assert.equal(lockedLead.seller.name, null);
+  assert.equal(lockedLead.seller.phone, null);
+  assert.equal(lockedLead.pickupSchedule.primaryTime, "5:00 PM - 6:00 PM");
+  assert.equal(lockedLead.pickupSchedule.alternateTime, null);
+
+  await request(app)
+    .get(`/api/v1/partner/leads/${lockedLead.id}`)
+    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
+    .expect(403);
+
+  const intent = await request(app)
+    .post(`/api/v1/partner/leads/${lockedLead.id}/unlock-intent`)
+    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
+    .expect(200);
+
+  assert.equal(intent.body.data.unlockPrice, 500);
+  assert.equal(intent.body.data.paymentQrUrl, "/Leadpay.jpeg");
+  assert.equal(intent.body.data.intent.status, "PENDING_PAYMENT");
+
+  await request(app)
+    .post(`/api/v1/partner/lead-unlock-intents/${intent.body.data.intent.id}/screenshot-sent`)
+    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
+    .expect(200);
+
+  const pendingList = await request(app)
+    .get("/api/v1/partner/lead-unlock-intents/admin?status=SCREENSHOT_SENT")
+    .set("Authorization", `Bearer ${adminToken}`)
+    .expect(200);
+
+  assert.equal(pendingList.body.data.rows.some((row) => row.id === intent.body.data.intent.id), true);
+
+  await request(app)
+    .patch(`/api/v1/partner/lead-unlock-intents/${intent.body.data.intent.id}/verify`)
+    .set("Authorization", `Bearer ${adminToken}`)
+    .send({ action: "APPROVE", note: "Approved in unlock workflow test" })
+    .expect(200);
+
+  const detail = await request(app)
+    .get(`/api/v1/partner/leads/${lockedLead.id}`)
+    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
+    .expect(200);
+
+  assert.equal(detail.body.data.lead.seller.name, "Masked Seller");
+  assert.equal(detail.body.data.lead.seller.phone, "8000000116");
+  assert.equal(detail.body.data.lead.status, "ACCEPTED");
 });
 
 test("scope resolution requires active serviceability", async () => {
@@ -829,30 +829,33 @@ test("admin pricing upload rejects excel when header labels are not exact", asyn
   assert.equal(upload.body.error.details.expectedHeaders[0], "Brand");
 });
 
-test("partner lead access unlocks only after admin approves wallet recharge request", async () => {
-  const adminToken = await createAdminToken();
+test("partner can list lead bucket and service leads without wallet recharge", async () => {
   const partnerSession = await createPartnerSession("9000000110");
 
-  const blockedWithoutCoins = await request(app)
-    .get("/api/v1/partner/lead-bucket?pincode=560001")
-    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
-    .expect(400);
-
-  assert.equal(blockedWithoutCoins.body.error.code, "BAD_REQUEST");
-
-  await approvePartnerWalletRecharge({
-    partnerToken: partnerSession.accessToken,
-    adminToken,
-    txnRef: "TXN-9000000110",
-  });
-
-  const unblockedWithCoins = await request(app)
+  const leadBucket = await request(app)
     .get("/api/v1/partner/lead-bucket?pincode=560001")
     .set("Authorization", `Bearer ${partnerSession.accessToken}`)
     .expect(200);
 
-  assert.equal(unblockedWithCoins.body.success, true);
-  assert.equal(Array.isArray(unblockedWithCoins.body.data.rows), true);
+  assert.equal(leadBucket.body.success, true);
+  assert.equal(Array.isArray(leadBucket.body.data.rows), true);
+
+  const serviceLeads = await request(app)
+    .get("/api/v1/partner/service-leads?pincode=560001&date=2026-07-16")
+    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
+    .expect(200);
+
+  assert.equal(serviceLeads.body.success, true);
+  assert.equal(Array.isArray(serviceLeads.body.data.rows), true);
+
+  const dashboard = await request(app)
+    .get("/api/v1/partner/dashboard?pincode=560001")
+    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
+    .expect(200);
+
+  assert.equal(typeof dashboard.body.data.metrics.todayLeads, "number");
+  assert.equal(typeof dashboard.body.data.metrics.weeklyLeads, "number");
+  assert.equal(typeof dashboard.body.data.metrics.monthlyLeads, "number");
 });
 
 
