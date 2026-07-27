@@ -1055,6 +1055,48 @@ export async function cancelUserSellFlow(token: string, flowId: string): Promise
   return parseResponse<{ flow: UserSellFlow }>(response);
 }
 
+export type UserSellFlowInvoice = {
+  id: string;
+  leadId: string;
+  amount: number;
+  paymentMode: string;
+  paymentProofUrl?: string;
+  paidAt?: string;
+  createdAt: string;
+};
+
+export async function getUserSellFlowInvoice(token: string, flowId: string): Promise<{ invoice: UserSellFlowInvoice }> {
+  const response = await fetch(`${API_BASE}/user/sell-flows/${encodeURIComponent(flowId)}/invoice`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  return parseResponse(response);
+}
+
+export async function sendPartnerLeadCustomerOtp(token: string, leadId: string): Promise<{ message: string; otpTtlSeconds?: number }> {
+  const response = await fetch(`${API_BASE}/partner/leads/${encodeURIComponent(leadId)}/customer-otp/send`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  return parseResponse(response);
+}
+
+export async function verifyPartnerLeadCustomerOtp(token: string, leadId: string, otp: string): Promise<{ verified: boolean; lead?: PartnerLead }> {
+  const response = await fetch(`${API_BASE}/partner/leads/${encodeURIComponent(leadId)}/customer-otp/verify`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ otp }),
+  });
+  return parseResponse(response);
+}
+
 export async function resolvePartnerScope(pincode: string, token: string): Promise<ScopeResolveResponse> {
   const response = await fetch(`${API_BASE}/serviceability/scope/resolve`, {
     method: "POST",
