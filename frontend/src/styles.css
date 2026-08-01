@@ -292,11 +292,11 @@ button {
 
 /* Hero */
 .hero {
-  min-height: 640px;
+  min-height: auto;
   background: #ffffff;
-  padding: 72px 72px 56px;
+  padding: 48px 64px 40px;
   display: grid;
-  grid-template-columns: minmax(420px, 1.05fr) minmax(420px, 0.95fr);
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
   gap: 24px;
   align-items: center;
   position: relative;
@@ -365,20 +365,19 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 22px;
+  padding: 8px 16px;
   border-radius: 999px;
   background: #ecfaf5;
   color: #112536;
-  font-size: 40px;
-  font-size: clamp(20px, 1.55vw, 31px);
+  font-size: clamp(13px, 1.1vw, 18px);
   font-weight: 600;
   line-height: 1;
 }
 
 .hero-title {
-  margin: 26px 0 0;
-  font-size: clamp(52px, 4.1vw, 80px);
-  line-height: 0.98;
+  margin: 16px 0 0;
+  font-size: clamp(40px, 3.6vw, 72px);
+  line-height: 1;
   letter-spacing: -0.04em;
   font-weight: 800;
   color: #0c1118;
@@ -394,67 +393,83 @@ button {
 .hero-title span::after {
   content: "";
   display: block;
-  margin-top: 12px;
-  width: min(100%, 470px);
-  height: 7px;
+  margin-top: 8px;
+  width: min(100%, 380px);
+  height: 5px;
   border-radius: 999px;
   background: linear-gradient(90deg, #1ca887, rgba(28, 168, 135, 0.2));
 }
 
 .hero-sub {
-  margin: 24px 0 0;
-  max-width: 720px;
+  margin: 14px 0 0;
+  max-width: 560px;
   color: #526171;
-  font-size: clamp(20px, 1.3vw, 27px);
-  line-height: 1.42;
-  font-weight: 500;
+  font-size: clamp(14px, 1.1vw, 18px);
+  line-height: 1.5;
+  font-weight: 400;
 }
 
 .hero-feature-strip {
-  margin-top: 26px;
+  margin-top: 18px;
   display: flex;
   flex-wrap: wrap;
-  gap: 14px;
+  gap: 10px;
 }
 
-.hero-feature-strip span {
+.hero-feature-strip > span {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
-  min-height: 64px;
-  padding: 14px 20px;
-  border-radius: 18px;
+  gap: 8px;
+  min-height: 50px;
+  padding: 10px 14px;
+  border-radius: 14px;
   background: #f3fbf8;
   color: #334554;
-  font-size: 20px;
+  font-size: 14px;
   font-weight: 500;
 }
 
-.hero-feature-strip span strong {
+.hero-feature-strip > span strong {
   color: #0f1f30;
+  font-size: 14px;
 }
 
 .hero-feature-strip svg {
   color: #16a789;
   flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+}
+
+.hero-chip-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  line-height: 1.3;
+}
+
+.hero-chip-text small {
+  font-size: 0.86em;
+  font-weight: 400;
+  color: #526171;
 }
 
 .cta-row {
-  margin-top: 36px;
+  margin-top: 20px;
   display: flex;
-  gap: 14px;
+  gap: 12px;
   flex-wrap: wrap;
 }
 
 .hero-main-cta {
-  min-width: 318px;
-  min-height: 74px;
-  font-size: clamp(30px, 1.8vw, 40px);
+  min-width: 260px;
+  min-height: 56px;
+  font-size: clamp(17px, 1.3vw, 24px);
   font-weight: 800;
-  border-radius: 22px;
-  padding: 0 28px;
+  border-radius: 16px;
+  padding: 0 24px;
   background: linear-gradient(135deg, #15b58f, #0d9e7d);
-  box-shadow: 0 14px 30px rgba(10, 133, 107, 0.22);
+  box-shadow: 0 8px 24px rgba(10, 133, 107, 0.22);
 }
 
 .hero-main-cta::after {
@@ -564,9 +579,10 @@ button {
   }
 
   .hero-art {
+    order: -1;
     justify-self: center;
     width: min(100%, 520px);
-    margin-top: 6px;
+    margin-top: 0;
   }
 }
 

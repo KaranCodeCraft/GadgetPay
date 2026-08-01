@@ -802,31 +802,36 @@ function UserPage() {
       </section> */}
 
       <section className="hero" id="sell">
-        <div>
-          <span className="badge-pill">🏆India's Next-Generation Device Marketplace</span>
-          <h1 className="h1">
-            Sell Your <span className="hero-typeword">{typedText}</span>.
-            <br />
-            <span style={{ display: "inline-block", whiteSpace: "nowrap" }}>Turn Your Old Device Into Money.</span>
+        <div className="hero-copy">
+          <span className="hero-kicker">✨ The Smartest Way to Sell Your Old Gadgets</span>
+          <h1 className="hero-title">
+            Turn Your Old Device
+            <span>Into Money.</span>
           </h1>
-          <p className="sub">Best Prices. Free Doorstep Pickup. Instant Payment.</p>
+          <p className="hero-sub">
+            Get the best value for your used smartphones, iPads, tablets and more –
+            quickly, safely and effortlessly with GadgetPe.
+          </p>
+          <div className="hero-feature-strip">
+            <span><HeroIconMoney /><span className="hero-chip-text"><strong>Best Price</strong><small>Guaranteed</small></span></span>
+            <span><HeroIconTruck /><span className="hero-chip-text"><strong>Free</strong><small>Doorstep Pickup</small></span></span>
+            <span><HeroIconShield /><span className="hero-chip-text"><strong>100% Safe</strong><small>&amp; Transparent</small></span></span>
+          </div>
           <div className="cta-row">
             <button
               type="button"
-              className="cta-green"
+              className="hero-main-cta cta-green"
               onClick={() => {
                 void navigate({ to: "/user/sell-phone" });
               }}
             >
-              Sell Now
+              Sell Your Device Now
             </button>
-            {/* <button type="button" className="cta-outline">Browse Gadgets</button> */}
           </div>
-          <div className="trust-row">
-            <span><HeroIconShield /> Secure</span>
-            <span><HeroIconTruck /> Easy Pickup</span>
-            <span><HeroIconMoney /> Fast Payment</span>
-          </div>
+        </div>
+        <div className="hero-art">
+          <img src="/hero.jpeg" alt="Sell your old smartphones, tablets and gadgets" className="hero-art-image" />
+          <div className="hero-art-stage" aria-hidden="true" />
         </div>
       </section>
 
