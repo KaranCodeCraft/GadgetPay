@@ -616,27 +616,21 @@ function UserPage() {
                       </div>
                     </div>
                     <div className="gp-hm-divider" />
-                    {sellerActions.map((action) => {
-                      const Icon = action.icon;
-                      return (
-                        <button
-                          key={action.title}
-                          type="button"
-                          className="gp-hamburger-item"
-                          onClick={() => { setHamburgerOpen(false); void navigate({ to: action.to }); }}
-                        >
-                          <Icon size={16} />
-                          <span>{action.title}</span>
-                        </button>
-                      );
-                    })}
                     <button
                       type="button"
                       className="gp-hamburger-item"
-                      onClick={() => { setHamburgerOpen(false); void navigate({ to: "/user/selling-history" }); }}
+                      onClick={() => { setHamburgerOpen(false); void navigate({ to: "/user/active-orders" }); }}
+                    >
+                      <PackageCheck size={16} />
+                      <span>Active Orders</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="gp-hamburger-item"
+                      onClick={() => { setHamburgerOpen(false); void navigate({ to: "/user/closed-orders" }); }}
                     >
                       <History size={16} />
-                      <span>Seller History</span>
+                      <span>Closed Orders</span>
                     </button>
                     <button
                       type="button"

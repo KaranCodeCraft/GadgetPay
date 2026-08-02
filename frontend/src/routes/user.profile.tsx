@@ -55,8 +55,6 @@ function UserProfilePage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const initials = name.trim().split(" ").map((w) => w[0]).join("").toUpperCase().slice(0, 2) || "U";
-
   return (
     <main className="user-seller-page">
       <section className="user-dashboard-shell user-profile-shell">
@@ -68,7 +66,6 @@ function UserProfilePage() {
 
         {/* Avatar + name card */}
         <div className="user-profile-hero">
-          <div className="user-profile-avatar">{initials}</div>
           <div className="user-profile-hero-info">
             <h1 className="user-profile-name">{name}</h1>
             <span className="user-profile-badge"><BadgeCheck size={13} />GadgetPe Seller</span>
@@ -124,7 +121,7 @@ function UserProfilePage() {
           )}
         </div>
 
-        {/* Actions */}
+        {/* Actions
         <div className="user-profile-actions">
           <Link to="/user/sell-phone" className="user-auth-submit user-inline-link" style={{ textAlign: "center" }}>
             Sell a Phone
@@ -133,6 +130,7 @@ function UserProfilePage() {
             Seller History
           </Link>
         </div>
+        */}
       </section>
     </main>
   );

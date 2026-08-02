@@ -45,6 +45,10 @@ import {
   updatePartnerLeadWorkflowStatus,
   verifyPartnerLeadUnlockIntent,
   verifyPartnerCoinRechargeRequest,
+  listActivePartnerPincodes,
+  deactivatePartnerPincodeScope,
+  upsertPartnerPincodeScope,
+  getServiceabilityByPincode,
 } from "../../db/repository.js";
 import {
   assertAllowedMime,
@@ -78,6 +82,19 @@ const leadListQuerySchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   timeSlot: z.string().trim().min(1).max(60).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional().default(50),
+});
+
+const leadBucketQuerySchema = z.object({
+  pincode: z.string().regex(/^\d{6}$/).optional(),
+  pincodes: z.string().optional(),
+  status: z.enum(partnerLeadStatuses).optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional().default(50),
+}).refine((data) => data.pincode || data.pincodes, {
+  message: "Either pincode or pincodes query param is required",
+});
+
+const pincodeBodySchema = z.object({
+  pincode: z.string().regex(/^\d{6}$/, "Pincode must be exactly 6 digits"),
 });
 
 const workflowStatusSchema = z.object({
@@ -372,11 +389,70 @@ partnerRouter.get("/coins/ledger", requireAuth, requireRole("partner"), (req, re
   res.json(success({ rows, count: rows.length }));
 });
 
+partnerRouter.get("/pincodes", requireAuth, requireRole("partner"), (req, res) => {
+  const pincodes = listActivePartnerPincodes(req.auth.sub);
+  res.json(success({ pincodes }));
+});
+
+partnerRouter.post("/pincodes", requireAuth, requireRole("partner"), (req, res, next) => {
+  try {
+    const { pincode } = pincodeBodySchema.parse(req.body);
+
+    const existing = listActivePartnerPincodes(req.auth.sub);
+    const alreadySaved = existing.some((p) => p.pincode === pincode);
+    if (!alreadySaved && existing.length >= 4) {
+      throw badRequest("Maximum of 4 working pincodes allowed.");
+    }
+
+    const serviceability = getServiceabilityByPincode(pincode);
+    if (!serviceability || serviceability.status !== "ACTIVE") {
+      throw badRequest(`Pincode ${pincode} is not serviceable in this area.`);
+    }
+
+    const now = nowIso();
+    upsertPartnerPincodeScope({
+      id: crypto.randomUUID(),
+      partnerId: req.auth.sub,
+      pincode,
+      isActive: true,
+      updatedBy: req.auth.sub,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const pincodes = listActivePartnerPincodes(req.auth.sub);
+    res.json(success({ pincodes }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+partnerRouter.delete("/pincodes/:pincode", requireAuth, requireRole("partner"), (req, res, next) => {
+  try {
+    const { pincode } = z.object({ pincode: z.string().regex(/^\d{6}$/) }).parse(req.params);
+    deactivatePartnerPincodeScope(req.auth.sub, pincode);
+    const pincodes = listActivePartnerPincodes(req.auth.sub);
+    res.json(success({ pincodes }));
+  } catch (err) {
+    next(err);
+  }
+});
+
 partnerRouter.get("/lead-bucket", requireAuth, requireRole("partner"), (req, res, next) => {
   try {
-    const query = leadListQuerySchema.parse(req.query);
+    const query = leadBucketQuerySchema.parse(req.query);
+
+    let pincodeFilter;
+    if (query.pincodes) {
+      const arr = query.pincodes.split(",").map((p) => p.trim()).filter((p) => /^\d{6}$/.test(p));
+      if (arr.length === 0) throw badRequest("No valid pincodes provided in pincodes param.");
+      pincodeFilter = { pincodes: arr.slice(0, 4) };
+    } else {
+      pincodeFilter = { pincode: query.pincode };
+    }
+
     const bucketRows = listPartnerLeadsForScope({
-      pincode: query.pincode,
+      ...pincodeFilter,
       leadType: "LEAD_BUCKET",
       status: query.status,
       viewerPartnerId: req.auth.sub,
@@ -384,7 +460,7 @@ partnerRouter.get("/lead-bucket", requireAuth, requireRole("partner"), (req, res
     });
 
     const scheduledRows = listPartnerLeadsForScope({
-      pincode: query.pincode,
+      ...pincodeFilter,
       leadType: "SERVICE_LEAD",
       status: query.status,
       viewerPartnerId: req.auth.sub,

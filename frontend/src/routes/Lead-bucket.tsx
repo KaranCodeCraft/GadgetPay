@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { getActiveRole } from "../lib/auth/role-session";
 import {
   createLeadUnlockIntent,
+  getPartnerWorkingPincodes,
   listPartnerLeadBucket,
   updatePartnerLeadStatus,
   type PartnerLead,
@@ -14,13 +15,7 @@ export const Route = createFileRoute("/Lead-bucket")({
 });
 
 const PAGE_SIZE = 25;
-const PARTNER_SCOPE_KEY = "gadgetpe_partner_scope";
 const PARTNER_TOKEN_KEY = "gadgetpe_partner_access_token";
-
-type PartnerScopeSnapshot = {
-  serviceabilityStatus?: string;
-  pincode?: string;
-};
 
 function formatInr(value: number) {
   return new Intl.NumberFormat("en-IN").format(value);
@@ -96,17 +91,17 @@ function LeadBucketContent() {
   const navigate = useNavigate();
   const [page, setPage] = useState(1);
   const [leads, setLeads] = useState<PartnerLead[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [scopePincode, setScopePincode] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [workingPincodes, setWorkingPincodes] = useState<string[]>([]);
   const [unlockingLeadId, setUnlockingLeadId] = useState<string | null>(null);
   const [cancellingLeadId, setCancellingLeadId] = useState<string | null>(null);
   const [cancelTarget, setCancelTarget] = useState<PartnerLead | null>(null);
   const [currentPartnerId, setCurrentPartnerId] = useState("");
 
-  const loadLeadBucket = useCallback(async (token: string, pincode: string) => {
+  const loadLeadBucket = useCallback(async (token: string, pincodes: string[]) => {
     setLoading(true);
     try {
-      const result = await listPartnerLeadBucket(token, { pincode, limit: 100 });
+      const result = await listPartnerLeadBucket(token, { pincodes, limit: 100 });
       setLeads(result.rows);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Unable to load lead bucket.");
@@ -127,14 +122,7 @@ function LeadBucketContent() {
       return;
     }
 
-    const raw = localStorage.getItem(PARTNER_SCOPE_KEY);
     const token = localStorage.getItem(PARTNER_TOKEN_KEY);
-    if (!raw) {
-      toast.error("Select an ACTIVE pincode on Partner page first.");
-      window.location.href = "/partner-page";
-      return;
-    }
-
     if (!token) {
       toast.error("Please login as partner first.");
       window.location.href = "/partner";
@@ -148,22 +136,19 @@ function LeadBucketContent() {
 
     void (async () => {
       try {
-        const scope = JSON.parse(raw) as PartnerScopeSnapshot;
-        if (scope.serviceabilityStatus !== "ACTIVE") {
-          toast.error("Current pincode is not ACTIVE. Lead Bucket is blocked.");
-          window.location.href = "/partner-page";
+        const result = await getPartnerWorkingPincodes(token);
+        const pins = result.pincodes.map((p) => p.pincode);
+        setWorkingPincodes(pins);
+        if (pins.length === 0) {
+          setLoading(false);
           return;
         }
-
-        const pincode = scope.pincode || "";
-        setScopePincode(pincode);
-        await loadLeadBucket(token, pincode);
+        await loadLeadBucket(token, pins);
       } catch {
-        toast.error("Invalid tenant scope. Please select pincode again.");
-        window.location.href = "/partner-page";
+        toast.error("Unable to load working pincodes.");
+        setLoading(false);
       }
     })();
-
   }, [navigate, loadLeadBucket]);
 
   const handleUnlockLead = useCallback(
@@ -175,9 +160,9 @@ function LeadBucketContent() {
         return;
       }
 
-      if (!scopePincode) {
-        toast.error("Select an ACTIVE pincode on Partner page first.");
-        window.location.href = "/partner-page";
+      if (workingPincodes.length === 0) {
+        toast.error("Add working pincodes first.");
+        window.location.href = "/partner-page/working-pincodes";
         return;
       }
 
@@ -191,7 +176,7 @@ function LeadBucketContent() {
         setUnlockingLeadId(null);
       }
     },
-    [scopePincode, navigate],
+    [workingPincodes, navigate],
   );
 
   const handleCancelAcceptedLead = useCallback(async () => {
@@ -204,9 +189,9 @@ function LeadBucketContent() {
       return;
     }
 
-    if (!scopePincode) {
-      toast.error("Select an ACTIVE pincode on Partner page first.");
-      window.location.href = "/partner-page";
+    if (workingPincodes.length === 0) {
+      toast.error("Add working pincodes first.");
+      window.location.href = "/partner-page/working-pincodes";
       return;
     }
 
@@ -218,13 +203,13 @@ function LeadBucketContent() {
       });
       toast.success("Lead cancelled and returned to Lead Bucket.");
       setCancelTarget(null);
-      await loadLeadBucket(token, scopePincode);
+      await loadLeadBucket(token, workingPincodes);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Unable to cancel lead.");
     } finally {
       setCancellingLeadId(null);
     }
-  }, [cancelTarget, scopePincode, loadLeadBucket]);
+  }, [cancelTarget, workingPincodes, loadLeadBucket]);
 
   const totalPages = Math.max(1, Math.ceil(leads.length / PAGE_SIZE));
   const safePage = useMemo(() => Math.min(page, totalPages), [page, totalPages]);
@@ -245,7 +230,15 @@ function LeadBucketContent() {
       <section className="partner-simple-card partner-lead-card lead-bucket-card">
         <h1>Lead Bucket</h1>
         <p>Showing {leads.length === 0 ? 0 : start + 1} - {Math.min(end, leads.length)} of {leads.length} leads</p>
-        <p className="lead-hint lead-bucket-hint">Quote-ready leads for pincode {scopePincode || "-"}.</p>
+        <p className="lead-hint lead-bucket-hint">
+          {workingPincodes.length === 0
+            ? <>
+                No working pincodes set up.{" "}
+                <Link to="/partner-page/working-pincodes" className="partner-simple-link">Add pincodes</Link>
+              </>
+            : `Showing leads for pincode${workingPincodes.length > 1 ? "s" : ""}: ${workingPincodes.join(", ")}`
+          }
+        </p>
 
         <div className="lead-table-wrap lead-bucket-table-wrap">
           <table className="lead-table">

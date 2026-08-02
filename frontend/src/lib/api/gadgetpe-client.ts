@@ -1055,6 +1055,43 @@ export async function cancelUserSellFlow(token: string, flowId: string): Promise
   return parseResponse<{ flow: UserSellFlow }>(response);
 }
 
+export type UserSellFlowLeadStatus = {
+  found: boolean;
+  lead: {
+    id: string;
+    status: string;
+    completedAt: string | null;
+    paymentProof: {
+      amountCollected: number;
+      paymentMode: string;
+      transactionRef: string | null;
+      submittedAt: string;
+      mediaUrl: string | null;
+    } | null;
+    paymentSubmittedAt: string | null;
+  } | null;
+};
+
+export async function getUserSellFlowLeadStatus(token: string, flowId: string): Promise<UserSellFlowLeadStatus> {
+  const response = await fetch(`${API_BASE}/user/sell-flows/${encodeURIComponent(flowId)}/lead-status`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return parseResponse<UserSellFlowLeadStatus>(response);
+}
+
+export async function rescheduleUserSellFlow(
+  token: string,
+  flowId: string,
+  body: { primaryDate: string; primaryTime: string; alternateDate: string; alternateTime: string },
+): Promise<{ flow: UserSellFlow; rescheduled: boolean }> {
+  const response = await fetch(`${API_BASE}/user/sell-flows/${encodeURIComponent(flowId)}/reschedule`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return parseResponse<{ flow: UserSellFlow; rescheduled: boolean }>(response);
+}
+
 export type UserSellFlowInvoice = {
   id: string;
   leadId: string;
@@ -1128,9 +1165,14 @@ export async function getPartnerDashboard(pincode: string, token: string): Promi
 
 export async function listPartnerLeadBucket(
   token: string,
-  filters: { pincode: string; status?: PartnerLeadStatus; limit?: number },
+  filters: { pincode?: string; pincodes?: string[]; status?: PartnerLeadStatus; limit?: number },
 ): Promise<{ rows: PartnerLead[]; count: number }> {
-  const params = new URLSearchParams({ pincode: filters.pincode });
+  const params = new URLSearchParams();
+  if (filters.pincodes && filters.pincodes.length > 0) {
+    params.set("pincodes", filters.pincodes.join(","));
+  } else if (filters.pincode) {
+    params.set("pincode", filters.pincode);
+  }
   if (filters.status) params.set("status", filters.status);
   if (filters.limit) params.set("limit", String(filters.limit));
 
@@ -1160,6 +1202,40 @@ export async function listPartnerServiceLeads(
   });
 
   return parseResponse<{ rows: PartnerLead[]; count: number }>(response);
+}
+
+export type WorkingPincode = {
+  pincode: string;
+  state: string | null;
+  district: string | null;
+  createdAt: string;
+};
+
+export async function getPartnerWorkingPincodes(token: string): Promise<{ pincodes: WorkingPincode[] }> {
+  const response = await fetch(`${API_BASE}/partner/pincodes`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return parseResponse<{ pincodes: WorkingPincode[] }>(response);
+}
+
+export async function addPartnerWorkingPincode(token: string, pincode: string): Promise<{ pincodes: WorkingPincode[] }> {
+  const response = await fetch(`${API_BASE}/partner/pincodes`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ pincode }),
+  });
+  return parseResponse<{ pincodes: WorkingPincode[] }>(response);
+}
+
+export async function removePartnerWorkingPincode(token: string, pincode: string): Promise<{ pincodes: WorkingPincode[] }> {
+  const response = await fetch(`${API_BASE}/partner/pincodes/${encodeURIComponent(pincode)}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return parseResponse<{ pincodes: WorkingPincode[] }>(response);
 }
 
 export async function getPartnerLead(token: string, leadId: string): Promise<{ lead: PartnerLead }> {

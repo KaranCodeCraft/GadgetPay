@@ -10,14 +10,13 @@ import { toast } from "sonner";
 import { clearRoleSession, getActiveRole } from "../lib/auth/role-session";
 import { PartnerDashboardCompactFooter, SupportFab } from "../components/partner-footer-and-support";
 import {
-  ApiClientError,
   ensureRoleAccessToken,
   getPartnerCoinBalance,
   getPartnerDashboard,
   getPartnerKycStatus,
+  getPartnerWorkingPincodes,
   listPartnerActivePickups,
   logoutSession,
-  resolvePartnerScope,
   type PartnerDashboardResponse,
   type PartnerLead,
 } from "../lib/api/gadgetpe-client";
@@ -66,13 +65,6 @@ function getLeadDisplayAmount(lead: PartnerLead) {
   return lead.onsiteValidation?.revisedQuote ?? lead.paymentProof?.amountCollected ?? lead.quote?.sellingPrice ?? lead.selectedModel.listedPrice ?? 0;
 }
 
-type PartnerScopeSnapshot = {
-  pincode: string;
-  serviceabilityStatus: "ACTIVE" | "INACTIVE" | "LIMITED";
-  state: string;
-  district: string;
-};
-
 function getPartnerAccessToken() {
   if (typeof window === "undefined") return null;
   return localStorage.getItem(PARTNER_ACCESS_TOKEN_KEY) || localStorage.getItem(LEGACY_PARTNER_ACCESS_TOKEN_KEY);
@@ -82,15 +74,11 @@ function PartnerDashboardPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const [activeItem, setActiveItem] = useState<SidebarItem>("Profile");
-  const [pincodeInput, setPincodeInput] = useState("");
   const [selectedPincode, setSelectedPincode] = useState("");
-  const [showPincodeControls, setShowPincodeControls] = useState(false);
+  const [workingPincodes, setWorkingPincodes] = useState<string[]>([]);
   const [refreshedAt, setRefreshedAt] = useState("Initial load");
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [serviceabilityStatus, setServiceabilityStatus] = useState<"ACTIVE" | "INACTIVE" | "LIMITED">("INACTIVE");
-  const [scopeError, setScopeError] = useState<string | null>(null);
-  const [scopeLocation, setScopeLocation] = useState<{ state: string; district: string } | null>(null);
-  const [isApplyingScope, setIsApplyingScope] = useState(false);
   const [kpi, setKpi] = useState<PartnerDashboardResponse["metrics"]>(defaultMetrics);
   const [activePickup, setActivePickup] = useState<PartnerLead | null>(null);
   const [activePickupElapsed, setActivePickupElapsed] = useState("--");
@@ -132,91 +120,23 @@ function PartnerDashboardPage() {
     }
   }, [navigate]);
 
-  const saveScope = (scope: PartnerScopeSnapshot) => {
-    localStorage.setItem(PARTNER_SCOPE_KEY, JSON.stringify(scope));
-  };
-
-  const clearScope = () => {
-    localStorage.removeItem(PARTNER_SCOPE_KEY);
-  };
-
-  const applyPincode = async () => {
-    const pincode = pincodeInput.trim();
-    if (pincode.length !== 6) {
-      setScopeError("Pincode must be 6 digits.");
-      toast.error("Pincode must be 6 digits.");
-      return;
-    }
-
+  useEffect(() => {
     const accessToken = getPartnerAccessToken();
-    if (!accessToken) {
-      setScopeError("Session expired. Please login again.");
-      toast.error("Session expired. Please login again.");
-      return;
-    }
+    if (!accessToken) return;
 
-    setScopeError(null);
-    setIsApplyingScope(true);
-
-    try {
-      const scope = await resolvePartnerScope(pincode, accessToken);
-      setSelectedPincode(scope.selectedPincode);
-      setServiceabilityStatus(scope.serviceabilityStatus);
-      setScopeLocation({
-        state: scope.location.state,
-        district: scope.location.district,
-      });
-      saveScope({
-        pincode: scope.selectedPincode,
-        serviceabilityStatus: scope.serviceabilityStatus,
-        state: scope.location.state,
-        district: scope.location.district,
-      });
-
-      const dashboard = await getPartnerDashboard(scope.selectedPincode, accessToken);
-      setKpi(dashboard.metrics);
-      setRefreshedAt(new Date().toLocaleTimeString());
-      toast.success(`Tenant scope set to ${scope.selectedPincode}.`);
-    } catch (error) {
-      if (error instanceof ApiClientError) {
-        const statusFromDetails =
-          error.details && typeof error.details === "object" && "status" in error.details
-            ? String((error.details as { status?: string }).status)
-            : null;
-        const normalizedStatus = statusFromDetails === "LIMITED" ? "LIMITED" : "INACTIVE";
-        if (statusFromDetails === "INACTIVE" || statusFromDetails === "LIMITED") {
-          setServiceabilityStatus(normalizedStatus);
-          clearScope();
-          toast.error(`Pincode ${pincode} is ${statusFromDetails}. Operations are blocked.`);
+    void (async () => {
+      try {
+        const result = await getPartnerWorkingPincodes(accessToken);
+        const pins = result.pincodes.map((p) => p.pincode);
+        setWorkingPincodes(pins);
+        if (pins.length > 0) {
+          setSelectedPincode(pins[0]);
+          setServiceabilityStatus("ACTIVE");
         }
+      } catch {
+        // No working pincodes yet
       }
-      setScopeError(error instanceof Error ? error.message : "Unable to resolve serviceability.");
-    } finally {
-      setIsApplyingScope(false);
-    }
-  };
-
-  useEffect(() => {
-    setPincodeInput(selectedPincode);
-  }, [selectedPincode]);
-
-  useEffect(() => {
-    const scopeRaw = localStorage.getItem(PARTNER_SCOPE_KEY);
-    if (!scopeRaw) {
-      return;
-    }
-
-    try {
-      const scope = JSON.parse(scopeRaw) as PartnerScopeSnapshot;
-      setSelectedPincode(scope.pincode);
-      setServiceabilityStatus(scope.serviceabilityStatus);
-      setScopeLocation({
-        state: scope.state,
-        district: scope.district,
-      });
-    } catch {
-      clearScope();
-    }
+    })();
   }, []);
 
   useEffect(() => {
@@ -312,7 +232,8 @@ function PartnerDashboardPage() {
     }
 
     event.preventDefault();
-    toast.error("Selected pincode is not ACTIVE. Operations are blocked.");
+    toast.error("Add working pincodes first.");
+    void navigate({ to: "/partner-page/working-pincodes" });
   };
 
   const handleServiceLeadsNavigation = (event: React.MouseEvent<HTMLAnchorElement>) => {
@@ -331,7 +252,7 @@ function PartnerDashboardPage() {
 
     try {
       await logoutSession(refreshToken);
-      clearScope();
+      localStorage.removeItem(PARTNER_SCOPE_KEY);
       clearRoleSession("partner");
       setIsSidebarOpen(false);
       toast.success("Logged out successfully.");
@@ -394,7 +315,7 @@ function PartnerDashboardPage() {
           <span>Profile</span>
         </h2>
         <p>Name: {partnerName}</p>
-        <p>Pincode: {selectedPincode || "Not set"}</p>
+        {/* <p>Pincode: {selectedPincode || "Not set"}</p> */}
         <p>Serviceability: {serviceabilityStatus}</p>
         <p>Coins: {effectiveCoins}</p>
       </section>
@@ -462,6 +383,14 @@ function PartnerDashboardPage() {
               })()}
             </button>
           ))}
+          <Link
+            to="/partner-page/working-pincodes"
+            className="partner-sidebar-nav-link"
+            onClick={() => setIsSidebarOpen(false)}
+          >
+            <MapPin size={15} className="partner-nav-icon" />
+            <span>Working Pincodes</span>
+          </Link>
         </nav>
 
         <button type="button" className="partner-logout-btn" onClick={() => void handleLogout()} aria-label="Logout from partner dashboard">
@@ -474,9 +403,7 @@ function PartnerDashboardPage() {
           <header className="partner-content-head">
             <h1>Welcome {partnerName}</h1>
             {/* <p>Data refreshed for pincode {selectedPincode} at {refreshedAt}.</p>
-            {scopeLocation ? <p>{scopeLocation.district}, {scopeLocation.state}</p> : null}
             <p>Serviceability: {serviceabilityStatus}</p> */}
-            {scopeError ? <p className="partner-auth-error">{scopeError}</p> : null}
             {activePickup ? (
               <div className="lead-booking-box partner-active-pickup-alert" style={{ marginTop: 10 }}>
                 <h3>Active Pickup Alert</h3>
@@ -494,59 +421,6 @@ function PartnerDashboardPage() {
               </div>
             ) : null}
           </header>
-
-          <div
-            className={`partner-pincode-block partner-pincode-top-right${!showPincodeControls ? " partner-pincode-collapsed" : ""}`}
-            onClick={() => {
-              if (!showPincodeControls) setShowPincodeControls(true);
-            }}
-            role="button"
-            tabIndex={0}
-            onKeyDown={(event) => {
-              if (!showPincodeControls && (event.key === "Enter" || event.key === " ")) {
-                event.preventDefault();
-                setShowPincodeControls(true);
-              }
-            }}
-            aria-label="Reveal pincode input"
-          >
-            <div className="partner-pincode-title">
-              <MapPin size={12} />
-              <span>Pincode</span>
-            </div>
-            {showPincodeControls ? (
-              <div className="partner-pincode-controls">
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  maxLength={6}
-                  placeholder="Enter pincode"
-                  value={pincodeInput}
-                  onChange={(event) => setPincodeInput(event.target.value)}
-                />
-                <button type="button" onClick={applyPincode}>
-                  <MapPin size={11} />
-                  <span>{isApplyingScope ? "Applying..." : "Apply"}</span>
-                </button>
-              </div>
-            ) : null}
-            {showPincodeControls && (
-              <button
-                type="button"
-                className="partner-pincode-reveal partner-pincode-hide"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setShowPincodeControls(false);
-                }}
-              >
-                Hide
-              </button>
-            )}
-            <p>
-              Current: {selectedPincode}
-              {scopeLocation ? ` | ${scopeLocation.district}, ${scopeLocation.state}` : ""}
-            </p>
-          </div>
         </div>
 
         {renderActivePanel()}
@@ -557,19 +431,19 @@ function PartnerDashboardPage() {
               <aside className="partner-right-tiles" aria-label="Lead summary">
                 <Link
                   to="/Lead-bucket"
-                  className="partner-flash-tile partner-flash-button"
+                  className="partner-flash-tile partner-flash-button partner-flash-blue"
                   onClick={handleRestrictedNavigation}
                   aria-disabled={serviceabilityStatus !== "ACTIVE"}
                 >
-                  <h3>Click for Lead Bucket</h3>
+                  <h3>Lead Bucket</h3>
                 </Link>
                 <Link
                   to="/service-Leads"
-                  className="partner-flash-tile partner-flash-button"
+                  className="partner-flash-tile partner-flash-button partner-flash-green"
                   onClick={handleServiceLeadsNavigation}
                   aria-disabled={serviceabilityStatus !== "ACTIVE"}
                 >
-                  <h3>Service Leads Today</h3>
+                  <h3>Assigned Leads</h3>
                 </Link>
               </aside>
             </div>

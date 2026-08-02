@@ -11,11 +11,12 @@ type AnswerValue = "yes" | "no" | "na";
 type AnswerMap = Record<string, AnswerValue | undefined>;
 type AppleBatteryHealth = "above95" | "above85" | "at80";
 type MobileAgeOption = "below3Months" | "months3To6" | "months6To11" | "above11Months";
-type QuestionGroupKey = "basicFunctionality" | "batteryAndCharging" | "accessoriesAndOwnership";
+type QuestionGroupKey = "basicFunctionality" | "warrantyAndBill" | "batteryAndCharging" | "accessoriesAndOwnership";
 
 type QuestionnaireQuestion = {
   key: string;
   label: string;
+  hint?: string;
   options?: AnswerValue[];
 };
 
@@ -23,8 +24,7 @@ type SlideItem =
   | { kind: "question"; group: QuestionGroupKey; question: QuestionnaireQuestion }
   | { kind: "issue"; issue: string }
   | { kind: "appleBatteryHealth" }
-  | { kind: "bodyDefectDetail" }
-  | { kind: "devicePanelDetail" }
+  // | { kind: "devicePanelDetail" }
   | { kind: "functionalProblemsDetail" }
   | { kind: "mobileAge" }
   | { kind: "accessoriesDetail" };
@@ -80,95 +80,6 @@ const issueIcons: Record<string, JSX.Element> = {
     </svg>
   ),
 };
-
-type BodyDefectOption = { value: string; label: string; svg: JSX.Element };
-
-const scratchOptions: BodyDefectOption[] = [
-  {
-    value: "moreThan2",
-    label: "More than 2 scratches",
-    svg: (
-      <svg viewBox="0 0 80 110" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <rect x="18" y="4" width="44" height="102" rx="7" stroke="#1a2733" strokeWidth="2"/>
-        <rect x="28" y="9" width="24" height="3" rx="1.5" stroke="#1a2733" strokeWidth="1.5"/>
-        <rect x="22" y="17" width="36" height="76" rx="2" stroke="#d0d8e0" strokeWidth="1" fill="#f8fafc"/>
-        <circle cx="35" cy="13" r="2.5" stroke="#1a2733" strokeWidth="1.2" fill="none"/>
-        <line x1="26" y1="28" x2="44" y2="58" stroke="#20bf97" strokeWidth="2.5" strokeLinecap="round"/>
-        <line x1="36" y1="24" x2="55" y2="54" stroke="#20bf97" strokeWidth="2" strokeLinecap="round"/>
-        <line x1="23" y1="48" x2="38" y2="72" stroke="#20bf97" strokeWidth="1.5" strokeLinecap="round"/>
-      </svg>
-    ),
-  },
-  {
-    value: "oneTo2",
-    label: "1-2 scratches",
-    svg: (
-      <svg viewBox="0 0 80 110" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <rect x="18" y="4" width="44" height="102" rx="7" stroke="#1a2733" strokeWidth="2"/>
-        <rect x="28" y="9" width="24" height="3" rx="1.5" stroke="#1a2733" strokeWidth="1.5"/>
-        <rect x="22" y="17" width="36" height="76" rx="2" stroke="#d0d8e0" strokeWidth="1" fill="#f8fafc"/>
-        <circle cx="35" cy="13" r="2.5" stroke="#1a2733" strokeWidth="1.2" fill="none"/>
-        <line x1="26" y1="28" x2="44" y2="58" stroke="#20bf97" strokeWidth="2.5" strokeLinecap="round"/>
-        <line x1="36" y1="24" x2="55" y2="54" stroke="#20bf97" strokeWidth="2" strokeLinecap="round"/>
-      </svg>
-    ),
-  },
-  {
-    value: "none",
-    label: "No scratches",
-    svg: (
-      <svg viewBox="0 0 80 110" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <rect x="18" y="4" width="44" height="102" rx="7" stroke="#1a2733" strokeWidth="2"/>
-        <rect x="28" y="9" width="24" height="3" rx="1.5" stroke="#1a2733" strokeWidth="1.5"/>
-        <rect x="22" y="17" width="36" height="76" rx="2" stroke="#d0d8e0" strokeWidth="1" fill="#f8fafc"/>
-        <circle cx="35" cy="13" r="2.5" stroke="#1a2733" strokeWidth="1.2" fill="none"/>
-        <path d="M50 32 L51.5 36.5 L56 38 L51.5 39.5 L50 44 L48.5 39.5 L44 38 L48.5 36.5 Z" fill="#20bf97"/>
-      </svg>
-    ),
-  },
-];
-
-const dentOptions: BodyDefectOption[] = [
-  {
-    value: "majorOrMore",
-    label: "Major dent(s) or more than 2",
-    svg: (
-      <svg viewBox="0 0 80 110" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <rect x="18" y="4" width="44" height="102" rx="7" stroke="#1a2733" strokeWidth="2"/>
-        <rect x="28" y="9" width="24" height="3" rx="1.5" stroke="#1a2733" strokeWidth="1.5"/>
-        <rect x="22" y="17" width="36" height="76" rx="2" stroke="#d0d8e0" strokeWidth="1" fill="#f8fafc"/>
-        <path d="M62 28 Q72 35 62 42" stroke="#20bf97" strokeWidth="2.5" strokeLinecap="round" fill="none"/>
-        <path d="M18 52 Q8 59 18 66" stroke="#20bf97" strokeWidth="2.5" strokeLinecap="round" fill="none"/>
-        <path d="M62 76 Q72 81 62 86" stroke="#20bf97" strokeWidth="2" strokeLinecap="round" fill="none"/>
-      </svg>
-    ),
-  },
-  {
-    value: "oneTo2Minor",
-    label: "1-2 minor dents",
-    svg: (
-      <svg viewBox="0 0 80 110" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <rect x="18" y="4" width="44" height="102" rx="7" stroke="#1a2733" strokeWidth="2"/>
-        <rect x="28" y="9" width="24" height="3" rx="1.5" stroke="#1a2733" strokeWidth="1.5"/>
-        <rect x="22" y="17" width="36" height="76" rx="2" stroke="#d0d8e0" strokeWidth="1" fill="#f8fafc"/>
-        <path d="M62 40 Q70 47 62 54" stroke="#20bf97" strokeWidth="2" strokeLinecap="round" fill="none"/>
-        <path d="M18 62 Q10 69 18 76" stroke="#20bf97" strokeWidth="2" strokeLinecap="round" fill="none"/>
-      </svg>
-    ),
-  },
-  {
-    value: "none",
-    label: "No dents",
-    svg: (
-      <svg viewBox="0 0 80 110" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <rect x="18" y="4" width="44" height="102" rx="7" stroke="#1a2733" strokeWidth="2"/>
-        <rect x="28" y="9" width="24" height="3" rx="1.5" stroke="#1a2733" strokeWidth="1.5"/>
-        <rect x="22" y="17" width="36" height="76" rx="2" stroke="#d0d8e0" strokeWidth="1" fill="#f8fafc"/>
-        <path d="M50 32 L51.5 36.5 L56 38 L51.5 39.5 L50 44 L48.5 39.5 L44 38 L48.5 36.5 Z" fill="#20bf97"/>
-      </svg>
-    ),
-  },
-];
 
 const panelConditionOptions: BodyDefectOption[] = [
   {
@@ -406,23 +317,6 @@ const functionalProblemOptions: FunctionalProblemOption[] = [
     ),
   },
   {
-    value: "batteryHealthBelow80Service",
-    label: "Battery health Below 80 (battery in service)",
-    svg: (
-      <svg viewBox="0 0 80 110" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <rect x="18" y="4" width="44" height="102" rx="7" stroke="#1a2733" strokeWidth="2"/>
-        <rect x="28" y="9" width="24" height="3" rx="1.5" stroke="#1a2733" strokeWidth="1.5"/>
-        <rect x="22" y="17" width="36" height="76" rx="2" stroke="#d0d8e0" strokeWidth="1" fill="#f8fafc"/>
-        <rect x="29" y="43" width="22" height="16" rx="2" stroke="#20bf97" strokeWidth="1.5" fill="#e8f7f3"/>
-        <rect x="51" y="48" width="3" height="6" rx="1" fill="#20bf97"/>
-        <rect x="31" y="45" width="10" height="12" rx="1" fill="#20bf97" opacity="0.35"/>
-        <line x1="33" y1="53" x2="47" y2="53" stroke="#20bf97" strokeWidth="1.6" strokeLinecap="round"/>
-        <line x1="39" y1="49" x2="39" y2="57" stroke="#20bf97" strokeWidth="1.6" strokeLinecap="round"/>
-        {warnTriangle(55, 24)}
-      </svg>
-    ),
-  },
-  {
     value: "speakerFaulty",
     label: "Speaker Faulty",
     svg: (
@@ -587,13 +481,34 @@ const functionalProblemOptions: FunctionalProblemOption[] = [
       </svg>
     ),
   },
+  {
+    value: "batteryHealthBelow80Service",
+    label: "Battery health Below 80 (battery in service)",
+    svg: (
+      <svg viewBox="0 0 80 110" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <rect x="18" y="4" width="44" height="102" rx="7" stroke="#1a2733" strokeWidth="2"/>
+        <rect x="28" y="9" width="24" height="3" rx="1.5" stroke="#1a2733" strokeWidth="1.5"/>
+        <rect x="22" y="17" width="36" height="76" rx="2" stroke="#d0d8e0" strokeWidth="1" fill="#f8fafc"/>
+        <rect x="29" y="43" width="22" height="16" rx="2" stroke="#20bf97" strokeWidth="1.5" fill="#e8f7f3"/>
+        <rect x="51" y="48" width="3" height="6" rx="1" fill="#20bf97"/>
+        <rect x="31" y="45" width="10" height="12" rx="1" fill="#20bf97" opacity="0.35"/>
+        <line x1="33" y1="53" x2="47" y2="53" stroke="#20bf97" strokeWidth="1.6" strokeLinecap="round"/>
+        <line x1="39" y1="49" x2="39" y2="57" stroke="#20bf97" strokeWidth="1.6" strokeLinecap="round"/>
+        {warnTriangle(55, 24)}
+      </svg>
+    ),
+  },
 ];
 
+const warrantyAndBillQuestions = [
+  { key: "underWarranty", label: "Is your device under manufacturer warranty?", hint: "You can get a better price for your device if it's under manufacturer warranty with a GST valid bill." },
+  { key: "billInvoice", label: "Do you have GST valid bill with the same IMEI?", hint: "Make sure your bill has device IMEI mentioned on it." },
+] satisfies QuestionnaireQuestion[];
+
 const basicFunctionalityQuestions = [
-  { key: "canMakeCalls", label: "Are you able to make or receive calls?" },
-  { key: "touchWorking", label: "Is touch screen working properly?" },
-  { key: "displayWorking", label: "Is display brightness and color working properly?" },
-  { key: "screenReplaced", label: "Has the screen been replaced?" },
+  { key: "canMakeCalls", label: "Are you able to make and receive calls?", hint: "Check your device for cellular network connectivity issues." },
+  { key: "touchWorking", label: "Is your device's touch screen working properly?", hint: "Check the touch screen functionality of your phone." },
+  { key: "screenReplaced", label: "Is your phone's screen original?", hint: 'Pick "Yes" if screen was never changed or was changed by Authorized Service Center. Pick "No" if screen was changed at local shop.' },
 ] satisfies QuestionnaireQuestion[];
 
 const batteryAndChargingQuestions = [
@@ -625,6 +540,7 @@ type StoredDetails = {
   detailStep?: number;
   questionnaireSlide?: number;
   basicFunctionality?: AnswerMap;
+  warrantyAndBill?: AnswerMap;
   physicalIssues?: string[];
   nestedPhysicalIssueAnswers?: Record<string, string>;
   cameraAndBiometrics?: AnswerMap;
@@ -690,11 +606,6 @@ function cleanNestedAnswers(selectedIssues: string[], nestedAnswers: Record<stri
     if (answer) cleanedAnswers[issue] = answer;
     return cleanedAnswers;
   }, {});
-  if (selectedIssues.includes("Scratch/Dent on device body")) {
-    if (nestedAnswers["bodyScratches"]) cleaned["bodyScratches"] = nestedAnswers["bodyScratches"];
-    if (nestedAnswers["bodyDents"]) cleaned["bodyDents"] = nestedAnswers["bodyDents"];
-  }
-  // panel detail always appears — always preserve
   if (nestedAnswers["panelCondition"]) cleaned["panelCondition"] = nestedAnswers["panelCondition"];
   if (nestedAnswers["deviceBent"]) cleaned["deviceBent"] = nestedAnswers["deviceBent"];
   return cleaned;
@@ -719,12 +630,17 @@ function getFunctionalProblemOptions(isApple: boolean) {
   return functionalProblemOptions.filter((option) => option.value !== "batteryFaulty");
 }
 
+function getAccessoryOptions(isApple: boolean) {
+  if (!isApple) return accessoryOptions;
+  return accessoryOptions.filter((option) => option.value !== "originalCharger");
+}
+
 function buildSlideItems(): SlideItem[] {
   return [
     ...basicFunctionalityQuestions.map((question) => ({ kind: "question" as const, group: "basicFunctionality" as const, question })),
+    ...warrantyAndBillQuestions.map((question) => ({ kind: "question" as const, group: "warrantyAndBill" as const, question })),
     ...issueOptions.map((issue) => ({ kind: "issue" as const, issue })),
-    { kind: "bodyDefectDetail" as const },
-    { kind: "devicePanelDetail" as const },
+    // { kind: "devicePanelDetail" as const },
     { kind: "functionalProblemsDetail" as const },
     { kind: "mobileAge" as const },
     { kind: "accessoriesDetail" as const },
@@ -762,12 +678,9 @@ function chunkSlideItems(items: SlideItem[]): SlideItem[][] {
 }
 
 function getSlideTitle(slide: SlideItem[]) {
-  if (slide.some((item) => item.kind === "bodyDefectDetail")) {
-    return "Tell us more about your device's body defects?";
-  }
-  if (slide.some((item) => item.kind === "devicePanelDetail")) {
-    return "Device Side/Back Panel & Bent Condition";
-  }
+  // if (slide.some((item) => item.kind === "devicePanelDetail")) {
+  //   return "Device Side/Back Panel & Bent Condition";
+  // }
   if (slide.some((item) => item.kind === "functionalProblemsDetail")) {
     return "Functional or Physical Problems";
   }
@@ -777,22 +690,22 @@ function getSlideTitle(slide: SlideItem[]) {
   if (slide.some((item) => item.kind === "accessoriesDetail")) {
     return "Do you have the following?";
   }
-  if (slide.some((item) => item.kind === "appleBatteryHealth" || (item.kind === "question" && item.group !== "basicFunctionality"))) {
-    return "Battery & ownership";
+  if (slide.some((item) => item.kind === "question" && item.group === "warrantyAndBill")) {
+    return "Warranty & Bill";
   }
   if (slide.some((item) => item.kind === "issue")) {
     return "Condition";
   }
-  return "Basics";
+  if (slide.some((item) => item.kind === "appleBatteryHealth" || (item.kind === "question" && item.group !== "basicFunctionality"))) {
+    return "Battery & ownership";
+  }
+  return "Tell us more about your device?";
 }
 
 function getSlideDescription(slide: SlideItem[]) {
-  if (slide.some((item) => item.kind === "bodyDefectDetail")) {
-    return "(Because you selected device's body defect)";
-  }
-  if (slide.some((item) => item.kind === "devicePanelDetail")) {
-    return "Check your device's panel condition and physical alignment.";
-  }
+  // if (slide.some((item) => item.kind === "devicePanelDetail")) {
+  //   return "Check your device's panel condition and physical alignment.";
+  // }
   if (slide.some((item) => item.kind === "functionalProblemsDetail")) {
     return "Please choose appropriate condition to get accurate quote:";
   }
@@ -805,7 +718,8 @@ function getSlideDescription(slide: SlideItem[]) {
   const title = getSlideTitle(slide);
   if (title === "Battery & ownership") return "Battery, charging and documents.";
   if (title === "Condition") return "Select visible issues if any.";
-  return "Calls, display and touch.";
+  if (title === "Warranty & Bill") return "Help us verify your device ownership details.";
+  return "Please answer a few questions about your device.";
 }
 
 function AnswerToggleGroup({ name, value, options = ["yes", "no"], onChange }: { name: string; value?: AnswerValue; options?: AnswerValue[]; onChange: (value: AnswerValue) => void }) {
@@ -872,6 +786,7 @@ function UserSellPhoneDeviceDetailsPage() {
   const [storedSelectedModel, setStoredSelectedModel] = useState<SelectedModel | null>(null);
   const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
   const [basicFunctionality, setBasicFunctionality] = useState<AnswerMap>({});
+  const [warrantyAndBill, setWarrantyAndBill] = useState<AnswerMap>({});
   const [selectedIssues, setSelectedIssues] = useState<string[]>([]);
   const [nestedPhysicalIssueAnswers, setNestedPhysicalIssueAnswers] = useState<Record<string, string>>({});
   const [batteryAndCharging, setBatteryAndCharging] = useState<AnswerMap>({});
@@ -892,6 +807,7 @@ function UserSellPhoneDeviceDetailsPage() {
     setStoredDetails(details);
     setStoredSelectedModel(selectedModel);
     setBasicFunctionality(createInitialBasicFunctionality(details));
+    setWarrantyAndBill(details?.warrantyAndBill ?? {});
     setSelectedIssues(details?.physicalIssues ?? details?.selectedIssues ?? []);
     setNestedPhysicalIssueAnswers(details?.nestedPhysicalIssueAnswers ?? {});
     setBatteryAndCharging(details?.batteryAndCharging ?? {});
@@ -907,6 +823,7 @@ function UserSellPhoneDeviceDetailsPage() {
   const isApple = isAppleDevice(storedSelectedModel);
   const slides = chunkSlideItems(buildSlideItems());
   const functionalProblemOptionsForDevice = getFunctionalProblemOptions(isApple);
+  const accessoryOptionsForDevice = getAccessoryOptions(isApple);
 
   const activeSlideIndex = normalizeSlideIndex(currentSlideIndex, slides.length);
   const activeSlide = slides[activeSlideIndex] ?? [];
@@ -914,12 +831,14 @@ function UserSellPhoneDeviceDetailsPage() {
 
   const answerMaps: Record<QuestionGroupKey, AnswerMap> = {
     basicFunctionality,
+    warrantyAndBill,
     batteryAndCharging,
     accessoriesAndOwnership,
   };
 
   const updateAnswerMap = (group: QuestionGroupKey, updater: (previousAnswers: AnswerMap) => AnswerMap) => {
     if (group === "basicFunctionality") setBasicFunctionality(updater);
+    if (group === "warrantyAndBill") setWarrantyAndBill(updater);
     if (group === "batteryAndCharging") setBatteryAndCharging(updater);
     if (group === "accessoriesAndOwnership") setAccessoriesAndOwnership(updater);
   };
@@ -936,6 +855,7 @@ function UserSellPhoneDeviceDetailsPage() {
       detailStep: Math.min(slideIndex + 1, 3),
       questionnaireSlide: slideIndex,
       basicFunctionality,
+      warrantyAndBill,
       physicalIssues: issues,
       nestedPhysicalIssueAnswers: cleanIssueAnswers,
       cameraAndBiometrics: storedDetails?.cameraAndBiometrics ?? {},
@@ -1037,20 +957,18 @@ function UserSellPhoneDeviceDetailsPage() {
 
   const isSlideComplete = activeSlide.every((item) => {
     if (item.kind === "issue") return true;
-    if (item.kind === "bodyDefectDetail") return Boolean(nestedPhysicalIssueAnswers["bodyScratches"] && nestedPhysicalIssueAnswers["bodyDents"]);
-    if (item.kind === "devicePanelDetail") return Boolean(nestedPhysicalIssueAnswers["panelCondition"] && nestedPhysicalIssueAnswers["deviceBent"]);
-    if (item.kind === "functionalProblemsDetail") return true; // multi-select, always passable
+    // if (item.kind === "devicePanelDetail") return Boolean(nestedPhysicalIssueAnswers["panelCondition"] && nestedPhysicalIssueAnswers["deviceBent"]);
+    if (item.kind === "functionalProblemsDetail") return true;
     if (item.kind === "mobileAge") return Boolean(mobileAge);
-    if (item.kind === "accessoriesDetail") return true; // multi-select, always passable
+    if (item.kind === "accessoriesDetail") return true;
     if (item.kind === "appleBatteryHealth") return Boolean(appleBatteryHealth);
     return Boolean(answerMaps[item.group][item.question.key]);
   });
 
-  const progressItems = slides.flat().filter((item) => item.kind !== "issue" && item.kind !== "bodyDefectDetail" && item.kind !== "devicePanelDetail" && item.kind !== "functionalProblemsDetail" && item.kind !== "accessoriesDetail");
+  const progressItems = slides.flat().filter((item) => item.kind !== "issue" && item.kind !== "functionalProblemsDetail" && item.kind !== "accessoriesDetail");
   const answeredCount = progressItems.filter((item) => {
     if (item.kind === "appleBatteryHealth") return Boolean(appleBatteryHealth);
     if (item.kind === "mobileAge") return Boolean(mobileAge);
-    if (item.kind === "bodyDefectDetail") return false;
     return Boolean(answerMaps[item.group][item.question.key]);
   }).length;
   const totalRequiredCount = progressItems.length;
@@ -1079,62 +997,7 @@ function UserSellPhoneDeviceDetailsPage() {
       return <AppleBatteryHealthGroup key="appleBatteryHealth" value={appleBatteryHealth} onChange={updateAppleBatteryHealth} />;
     }
 
-    if (item.kind === "bodyDefectDetail") {
-      const currentScratches = nestedPhysicalIssueAnswers["bodyScratches"];
-      const currentDents = nestedPhysicalIssueAnswers["bodyDents"];
-      const updateBodyDefect = (key: string, value: string) => {
-        const updated = { ...nestedPhysicalIssueAnswers, [key]: value };
-        setNestedPhysicalIssueAnswers(updated);
-        persistDeviceDetails(activeSlideIndex, selectedIssues, batteryAndCharging, appleBatteryHealth, updated);
-      };
-      return (
-        <div key="bodyDefectDetail" className="user-body-defect-detail">
-          <div className="user-body-defect-section">
-            <div className="user-body-defect-section-header">
-              <h3>1. Scratches on device Body</h3>
-              <p>Check for scratches on device body</p>
-            </div>
-            <div className="user-issue-img-grid">
-              {scratchOptions.map((opt) => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  className={`user-issue-img-tile${currentScratches === opt.value ? " selected" : ""}`}
-                  onClick={() => updateBodyDefect("bodyScratches", opt.value)}
-                  aria-pressed={currentScratches === opt.value}
-                >
-                  <div className="user-issue-img-wrap">{opt.svg}</div>
-                  <span className="user-issue-img-label">{opt.label}</span>
-                  {currentScratches === opt.value && <span className="user-issue-img-check">✓</span>}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="user-body-defect-section">
-            <div className="user-body-defect-section-header">
-              <h3>2. Dents on device Body</h3>
-              <p>Check for dents on device body</p>
-            </div>
-            <div className="user-issue-img-grid">
-              {dentOptions.map((opt) => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  className={`user-issue-img-tile${currentDents === opt.value ? " selected" : ""}`}
-                  onClick={() => updateBodyDefect("bodyDents", opt.value)}
-                  aria-pressed={currentDents === opt.value}
-                >
-                  <div className="user-issue-img-wrap">{opt.svg}</div>
-                  <span className="user-issue-img-label">{opt.label}</span>
-                  {currentDents === opt.value && <span className="user-issue-img-check">✓</span>}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      );
-    }
-
+    /* devicePanelDetail slide commented out
     if (item.kind === "devicePanelDetail") {
       const currentPanel = nestedPhysicalIssueAnswers["panelCondition"];
       const currentBent = nestedPhysicalIssueAnswers["deviceBent"];
@@ -1152,9 +1015,7 @@ function UserSellPhoneDeviceDetailsPage() {
             </div>
             <div className="user-issue-img-grid">
               {panelConditionOptions.map((opt) => (
-                <button
-                  key={opt.value}
-                  type="button"
+                <button key={opt.value} type="button"
                   className={`user-issue-img-tile${currentPanel === opt.value ? " selected" : ""}`}
                   onClick={() => updatePanelDetail("panelCondition", opt.value)}
                   aria-pressed={currentPanel === opt.value}
@@ -1173,9 +1034,7 @@ function UserSellPhoneDeviceDetailsPage() {
             </div>
             <div className="user-issue-img-grid">
               {deviceBentOptions.map((opt) => (
-                <button
-                  key={opt.value}
-                  type="button"
+                <button key={opt.value} type="button"
                   className={`user-issue-img-tile${currentBent === opt.value ? " selected" : ""}`}
                   onClick={() => updatePanelDetail("deviceBent", opt.value)}
                   aria-pressed={currentBent === opt.value}
@@ -1190,6 +1049,7 @@ function UserSellPhoneDeviceDetailsPage() {
         </div>
       );
     }
+    */
 
     if (item.kind === "functionalProblemsDetail") {
       const toggleFunctionalProblem = (value: string) => {
@@ -1231,7 +1091,7 @@ function UserSellPhoneDeviceDetailsPage() {
       };
       return (
         <div key="accessoriesDetail" className="user-accessories-grid">
-          {accessoryOptions.map((opt) => {
+          {accessoryOptionsForDevice.map((opt) => {
             const selected = accessories.includes(opt.value);
             return (
               <button
@@ -1283,6 +1143,7 @@ function UserSellPhoneDeviceDetailsPage() {
     return (
       <article className="user-question-card" key={`${item.group}-${item.question.key}`}>
         <h3>{item.question.label}</h3>
+        {item.question.hint && <p className="user-question-hint">{item.question.hint}</p>}
         <AnswerToggleGroup
           name={`${item.group}-${item.question.key}`}
           value={answerMaps[item.group][item.question.key]}
@@ -1311,7 +1172,7 @@ function UserSellPhoneDeviceDetailsPage() {
             <h2>{getSlideTitle(activeSlide)}</h2>
             <p>{getSlideDescription(activeSlide)}</p>
           </div>
-          <div className={activeSlide.some((item) => item.kind === "bodyDefectDetail" || item.kind === "devicePanelDetail" || item.kind === "functionalProblemsDetail" || item.kind === "accessoriesDetail") ? "user-body-defect-wrap" : activeSlide.some((item) => item.kind === "issue") && activeSlide.every((item) => item.kind === "issue") ? "user-issue-img-grid" : "user-slide-item-grid"}>
+          <div className={activeSlide.some((item) => item.kind === "functionalProblemsDetail" || item.kind === "accessoriesDetail") ? "user-body-defect-wrap" : activeSlide.some((item) => item.kind === "issue") && activeSlide.every((item) => item.kind === "issue") ? "user-issue-img-grid" : "user-slide-item-grid"}>
             {activeSlide.map(renderSlideItem)}
           </div>
           <div className="user-auth-actions user-question-actions">

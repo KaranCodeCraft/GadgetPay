@@ -343,6 +343,39 @@ export function touchPartnerPincodeAssignment({ partnerId, pincode, assignedAt, 
     .run(assignedAt, assignedAt, updatedBy, partnerId, pincode);
 }
 
+export function deactivatePartnerPincodeScope(partnerId, pincode) {
+  const now = new Date().toISOString();
+  sqlite
+    .prepare(
+      `UPDATE partner_pincode_scopes
+       SET is_active = 0, updated_at = ?, updated_by = ?
+       WHERE partner_id = ? AND pincode = ?`
+    )
+    .run(now, partnerId, partnerId, pincode);
+}
+
+export function listActivePartnerPincodes(partnerId) {
+  return sqlite
+    .prepare(
+      `SELECT
+        s.pincode,
+        s.created_at as createdAt,
+        sp.state,
+        sp.district
+      FROM partner_pincode_scopes s
+      LEFT JOIN serviceability_pincodes sp ON sp.pincode = s.pincode
+      WHERE s.partner_id = ? AND s.is_active = 1
+      ORDER BY s.created_at ASC`
+    )
+    .all(partnerId)
+    .map((row) => ({
+      pincode: row.pincode,
+      state: row.state || null,
+      district: row.district || null,
+      createdAt: row.createdAt,
+    }));
+}
+
 export function upsertUser(user) {
   sqlite
     .prepare(
@@ -706,10 +739,23 @@ export function getPartnerLeadById(id, options = {}) {
   return attachPartnerUnlockOrder(mapPartnerLead(row), options.viewerPartnerId);
 }
 
-export function listPartnerLeadsForScope({ pincode, leadType, status, partnerId, viewerPartnerId, date, timeSlot, limit = 50 }) {
+export function listPartnerLeadsForScope({ pincode, pincodes, leadType, status, partnerId, viewerPartnerId, date, timeSlot, limit = 50 }) {
   const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
-  const clauses = ["pincode = ?", "lead_type = ?", "status != 'CANCELLED'"];
-  const params = [pincode, leadType];
+
+  let pincodeClause;
+  let pincodeParams;
+  if (Array.isArray(pincodes) && pincodes.length > 0) {
+    const safePincodes = pincodes.slice(0, 4);
+    const placeholders = safePincodes.map(() => "?").join(", ");
+    pincodeClause = `pincode IN (${placeholders})`;
+    pincodeParams = safePincodes;
+  } else {
+    pincodeClause = "pincode = ?";
+    pincodeParams = [pincode];
+  }
+
+  const clauses = [pincodeClause, "lead_type = ?", "status != 'CANCELLED'"];
+  const params = [...pincodeParams, leadType];
 
   if (status) {
     clauses.push("status = ?");

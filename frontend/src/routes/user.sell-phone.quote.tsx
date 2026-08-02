@@ -466,6 +466,23 @@ function UserSellPhoneQuotePage() {
     }
   };
 
+  const handleBypassOtp = () => {
+    const phone = quoteAccessPhone.trim();
+    if (phone && !/^\d{10}$/.test(phone)) {
+      setAuthError("Enter a valid 10-digit phone number.");
+      return;
+    }
+    const bypassPhone = phone || "9999999999";
+    const bypassName = sellerName.trim() || "Test User";
+    setCallingPhoneNumber(bypassPhone);
+    setSellerName(bypassName);
+    setVerifiedUser({ id: "bypass", name: bypassName });
+    setVerifiedToken("bypass-dev");
+    setAuthError(null);
+    setIsPhoneVerified(true);
+    void loadBackendQuotePreview(selectedModel);
+  };
+
   const handleSchedulePickup = async () => {
     const token = verifiedToken || window.localStorage.getItem(USER_TOKEN_KEY);
     const userId = verifiedUser?.id || window.localStorage.getItem(USER_ID_KEY) || "";
@@ -473,6 +490,12 @@ function UserSellPhoneQuotePage() {
 
     if (!token || !userId) {
       setAuthError("Phone verification required before scheduling pickup.");
+      return;
+    }
+
+    // Dev bypass — skip backend commit and go straight to success
+    if (token === "bypass-dev") {
+      setModalStep("success");
       return;
     }
 
@@ -577,6 +600,15 @@ function UserSellPhoneQuotePage() {
                   </button>
                 )}
               </div>
+              <div style={{ textAlign: "center", marginTop: 10 }}>
+                <button
+                  type="button"
+                  onClick={handleBypassOtp}
+                  style={{ background: "none", border: "none", color: "#a0aec0", fontSize: 12, textDecoration: "underline", cursor: "pointer", padding: 0 }}
+                >
+                  Bypass OTP (dev only)
+                </button>
+              </div>
             </section>
           ) : (
             <>
@@ -652,13 +684,13 @@ function UserSellPhoneQuotePage() {
                     </div>
                     <button type="button" className="user-quote-sell-btn" disabled={!isQuoteReady || quoteLoading} onClick={openScheduleModal}>Sell Now</button>
                     <div className="user-quote-coupons-row">
-                      <span>🎟 Apply Coupons</span>
+                      <span>🎟 Apply Coupons <span style={{ fontSize: 11, fontWeight: 600, color: "#a0aec0", background: "#f1f5f9", borderRadius: 6, padding: "2px 7px", marginLeft: 6 }}>Coming soon</span></span>
                       <span>›</span>
                     </div>
-                    <div className="user-quote-whatsapp-row">
+                    {/* <div className="user-quote-whatsapp-row">
                       <span>Get price alerts &amp; notifications</span>
                       <button type="button" className={`user-quote-wa-toggle${whatsappAlerts ? "" : " off"}`} onClick={() => setWhatsappAlerts((v) => !v)} aria-label="Toggle WhatsApp alerts" />
-                    </div>
+                    </div> */}
                     <div className="user-quote-note-box">
                       <span className="user-quote-note-icon">!</span>
                       <span><strong>Note:</strong> Final value will be confirmed after device inspection at doorstep.</span>

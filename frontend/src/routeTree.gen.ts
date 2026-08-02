@@ -29,7 +29,10 @@ import { Route as UserPaymentsRouteImport } from './routes/user.payments'
 import { Route as UserMyListingsRouteImport } from './routes/user.my-listings'
 import { Route as UserLoginRouteImport } from './routes/user.login'
 import { Route as UserListDeviceRouteImport } from './routes/user.list-device'
+import { Route as UserClosedOrdersRouteImport } from './routes/user.closed-orders'
+import { Route as UserActiveOrdersRouteImport } from './routes/user.active-orders'
 import { Route as ServiceLeadsTransactionRouteImport } from './routes/service-Leads/transaction'
+import { Route as PartnerPageWorkingPincodesRouteImport } from './routes/partner-page.working-pincodes'
 import { Route as PartnerPageCoinsRouteImport } from './routes/partner-page.coins'
 import { Route as LeadBucketUnlockPaymentRouteImport } from './routes/Lead-bucket.Unlock-payment'
 import { Route as ServiceLeadsTransactionIndexRouteImport } from './routes/service-Leads/transaction/index'
@@ -140,11 +143,27 @@ const UserListDeviceRoute = UserListDeviceRouteImport.update({
   path: '/list-device',
   getParentRoute: () => UserRoute,
 } as any)
+const UserClosedOrdersRoute = UserClosedOrdersRouteImport.update({
+  id: '/closed-orders',
+  path: '/closed-orders',
+  getParentRoute: () => UserRoute,
+} as any)
+const UserActiveOrdersRoute = UserActiveOrdersRouteImport.update({
+  id: '/active-orders',
+  path: '/active-orders',
+  getParentRoute: () => UserRoute,
+} as any)
 const ServiceLeadsTransactionRoute = ServiceLeadsTransactionRouteImport.update({
   id: '/service-Leads/transaction',
   path: '/service-Leads/transaction',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PartnerPageWorkingPincodesRoute =
+  PartnerPageWorkingPincodesRouteImport.update({
+    id: '/working-pincodes',
+    path: '/working-pincodes',
+    getParentRoute: () => PartnerPageRoute,
+  } as any)
 const PartnerPageCoinsRoute = PartnerPageCoinsRouteImport.update({
   id: '/coins',
   path: '/coins',
@@ -208,7 +227,10 @@ export interface FileRoutesByFullPath {
   '/user': typeof UserRouteWithChildren
   '/Lead-bucket/Unlock-payment': typeof LeadBucketUnlockPaymentRoute
   '/partner-page/coins': typeof PartnerPageCoinsRoute
+  '/partner-page/working-pincodes': typeof PartnerPageWorkingPincodesRoute
   '/service-Leads/transaction': typeof ServiceLeadsTransactionRouteWithChildren
+  '/user/active-orders': typeof UserActiveOrdersRoute
+  '/user/closed-orders': typeof UserClosedOrdersRoute
   '/user/list-device': typeof UserListDeviceRoute
   '/user/login': typeof UserLoginRoute
   '/user/my-listings': typeof UserMyListingsRoute
@@ -240,6 +262,9 @@ export interface FileRoutesByTo {
   '/user': typeof UserRouteWithChildren
   '/Lead-bucket/Unlock-payment': typeof LeadBucketUnlockPaymentRoute
   '/partner-page/coins': typeof PartnerPageCoinsRoute
+  '/partner-page/working-pincodes': typeof PartnerPageWorkingPincodesRoute
+  '/user/active-orders': typeof UserActiveOrdersRoute
+  '/user/closed-orders': typeof UserClosedOrdersRoute
   '/user/list-device': typeof UserListDeviceRoute
   '/user/login': typeof UserLoginRoute
   '/user/my-listings': typeof UserMyListingsRoute
@@ -272,7 +297,10 @@ export interface FileRoutesById {
   '/user': typeof UserRouteWithChildren
   '/Lead-bucket/Unlock-payment': typeof LeadBucketUnlockPaymentRoute
   '/partner-page/coins': typeof PartnerPageCoinsRoute
+  '/partner-page/working-pincodes': typeof PartnerPageWorkingPincodesRoute
   '/service-Leads/transaction': typeof ServiceLeadsTransactionRouteWithChildren
+  '/user/active-orders': typeof UserActiveOrdersRoute
+  '/user/closed-orders': typeof UserClosedOrdersRoute
   '/user/list-device': typeof UserListDeviceRoute
   '/user/login': typeof UserLoginRoute
   '/user/my-listings': typeof UserMyListingsRoute
@@ -306,7 +334,10 @@ export interface FileRouteTypes {
     | '/user'
     | '/Lead-bucket/Unlock-payment'
     | '/partner-page/coins'
+    | '/partner-page/working-pincodes'
     | '/service-Leads/transaction'
+    | '/user/active-orders'
+    | '/user/closed-orders'
     | '/user/list-device'
     | '/user/login'
     | '/user/my-listings'
@@ -338,6 +369,9 @@ export interface FileRouteTypes {
     | '/user'
     | '/Lead-bucket/Unlock-payment'
     | '/partner-page/coins'
+    | '/partner-page/working-pincodes'
+    | '/user/active-orders'
+    | '/user/closed-orders'
     | '/user/list-device'
     | '/user/login'
     | '/user/my-listings'
@@ -369,7 +403,10 @@ export interface FileRouteTypes {
     | '/user'
     | '/Lead-bucket/Unlock-payment'
     | '/partner-page/coins'
+    | '/partner-page/working-pincodes'
     | '/service-Leads/transaction'
+    | '/user/active-orders'
+    | '/user/closed-orders'
     | '/user/list-device'
     | '/user/login'
     | '/user/my-listings'
@@ -546,12 +583,33 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof UserListDeviceRouteImport
       parentRoute: typeof UserRoute
     }
+    '/user/closed-orders': {
+      id: '/user/closed-orders'
+      path: '/closed-orders'
+      fullPath: '/user/closed-orders'
+      preLoaderRoute: typeof UserClosedOrdersRouteImport
+      parentRoute: typeof UserRoute
+    }
+    '/user/active-orders': {
+      id: '/user/active-orders'
+      path: '/active-orders'
+      fullPath: '/user/active-orders'
+      preLoaderRoute: typeof UserActiveOrdersRouteImport
+      parentRoute: typeof UserRoute
+    }
     '/service-Leads/transaction': {
       id: '/service-Leads/transaction'
       path: '/service-Leads/transaction'
       fullPath: '/service-Leads/transaction'
       preLoaderRoute: typeof ServiceLeadsTransactionRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/partner-page/working-pincodes': {
+      id: '/partner-page/working-pincodes'
+      path: '/working-pincodes'
+      fullPath: '/partner-page/working-pincodes'
+      preLoaderRoute: typeof PartnerPageWorkingPincodesRouteImport
+      parentRoute: typeof PartnerPageRoute
     }
     '/partner-page/coins': {
       id: '/partner-page/coins'
@@ -633,10 +691,12 @@ const LeadBucketRouteWithChildren = LeadBucketRoute._addFileChildren(
 
 interface PartnerPageRouteChildren {
   PartnerPageCoinsRoute: typeof PartnerPageCoinsRoute
+  PartnerPageWorkingPincodesRoute: typeof PartnerPageWorkingPincodesRoute
 }
 
 const PartnerPageRouteChildren: PartnerPageRouteChildren = {
   PartnerPageCoinsRoute: PartnerPageCoinsRoute,
+  PartnerPageWorkingPincodesRoute: PartnerPageWorkingPincodesRoute,
 }
 
 const PartnerPageRouteWithChildren = PartnerPageRoute._addFileChildren(
@@ -674,6 +734,8 @@ const UserSellTabletRouteWithChildren = UserSellTabletRoute._addFileChildren(
 )
 
 interface UserRouteChildren {
+  UserActiveOrdersRoute: typeof UserActiveOrdersRoute
+  UserClosedOrdersRoute: typeof UserClosedOrdersRoute
   UserListDeviceRoute: typeof UserListDeviceRoute
   UserLoginRoute: typeof UserLoginRoute
   UserMyListingsRoute: typeof UserMyListingsRoute
@@ -686,6 +748,8 @@ interface UserRouteChildren {
 }
 
 const UserRouteChildren: UserRouteChildren = {
+  UserActiveOrdersRoute: UserActiveOrdersRoute,
+  UserClosedOrdersRoute: UserClosedOrdersRoute,
   UserListDeviceRoute: UserListDeviceRoute,
   UserLoginRoute: UserLoginRoute,
   UserMyListingsRoute: UserMyListingsRoute,
