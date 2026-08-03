@@ -483,11 +483,9 @@ partnerRouter.get("/service-leads", requireAuth, requireRole("partner"), (req, r
     const rows = listPartnerLeadsForScope({
       pincode: query.pincode,
       leadType: "SERVICE_LEAD",
-      status: query.status,
+      status: "ACCEPTED",
       partnerId: req.auth.sub,
       viewerPartnerId: req.auth.sub,
-      date: query.date,
-      timeSlot: query.timeSlot,
       limit: query.limit,
     });
     res.json(success({ rows, count: rows.length }));

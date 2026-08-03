@@ -2821,14 +2821,14 @@ export function upsertDevicePriceCatalogRows(rows) {
   const findStmt = sqlite.prepare(`
     SELECT id
     FROM device_price_catalog
-    WHERE brand = ? AND series = ? AND model = ? AND storage = ? AND launch_year = ?
+    WHERE device_type = ? AND brand = ? AND series = ? AND model = ? AND storage = ? AND launch_year = ?
   `);
 
   const upsertStmt = sqlite.prepare(`
     INSERT INTO device_price_catalog (
-      brand, series, model, storage, launch_year, cashify_price, row_json, source_upload_id, source_file_name, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(brand, series, model, storage, launch_year)
+      device_type, brand, series, model, storage, launch_year, cashify_price, row_json, source_upload_id, source_file_name, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(device_type, brand, series, model, storage, launch_year)
     DO UPDATE SET
       cashify_price = excluded.cashify_price,
       row_json = excluded.row_json,
@@ -2842,7 +2842,14 @@ export function upsertDevicePriceCatalogRows(rows) {
     let updatedCount = 0;
 
     for (const row of items) {
-      const existing = findStmt.get(row.brand, row.series, row.model, row.storage, row.launchYear);
+      const existing = findStmt.get(
+        row.deviceType,
+        row.brand,
+        row.series,
+        row.model,
+        row.storage,
+        row.launchYear,
+      );
       if (existing) {
         updatedCount += 1;
       } else {
@@ -2850,6 +2857,7 @@ export function upsertDevicePriceCatalogRows(rows) {
       }
 
       upsertStmt.run(
+        row.deviceType,
         row.brand,
         row.series,
         row.model,
@@ -2874,9 +2882,14 @@ export function upsertDevicePriceCatalogRows(rows) {
   return tx(rows);
 }
 
-export function listDevicePriceCatalog({ search, limit = 200 }) {
+export function listDevicePriceCatalog({ search, deviceType, limit = 200 }) {
   const clauses = [];
   const params = [];
+
+  if (deviceType) {
+    clauses.push("device_type = ?");
+    params.push(deviceType);
+  }
 
   if (search) {
     clauses.push("(brand LIKE ? OR series LIKE ? OR model LIKE ? OR storage LIKE ?)");
@@ -2887,6 +2900,7 @@ export function listDevicePriceCatalog({ search, limit = 200 }) {
   const query = `
     SELECT
       id,
+      device_type as deviceType,
       brand,
       series,
       model,
@@ -2910,11 +2924,12 @@ export function listDevicePriceCatalog({ search, limit = 200 }) {
   }));
 }
 
-export function findDevicePriceByExactMatch({ brand, series, model, storage, launchYear }) {
+export function findDevicePriceByExactMatch({ deviceType, brand, series, model, storage, launchYear }) {
   const row = sqlite
     .prepare(`
       SELECT
         id,
+        device_type as deviceType,
         brand,
         series,
         model,
@@ -2927,10 +2942,10 @@ export function findDevicePriceByExactMatch({ brand, series, model, storage, lau
         created_at as createdAt,
         updated_at as updatedAt
       FROM device_price_catalog
-      WHERE brand = ? AND series = ? AND model = ? AND storage = ? AND launch_year = ?
+      WHERE device_type = ? AND brand = ? AND series = ? AND model = ? AND storage = ? AND launch_year = ?
       LIMIT 1
     `)
-    .get(brand, series, model, storage, launchYear);
+    .get(deviceType, brand, series, model, storage, launchYear);
 
   if (!row) {
     return null;
@@ -2942,14 +2957,14 @@ export function findDevicePriceByExactMatch({ brand, series, model, storage, lau
   };
 }
 
-export function listDistinctBrands() {
+export function listDistinctBrands(deviceType) {
   return sqlite
-    .prepare(`SELECT DISTINCT brand FROM device_price_catalog ORDER BY brand`)
-    .all()
+    .prepare(`SELECT DISTINCT brand FROM device_price_catalog WHERE device_type = ? ORDER BY brand`)
+    .all(deviceType)
     .map((row) => row.brand);
 }
 
-export function listModelsForBrand(brand) {
+export function listModelsForBrand(brand, deviceType) {
   return sqlite
     .prepare(`
       SELECT
@@ -2959,10 +2974,10 @@ export function listModelsForBrand(brand) {
         launch_year AS launchYear,
         cashify_price AS cashifyPrice
       FROM device_price_catalog
-      WHERE brand = ?
+      WHERE brand = ? AND device_type = ?
       ORDER BY series, model, storage
     `)
-    .all(brand);
+    .all(brand, deviceType);
 }
 
 function mapQuoteDeductionRule(row) {
@@ -3123,11 +3138,12 @@ export function createDevicePriceUploadHistory(rec) {
   sqlite
     .prepare(`
       INSERT INTO device_price_upload_history (
-        id, file_name, uploaded_by, uploaded_at, status, deactivated_by, deactivated_at, deactivated_row_count, inserted_count, updated_count, total_processed
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        id, device_type, file_name, uploaded_by, uploaded_at, status, deactivated_by, deactivated_at, deactivated_row_count, inserted_count, updated_count, total_processed
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
     .run(
       rec.id,
+      rec.deviceType,
       rec.fileName,
       rec.uploadedBy,
       rec.uploadedAt,
@@ -3144,9 +3160,9 @@ export function createDevicePriceUploadHistory(rec) {
 export function createDevicePriceUploadSnapshotRows(rows) {
   const upsertStmt = sqlite.prepare(`
     INSERT INTO device_price_upload_rows (
-      upload_id, brand, series, model, storage, launch_year, cashify_price, row_json, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(upload_id, brand, series, model, storage, launch_year)
+      upload_id, device_type, brand, series, model, storage, launch_year, cashify_price, row_json, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(upload_id, device_type, brand, series, model, storage, launch_year)
     DO UPDATE SET
       cashify_price = excluded.cashify_price,
       row_json = excluded.row_json,
@@ -3157,6 +3173,7 @@ export function createDevicePriceUploadSnapshotRows(rows) {
     for (const row of items) {
       upsertStmt.run(
         row.uploadId,
+        row.deviceType,
         row.brand,
         row.series,
         row.model,
@@ -3178,6 +3195,7 @@ export function listDevicePriceUploadSnapshotRows(uploadId) {
     .prepare(`
       SELECT
         upload_id as uploadId,
+        device_type as deviceType,
         brand,
         series,
         model,
@@ -3194,11 +3212,21 @@ export function listDevicePriceUploadSnapshotRows(uploadId) {
     .all(uploadId);
 }
 
-export function listDevicePriceUploadHistory() {
+export function listDevicePriceUploadHistory({ deviceType } = {}) {
+  const clauses = [];
+  const params = [];
+
+  if (deviceType) {
+    clauses.push("h.device_type = ?");
+    params.push(deviceType);
+  }
+
+  const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   return sqlite
     .prepare(`
       SELECT
         h.id,
+        h.device_type as deviceType,
         h.file_name as fileName,
         h.uploaded_by as uploadedBy,
         h.uploaded_at as uploadedAt,
@@ -3212,12 +3240,13 @@ export function listDevicePriceUploadHistory() {
         (
           SELECT COUNT(*)
           FROM device_price_catalog c
-          WHERE c.source_upload_id = h.id
+          WHERE c.source_upload_id = h.id AND c.device_type = h.device_type
         ) as activeRowCount
       FROM device_price_upload_history h
+      ${where}
       ORDER BY h.uploaded_at DESC
     `)
-    .all();
+    .all(...params);
 }
 
 export function getDevicePriceUploadHistoryById(uploadId) {
@@ -3225,6 +3254,7 @@ export function getDevicePriceUploadHistoryById(uploadId) {
     .prepare(`
       SELECT
         id,
+        device_type as deviceType,
         file_name as fileName,
         uploaded_by as uploadedBy,
         uploaded_at as uploadedAt,
@@ -3273,6 +3303,7 @@ export function activateDevicePriceUploadAndRows({ uploadId, sourceFileName }) {
 
     const now = new Date().toISOString();
     const catalogInput = snapshotRows.map((row) => ({
+      deviceType: row.deviceType,
       brand: row.brand,
       series: row.series,
       model: row.model,

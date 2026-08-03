@@ -3409,16 +3409,19 @@ button {
   gap: 14px;
 }
 
-.partner-auth-form label {
+.partner-auth-form label,
+.partner-signup-card label {
   display: grid;
-  gap: 7px;
+  gap: 8px;
   font-size: 13px;
   color: #2e3b4a;
   font-weight: 700;
 }
 
 .partner-auth-form input,
-.partner-auth-form select {
+.partner-auth-form select,
+.partner-signup-card input,
+.partner-signup-card select {
   height: 44px;
   border-radius: 12px;
   border: none;
@@ -3431,6 +3434,146 @@ button {
 
 .partner-file-label input {
   padding-top: 9px;
+}
+
+.partner-optional-label {
+  font-size: 11px;
+  font-weight: 400;
+  color: #8a9bb0;
+  margin-left: 4px;
+}
+
+/* ===== Multi-step signup progress bar ===== */
+.partner-signup-steps {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  margin: 4px 0 20px;
+  width: 100%;
+}
+
+.partner-step-dot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.partner-step-dot.disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.partner-step-circle {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 2px solid #d0dce8;
+  background: #fff;
+  color: #8a9bb0;
+  font-size: 13px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s, border-color 0.2s, color 0.2s;
+}
+
+.partner-step-dot.current .partner-step-circle {
+  background: linear-gradient(135deg, #20bf97, #17a987);
+  border-color: #17a987;
+  color: #fff;
+}
+
+.partner-step-dot.done .partner-step-circle {
+  background: #f0fdf4;
+  border-color: #22c55e;
+  color: #16a34a;
+}
+
+.partner-step-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: #8a9bb0;
+  white-space: nowrap;
+}
+
+.partner-step-dot.current .partner-step-label {
+  color: #17a987;
+}
+
+.partner-step-dot.done .partner-step-label {
+  color: #16a34a;
+}
+
+.partner-step-line {
+  flex: 1;
+  height: 2px;
+  background: #d0dce8;
+  margin: 0 6px;
+  margin-bottom: 18px;
+  transition: background 0.2s;
+}
+
+.partner-step-line.done {
+  background: #22c55e;
+}
+
+/* ===== Signup step card ===== */
+.partner-signup-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  animation: stepCardIn 0.2s ease;
+}
+
+@keyframes stepCardIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.partner-step-nav-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 2px;
+}
+
+.partner-step-nav-row .partner-submit-btn {
+  flex: 1;
+}
+
+.partner-step-back-btn {
+  padding: 0 18px;
+  height: 44px;
+  border-radius: 12px;
+  border: 1.5px solid #d0dce8;
+  background: #fff;
+  color: #4f6275;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.15s;
+}
+
+.partner-step-back-btn:hover {
+  border-color: #20bf97;
+  color: #17a987;
+}
+
+.partner-file-selected {
+  margin: -6px 0 4px;
+  font-size: 12px;
+  color: #17a987;
+  font-weight: 600;
 }
 
 .partner-upload-btn,

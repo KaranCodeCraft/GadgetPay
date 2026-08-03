@@ -39,7 +39,7 @@ function UserSellPhoneBrandPage() {
   useEffect(() => {
     setLoading(true);
     setSelectedModel(null);
-    getCatalogModels(brand)
+    getCatalogModels(brand, "MOBILE")
       .then(({ series }) => setSeriesGroups(series))
       .catch(() => setSeriesGroups([]))
       .finally(() => setLoading(false));

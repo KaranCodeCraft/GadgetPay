@@ -5,13 +5,13 @@ import {
   ArrowUpRight,
   BarChart3,
   CheckCircle2,
-  ChevronDown,
   CircleDot,
   Clock,
   Coins,
   IndianRupee,
   LayoutDashboard,
   LogOut,
+  Menu,
   MapPin,
   Power,
   PowerOff,
@@ -49,14 +49,15 @@ import {
   listAdminPartnerCoinRechargeRequests,
   listServiceabilityPincodes,
   listServiceabilityUploadHistory,
-  previewQuoteDeductions,
   deleteServiceabilityUpload,
   deletePriceUpload,
   updatePriceUploadStatus,
   updateServiceabilityUploadStatus,
   toggleQuoteDeductionRule,
-  uploadPricingExcel,
+  uploadIpadPricingExcel,
+  uploadMobilePricingExcel,
   uploadServiceabilityExcel,
+  uploadTabletPricingExcel,
   verifyPartnerCoinRechargeRequest,
   toggleServiceabilityPincode,
   updateQuoteDeductionRule,
@@ -77,8 +78,6 @@ import {
   type QuoteDeductionRule,
   type QuoteDeductionRuleInput,
   type ServiceabilityUploadHistoryRow,
-  type UserSellFlowDeviceDetails,
-  type UserSellFlowQuote,
   type ServiceabilityRow,
 } from "../lib/api/gadgetpe-client";
 
@@ -131,6 +130,7 @@ type NavItem =
   | "Lead Assignment"
   | "Location Mgmt"
   | "Price Mgmt"
+  | "Deduction Rule"
   | "KYC Queue"
   | "Payments Verify"
   | "Partners"
@@ -274,6 +274,7 @@ const NAV_ICONS: Record<NavItem, ComponentType<{ size?: number; className?: stri
   "Lead Assignment": UserCheck,
   "Location Mgmt": MapPin,
   "Price Mgmt": Upload,
+  "Deduction Rule": Sliders,
   "KYC Queue": ShieldUser,
   "Payments Verify": Coins,
   Partners: Users,
@@ -288,6 +289,7 @@ const NAV_ITEMS: NavItem[] = [
   "Lead Assignment",
   "Location Mgmt",
   "Price Mgmt",
+  "Deduction Rule",
   "KYC Queue",
   "Payments Verify",
   "Partners",
@@ -1795,292 +1797,303 @@ function LocationSection() {
   );
 }
 
-type QuoteDeductionRuleForm = {
+type DeductionRuleMode = "PERCENT" | "RUPEES";
+
+type DeductionRulePreset = {
+  id: string;
+  sectionTitle: string;
+  prompt: string;
   answerGroup: QuoteDeductionAnswerGroup;
   answerKey: string;
-  answerValue: string;
-  label: string;
-  deductionType: "RUPEES" | "PERCENT";
-  deductionValue: string;
-  maxDeductionAmount: string;
-  priority: string;
-  appliesToBrand: string;
-  appliesToModelId: string;
+  answerValue: string | null;
+};
+
+type DeductionRuleDraft = {
+  mode: DeductionRuleMode;
+  value: string;
+  enabled: boolean;
+  ruleId: string | null;
   isActive: boolean;
 };
 
-const emptyDeductionRuleForm: QuoteDeductionRuleForm = {
-  answerGroup: "basicFunctionality",
-  answerKey: "",
-  answerValue: "",
-  label: "",
-  deductionType: "RUPEES",
-  deductionValue: "",
-  maxDeductionAmount: "",
-  priority: "100",
-  appliesToBrand: "",
-  appliesToModelId: "",
-  isActive: true,
-};
-
-type QuotePreviewForm = {
-  brandSlug: string;
-  modelId: string;
-  modelName: string;
-  listedPrice: string;
-  answerGroup: QuoteDeductionAnswerGroup;
-  answerKey: string;
-  answerValue: string;
-};
-
-const defaultPreviewForm: QuotePreviewForm = {
-  brandSlug: "",
-  modelId: "",
-  modelName: "",
-  listedPrice: "",
-  answerGroup: "basicFunctionality",
-  answerKey: "",
-  answerValue: "",
-};
-
-function parseRuleForm(form: QuoteDeductionRuleForm): QuoteDeductionRuleInput {
-  const deductionValue = Number(form.deductionValue);
-  if (!Number.isFinite(deductionValue) || deductionValue < 0)
-    throw new Error("Deduction value must be a valid non-negative number.");
-  const maxDeductionAmount = form.maxDeductionAmount.trim()
-    ? Number(form.maxDeductionAmount)
-    : null;
-  if (
-    maxDeductionAmount !== null &&
-    (!Number.isFinite(maxDeductionAmount) || maxDeductionAmount < 0)
-  )
-    throw new Error("Max deduction amount must be a valid non-negative number.");
-  const priority = form.priority.trim() ? Number(form.priority) : 100;
-  if (!Number.isInteger(priority) || priority < 0)
-    throw new Error("Priority must be a non-negative integer.");
-  if (!form.label.trim()) throw new Error("Label is required.");
-  if (!form.answerKey.trim()) throw new Error("Answer key is required.");
-  return {
-    answerGroup: form.answerGroup,
-    answerKey: form.answerKey.trim(),
-    answerValue: form.answerValue.trim() || null,
-    label: form.label.trim(),
-    deductionType: form.deductionType,
-    deductionValue,
-    maxDeductionAmount,
-    priority,
-    isActive: form.isActive,
-    appliesToBrand: form.appliesToBrand.trim() || null,
-    appliesToModelId: form.appliesToModelId.trim() || null,
-  };
-}
-
-const quoteAnswerGroups: { value: QuoteDeductionAnswerGroup; label: string }[] = [
-  { value: "basicFunctionality", label: "Basic Functionality" },
-  { value: "physicalIssues", label: "Physical Issues" },
-  { value: "nestedPhysicalIssueAnswers", label: "Physical Issue Details" },
-  { value: "cameraAndBiometrics", label: "Camera & Biometrics" },
-  { value: "sensorsAndConnectivity", label: "Sensors & Connectivity" },
-  { value: "batteryAndCharging", label: "Battery & Charging" },
-  { value: "accessoriesAndOwnership", label: "Accessories & Ownership" },
+const DEDUCTION_RULE_PRESETS: DeductionRulePreset[] = [
+  {
+    id: "canMakeCalls",
+    sectionTitle: "Tell us more about your device?",
+    prompt: "Are you able to make and receive calls?",
+    answerGroup: "basicFunctionality",
+    answerKey: "canMakeCalls",
+    answerValue: "no",
+  },
+  {
+    id: "touchWorking",
+    sectionTitle: "Tell us more about your device?",
+    prompt: "Is your device's touch screen working properly?",
+    answerGroup: "basicFunctionality",
+    answerKey: "touchWorking",
+    answerValue: "no",
+  },
+  {
+    id: "originalDisplay",
+    sectionTitle: "Tell us more about your device?",
+    prompt: "Is your phone's screen original?",
+    answerGroup: "basicFunctionality",
+    answerKey: "originalDisplay",
+    answerValue: "no",
+  },
+  {
+    id: "underWarranty",
+    sectionTitle: "Tell us more about your device?",
+    prompt: "Is your device under manufacturer warranty?",
+    answerGroup: "accessoriesAndOwnership",
+    answerKey: "underWarranty",
+    answerValue: "no",
+  },
+  {
+    id: "billInvoice",
+    sectionTitle: "Tell us more about your device?",
+    prompt: "Do you have GST valid bill with the same IMEI?",
+    answerGroup: "accessoriesAndOwnership",
+    answerKey: "billInvoice",
+    answerValue: "no",
+  },
+  {
+    id: "screenIssue",
+    sectionTitle: "Condition",
+    prompt: "Broken/scratch on device screen",
+    answerGroup: "physicalIssues",
+    answerKey: "Broken or Screen Scratches",
+    answerValue: null,
+  },
+  {
+    id: "deadSpotIssue",
+    sectionTitle: "Condition",
+    prompt: "Dead Spot/Visible line and Discoloration on screen",
+    answerGroup: "physicalIssues",
+    answerKey: "Any Dead spots",
+    answerValue: null,
+  },
+  {
+    id: "bodyDamageIssue",
+    sectionTitle: "Condition",
+    prompt: "Scratch/Dent on device body",
+    answerGroup: "physicalIssues",
+    answerKey: "Dent or Marks on body",
+    answerValue: null,
+  },
+  {
+    id: "panelIssue",
+    sectionTitle: "Condition",
+    prompt: "Device panel missing/broken",
+    answerGroup: "physicalIssues",
+    answerKey: "Device Panel Broken / Missing",
+    answerValue: null,
+  },
+  {
+    id: "frontCamera",
+    sectionTitle: "Functional or Physical Problems",
+    prompt: "Front Camera not working",
+    answerGroup: "cameraAndBiometrics",
+    answerKey: "frontCamera",
+    answerValue: "no",
+  },
+  {
+    id: "rearCamera",
+    sectionTitle: "Functional or Physical Problems",
+    prompt: "Back Camera not working",
+    answerGroup: "cameraAndBiometrics",
+    answerKey: "rearCamera",
+    answerValue: "no",
+  },
+  {
+    id: "volumeButtons",
+    sectionTitle: "Functional or Physical Problems",
+    prompt: "Volume Button not working",
+    answerGroup: "batteryAndCharging",
+    answerKey: "volumeButtons",
+    answerValue: "no",
+  },
+  {
+    id: "touchProblem",
+    sectionTitle: "Functional or Physical Problems",
+    prompt: "Finger Touch not working",
+    answerGroup: "basicFunctionality",
+    answerKey: "touchWorking",
+    answerValue: "no",
+  },
+  {
+    id: "wifi",
+    sectionTitle: "Functional or Physical Problems",
+    prompt: "WiFi not working",
+    answerGroup: "sensorsAndConnectivity",
+    answerKey: "wifi",
+    answerValue: "no",
+  },
+  {
+    id: "speaker",
+    sectionTitle: "Functional or Physical Problems",
+    prompt: "Speaker Faulty",
+    answerGroup: "cameraAndBiometrics",
+    answerKey: "speaker",
+    answerValue: "no",
+  },
+  {
+    id: "powerButton",
+    sectionTitle: "Functional or Physical Problems",
+    prompt: "Power Button not working",
+    answerGroup: "batteryAndCharging",
+    answerKey: "powerButton",
+    answerValue: "no",
+  },
+  {
+    id: "chargingPort",
+    sectionTitle: "Functional or Physical Problems",
+    prompt: "Charging Port not working",
+    answerGroup: "batteryAndCharging",
+    answerKey: "chargingPort",
+    answerValue: "no",
+  },
+  {
+    id: "faceUnlock",
+    sectionTitle: "Functional or Physical Problems",
+    prompt: "Face Sensor not working",
+    answerGroup: "cameraAndBiometrics",
+    answerKey: "faceUnlock",
+    answerValue: "no",
+  },
+  {
+    id: "alertSlider",
+    sectionTitle: "Functional or Physical Problems",
+    prompt: "Silent Button not working",
+    answerGroup: "batteryAndCharging",
+    answerKey: "alertSlider",
+    answerValue: "no",
+  },
+  {
+    id: "earSpeaker",
+    sectionTitle: "Functional or Physical Problems",
+    prompt: "Audio Receiver not working",
+    answerGroup: "cameraAndBiometrics",
+    answerKey: "earSpeaker",
+    answerValue: "no",
+  },
+  {
+    id: "cameraGlassBroken",
+    sectionTitle: "Functional or Physical Problems",
+    prompt: "Camera Glass Broken",
+    answerGroup: "physicalIssues",
+    answerKey: "Device Panel Broken / Missing",
+    answerValue: null,
+  },
+  {
+    id: "bluetooth",
+    sectionTitle: "Functional or Physical Problems",
+    prompt: "Bluetooth not working",
+    answerGroup: "sensorsAndConnectivity",
+    answerKey: "bluetooth",
+    answerValue: "no",
+  },
+  {
+    id: "vibration",
+    sectionTitle: "Functional or Physical Problems",
+    prompt: "Vibrator is not working",
+    answerGroup: "sensorsAndConnectivity",
+    answerKey: "vibration",
+    answerValue: "no",
+  },
+  {
+    id: "microphone",
+    sectionTitle: "Functional or Physical Problems",
+    prompt: "Microphone not working",
+    answerGroup: "cameraAndBiometrics",
+    answerKey: "microphone",
+    answerValue: "no",
+  },
+  {
+    id: "proximitySensor",
+    sectionTitle: "Functional or Physical Problems",
+    prompt: "Proximity Sensor not working",
+    answerGroup: "sensorsAndConnectivity",
+    answerKey: "proximitySensor",
+    answerValue: "no",
+  },
+  {
+    id: "batteryService",
+    sectionTitle: "Functional or Physical Problems",
+    prompt: "Battery health Below 80 (battery in service)",
+    answerGroup: "batteryAndCharging",
+    answerKey: "batteryDrain",
+    answerValue: "yes",
+  },
+  {
+    id: "mobileAgeBelow3",
+    sectionTitle: "What is your mobile age?",
+    prompt: "Below 3 months",
+    answerGroup: "accessoriesAndOwnership",
+    answerKey: "underWarranty",
+    answerValue: "yes",
+  },
+  {
+    id: "mobileAge3to6",
+    sectionTitle: "What is your mobile age?",
+    prompt: "3 months - 6 months",
+    answerGroup: "accessoriesAndOwnership",
+    answerKey: "underWarranty",
+    answerValue: "yes",
+  },
+  {
+    id: "mobileAge6to11",
+    sectionTitle: "What is your mobile age?",
+    prompt: "6 months - 11 months",
+    answerGroup: "accessoriesAndOwnership",
+    answerKey: "underWarranty",
+    answerValue: "yes",
+  },
+  {
+    id: "mobileAgeAbove11",
+    sectionTitle: "What is your mobile age?",
+    prompt: "Above 11 months",
+    answerGroup: "accessoriesAndOwnership",
+    answerKey: "underWarranty",
+    answerValue: "no",
+  },
+  {
+    id: "originalBox",
+    sectionTitle: "Do you have the following?",
+    prompt: "Original Box with same IMEI",
+    answerGroup: "accessoriesAndOwnership",
+    answerKey: "originalBox",
+    answerValue: "yes",
+  },
 ];
 
-function buildPreviewDetails(form: QuotePreviewForm): UserSellFlowDeviceDetails {
-  const { answerGroup, answerKey, answerValue } = form;
-  const base: UserSellFlowDeviceDetails = {
-    basicFunctionality: {},
-    physicalIssues: [],
-    nestedPhysicalIssueAnswers: {},
-    cameraAndBiometrics: {},
-    sensorsAndConnectivity: {},
-    batteryAndCharging: {},
-    accessoriesAndOwnership: {},
-  };
-  if (!answerKey.trim()) return base;
-  if (answerGroup === "physicalIssues") {
-    return { ...base, physicalIssues: [answerKey.trim()] };
-  }
-  if (answerGroup === "nestedPhysicalIssueAnswers") {
-    return { ...base, nestedPhysicalIssueAnswers: { [answerKey.trim()]: answerValue.trim() } };
-  }
-  return { ...base, [answerGroup]: { [answerKey.trim()]: answerValue.trim() || "yes" } };
+function createDefaultDeductionDrafts() {
+  return DEDUCTION_RULE_PRESETS.reduce<Record<string, DeductionRuleDraft>>((acc, item) => {
+    acc[item.id] = {
+      mode: "RUPEES",
+      value: "",
+      enabled: false,
+      ruleId: null,
+      isActive: false,
+    };
+    return acc;
+  }, {});
 }
 
-function ruleToForm(rule: QuoteDeductionRule): QuoteDeductionRuleForm {
-  return {
-    answerGroup: rule.answerGroup,
-    answerKey: rule.answerKey,
-    answerValue: rule.answerValue ?? "",
-    label: rule.label,
-    deductionType: rule.deductionType,
-    deductionValue: String(rule.deductionValue),
-    maxDeductionAmount: rule.maxDeductionAmount != null ? String(rule.maxDeductionAmount) : "",
-    priority: String(rule.priority),
-    appliesToBrand: rule.appliesToBrand ?? "",
-    appliesToModelId: rule.appliesToModelId ?? "",
-    isActive: rule.isActive,
-  };
-}
-
-type CatalogQuestion = { key: string; label: string; options: string[] };
-const _YN = ["yes", "no"] as const;
-const _YNA = ["yes", "no", "na"] as const;
-
-type QuestionRuleDraft = {
-  ruleId: string | null;
-  answerValue: string;
-  label: string;
-  deductionType: "RUPEES" | "PERCENT";
-  deductionValue: string;
-  maxDeductionAmount: string;
-  priority: string;
-  isActive: boolean;
-  appliesToBrand: string;
-  appliesToModelId: string;
-};
-
-const DEVICE_QUESTION_CATALOG: Record<QuoteDeductionAnswerGroup, CatalogQuestion[]> = {
-  basicFunctionality: [
-    { key: "canMakeCalls", label: "Can make or receive calls?", options: [..._YNA] },
-    { key: "touchWorking", label: "Touch screen working?", options: [..._YNA] },
-    { key: "screenReplaced", label: "Screen been replaced?", options: [..._YNA] },
-    { key: "displayWorking", label: "Display brightness & color OK?", options: [..._YNA] },
-    { key: "originalDisplay", label: "Display is original?", options: [..._YNA] },
-  ],
-  physicalIssues: [
-    { key: "Any Dead spots", label: "Any Dead spots", options: [] },
-    { key: "Broken or Screen Scratches", label: "Broken or Screen Scratches", options: [] },
-    { key: "Dent or Marks on body", label: "Dent / Marks on body", options: [] },
-    { key: "Device Panel Broken / Missing", label: "Device Panel Broken / Missing", options: [] },
-  ],
-  nestedPhysicalIssueAnswers: [
-    {
-      key: "Any Dead spots",
-      label: "Dead spots — where?",
-      options: ["Top", "Bottom", "Left side", "Right side", "Multiple areas"],
-    },
-    {
-      key: "Broken or Screen Scratches",
-      label: "Screen damage — how bad?",
-      options: ["Minor scratches", "Visible scratches", "Cracked glass", "Display bleeding"],
-    },
-    {
-      key: "Dent or Marks on body",
-      label: "Body damage — where?",
-      options: ["Back panel", "Side frame", "Corners", "Multiple sides"],
-    },
-    {
-      key: "Device Panel Broken / Missing",
-      label: "Panel — what condition?",
-      options: [
-        "Back panel broken",
-        "Back panel missing",
-        "Camera glass broken",
-        "Buttons missing",
-      ],
-    },
-  ],
-  cameraAndBiometrics: [
-    { key: "frontCamera", label: "Front camera working?", options: [..._YNA] },
-    { key: "rearCamera", label: "Rear camera working?", options: [..._YNA] },
-    { key: "cameraFlash", label: "Camera flash working?", options: [..._YNA] },
-    { key: "faceUnlock", label: "Face ID / Face Unlock working?", options: [..._YNA] },
-    { key: "fingerprintSensor", label: "Fingerprint sensor working?", options: [..._YNA] },
-    { key: "microphone", label: "Microphone working?", options: [..._YNA] },
-    { key: "speaker", label: "Speaker working?", options: [..._YNA] },
-    { key: "earSpeaker", label: "Ear speaker working?", options: [..._YNA] },
-  ],
-  sensorsAndConnectivity: [
-    { key: "proximitySensor", label: "Proximity sensor working?", options: [..._YN] },
-    { key: "gyroSensor", label: "Gyro sensor working?", options: [..._YN] },
-    { key: "accelerometer", label: "Accelerometer / auto-rotate OK?", options: [..._YN] },
-    { key: "wifi", label: "WiFi working?", options: [..._YN] },
-    { key: "bluetooth", label: "Bluetooth working?", options: [..._YN] },
-    { key: "gps", label: "GPS / Location working?", options: [..._YN] },
-    { key: "simNetwork", label: "SIM network working?", options: [..._YN] },
-    { key: "vibration", label: "Vibration working?", options: [..._YN] },
-  ],
-  batteryAndCharging: [
-    { key: "charging", label: "Phone charging properly?", options: [..._YNA] },
-    { key: "chargingPort", label: "Charging port loose or damaged?", options: [..._YNA] },
-    { key: "batteryDrain", label: "Battery drains quickly?", options: [..._YNA] },
-    { key: "heating", label: "Phone heats abnormally?", options: [..._YNA] },
-    { key: "autoRestart", label: "Phone restarts automatically?", options: [..._YNA] },
-    { key: "volumeButtons", label: "Volume buttons working?", options: [..._YNA] },
-    { key: "powerButton", label: "Power button working?", options: [..._YNA] },
-    { key: "alertSlider", label: "Silent switch / alert slider working?", options: [..._YNA] },
-  ],
-  accessoriesAndOwnership: [
-    { key: "originalBox", label: "Has original box?", options: [..._YN] },
-    { key: "originalCharger", label: "Has original charger?", options: [..._YN] },
-    { key: "billInvoice", label: "Has bill / invoice?", options: [..._YN] },
-    { key: "underWarranty", label: "Under warranty?", options: [..._YN] },
-    { key: "repairedBefore", label: "Repaired before?", options: [..._YN] },
-    { key: "accountLocked", label: "Locked by iCloud / Google account?", options: [..._YN] },
-    { key: "imeiAvailable", label: "IMEI available and matching?", options: [..._YN] },
-    { key: "waterDamage", label: "Water damage present?", options: [..._YN] },
-  ],
-};
-
-function makeQuestionDraft(
-  answerGroup: QuoteDeductionAnswerGroup,
-  question: CatalogQuestion,
-  existingRule?: QuoteDeductionRule,
-): QuestionRuleDraft {
-  return {
-    ruleId: existingRule?.id || null,
-    answerValue: existingRule?.answerValue ?? "",
-    label: existingRule?.label || question.label,
-    deductionType: existingRule?.deductionType || "RUPEES",
-    deductionValue: existingRule ? String(existingRule.deductionValue) : "",
-    maxDeductionAmount:
-      existingRule?.maxDeductionAmount != null ? String(existingRule.maxDeductionAmount) : "",
-    priority: existingRule ? String(existingRule.priority) : "100",
-    isActive: existingRule?.isActive ?? true,
-    appliesToBrand: existingRule?.appliesToBrand ?? "",
-    appliesToModelId: existingRule?.appliesToModelId ?? "",
-  };
-}
-
-function buildGroupRuleDrafts(rules: QuoteDeductionRule[]) {
-  const grouped = {} as Record<
-    QuoteDeductionAnswerGroup,
-    Record<string, QuestionRuleDraft>
-  >;
-
-  quoteAnswerGroups.forEach((group) => {
-    const questions = DEVICE_QUESTION_CATALOG[group.value] || [];
-    grouped[group.value] = {};
-    questions.forEach((question) => {
-      const existing = rules.find(
-        (rule) => rule.answerGroup === group.value && rule.answerKey === question.key,
-      );
-      grouped[group.value][question.key] = makeQuestionDraft(group.value, question, existing);
-    });
+function buildPresetRuleMap(rules: QuoteDeductionRule[]) {
+  const map = new Map<string, QuoteDeductionRule>();
+  rules.forEach((rule) => {
+    const preset = DEDUCTION_RULE_PRESETS.find(
+      (item) =>
+        item.answerGroup === rule.answerGroup &&
+        item.answerKey === rule.answerKey &&
+        (item.answerValue ?? null) === (rule.answerValue ?? null),
+    );
+    if (preset) {
+      map.set(preset.id, rule);
+    }
   });
-
-  return grouped;
-}
-
-function buildRuleSummary(form: QuoteDeductionRuleForm): string {
-  const questions = DEVICE_QUESTION_CATALOG[form.answerGroup];
-  const question = questions?.find((q) => q.key === form.answerKey);
-  if (!question || !form.answerKey) return "";
-  const isPhysical = form.answerGroup === "physicalIssues";
-  const condition = isPhysical
-    ? `user reports "${question.label}"`
-    : form.answerValue
-      ? `user answers "${form.answerValue}" to "${question.label}"`
-      : `user answers anything to "${question.label}"`;
-  const deductionAmt = form.deductionValue
-    ? form.deductionType === "PERCENT"
-      ? `${form.deductionValue}%`
-      : `Rs.\u00a0${Number(form.deductionValue).toLocaleString("en-IN")}`
-    : "[amount not set]";
-  const cap = form.maxDeductionAmount
-    ? `, capped at Rs.\u00a0${Number(form.maxDeductionAmount).toLocaleString("en-IN")}`
-    : "";
-  return `When ${condition} → deduct ${deductionAmt}${cap}`;
+  return map;
 }
 
 function PriceManagementSection() {
@@ -2098,36 +2111,38 @@ function PriceManagementSection() {
     "Launch Year",
     "GadgetPe Price",
   ]);
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
-  const [uploadInputKey, setUploadInputKey] = useState(0);
+  const [selectedDeviceType, setSelectedDeviceType] = useState<"MOBILE" | "IPAD" | "TABLET">("MOBILE");
+  const [mobileFiles, setMobileFiles] = useState<File[]>([]);
+  const [ipadFiles, setIpadFiles] = useState<File[]>([]);
+  const [tabletFiles, setTabletFiles] = useState<File[]>([]);
+  const [mobileUploadInputKey, setMobileUploadInputKey] = useState(0);
+  const [ipadUploadInputKey, setIpadUploadInputKey] = useState(0);
+  const [tabletUploadInputKey, setTabletUploadInputKey] = useState(0);
   const [loading, setLoading] = useState(false);
-  const [uploading, setUploading] = useState(false);
+  const [uploadingMobile, setUploadingMobile] = useState(false);
+  const [uploadingIpad, setUploadingIpad] = useState(false);
+  const [uploadingTablet, setUploadingTablet] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [lastUploadSummary, setLastUploadSummary] = useState<string[] | null>(null);
+  const [mobileUploadError, setMobileUploadError] = useState<string | null>(null);
+  const [ipadUploadError, setIpadUploadError] = useState<string | null>(null);
+  const [tabletUploadError, setTabletUploadError] = useState<string | null>(null);
+  const [mobileUploadSummary, setMobileUploadSummary] = useState<string[] | null>(null);
+  const [ipadUploadSummary, setIpadUploadSummary] = useState<string[] | null>(null);
+  const [tabletUploadSummary, setTabletUploadSummary] = useState<string[] | null>(null);
   const [uploadActionId, setUploadActionId] = useState<string | null>(null);
   const [uploadActionType, setUploadActionType] = useState<
     "activate" | "deactivate" | "delete" | null
   >(null);
-  const [deductionRules, setDeductionRules] = useState<QuoteDeductionRule[]>([]);
-  const [deductionForm, setDeductionForm] =
-    useState<QuoteDeductionRuleForm>(emptyDeductionRuleForm);
-  const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
-  const [savingRule, setSavingRule] = useState(false);
-  const [ruleActionId, setRuleActionId] = useState<string | null>(null);
-  const [groupRuleDrafts, setGroupRuleDrafts] = useState<
-    Record<QuoteDeductionAnswerGroup, Record<string, QuestionRuleDraft>>
-  >(() => buildGroupRuleDrafts([]));
-  const [savingQuestionKey, setSavingQuestionKey] = useState<string | null>(null);
-  const [previewForm, setPreviewForm] = useState<QuotePreviewForm>(defaultPreviewForm);
-  const [quotePreview, setQuotePreview] = useState<UserSellFlowQuote | null>(null);
-  const [previewingQuote, setPreviewingQuote] = useState(false);
   const [isCatalogExpanded, setIsCatalogExpanded] = useState(false);
 
-  const fetchCatalog = async (token: string) => {
+  const fetchCatalog = async (
+    token: string,
+    deviceType: "MOBILE" | "IPAD" | "TABLET" = selectedDeviceType,
+  ) => {
     setLoading(true);
     setError(null);
     try {
-      const result = await listPriceCatalog(token, search.trim() || undefined);
+      const result = await listPriceCatalog(token, search.trim() || undefined, deviceType);
       setRows(result.rows);
       setExpectedHeaders(result.expectedHeaders);
     } catch (err) {
@@ -2143,9 +2158,12 @@ function PriceManagementSection() {
     }
   };
 
-  const fetchUploadHistory = async (token: string) => {
+  const fetchUploadHistory = async (
+    token: string,
+    deviceType: "MOBILE" | "IPAD" | "TABLET" = selectedDeviceType,
+  ) => {
     try {
-      const result = await listPriceUploadHistory(token);
+      const result = await listPriceUploadHistory(token, deviceType);
       setUploadHistory(result.rows);
     } catch (err) {
       if (isTokenExpiredError(err)) {
@@ -2158,251 +2176,79 @@ function PriceManagementSection() {
     }
   };
 
-  const fetchDeductionRules = async (token: string) => {
-    try {
-      const result = await listQuoteDeductionRules(token);
-      setDeductionRules(result.rows);
-    } catch (err) {
-      if (isTokenExpiredError(err)) {
-        localStorage.removeItem("gadgetpe_admin_access_token");
-        setAdminToken(null);
-        setError("Session expired. Please login again.");
-        return;
-      }
-      setError(err instanceof Error ? err.message : "Unable to fetch quote deduction rules.");
-    }
-  };
-
   useEffect(() => {
     if (!adminToken) return;
-    void fetchCatalog(adminToken);
-    void fetchUploadHistory(adminToken);
-    void fetchDeductionRules(adminToken);
-  }, [adminToken, search]);
-
-  useEffect(() => {
-    setGroupRuleDrafts(buildGroupRuleDrafts(deductionRules));
-  }, [deductionRules]);
-
-  const updateQuestionDraft = (
-    group: QuoteDeductionAnswerGroup,
-    questionKey: string,
-    patch: Partial<QuestionRuleDraft>,
-  ) => {
-    setGroupRuleDrafts((prev) => ({
-      ...prev,
-      [group]: {
-        ...(prev[group] || {}),
-        [questionKey]: {
-          ...(prev[group]?.[questionKey] ||
-            makeQuestionDraft(group, { key: questionKey, label: questionKey, options: [] })),
-          ...patch,
-        },
-      },
-    }));
-  };
-
-  const saveQuestionRule = async (group: QuoteDeductionAnswerGroup, question: CatalogQuestion) => {
+    void fetchCatalog(adminToken, selectedDeviceType);
+    void fetchUploadHistory(adminToken, selectedDeviceType);
+  }, [adminToken, search, selectedDeviceType]);
+  const uploadByCategory = async (category: "MOBILE" | "IPAD" | "TABLET") => {
     if (!adminToken) return;
+    const files = category === "MOBILE" ? mobileFiles : category === "IPAD" ? ipadFiles : tabletFiles;
 
-    const draft = groupRuleDrafts[group]?.[question.key] || makeQuestionDraft(group, question);
-    const saveKey = `${group}:${question.key}`;
-
-    const deductionValue = Number(draft.deductionValue);
-    if (!Number.isFinite(deductionValue) || deductionValue < 0) {
-      toast.error("Deduction value must be a valid non-negative number.");
-      return;
-    }
-
-    const priority = draft.priority.trim() ? Number(draft.priority) : 100;
-    if (!Number.isInteger(priority) || priority < 0) {
-      toast.error("Priority must be a non-negative integer.");
-      return;
-    }
-
-    const maxCap = draft.maxDeductionAmount.trim() ? Number(draft.maxDeductionAmount) : null;
-    if (maxCap !== null && (!Number.isFinite(maxCap) || maxCap < 0)) {
-      toast.error("Max deduction amount must be a valid non-negative number.");
-      return;
-    }
-
-    const payload: QuoteDeductionRuleInput = {
-      answerGroup: group,
-      answerKey: question.key,
-      answerValue: group === "physicalIssues" ? null : draft.answerValue.trim() || null,
-      label: draft.label.trim() || question.label,
-      deductionType: draft.deductionType,
-      deductionValue,
-      maxDeductionAmount: maxCap,
-      priority,
-      isActive: draft.isActive,
-      appliesToBrand: draft.appliesToBrand.trim() || null,
-      appliesToModelId: draft.appliesToModelId.trim() || null,
-    };
-
-    setSavingQuestionKey(saveKey);
-    setError(null);
-    try {
-      if (draft.ruleId) {
-        await updateQuoteDeductionRule(adminToken, draft.ruleId, payload);
-        toast.success("Rule updated.");
-      } else {
-        await createQuoteDeductionRule(adminToken, payload);
-        toast.success("Rule created.");
-      }
-      await fetchDeductionRules(adminToken);
-    } catch (err) {
-      if (isTokenExpiredError(err)) {
-        localStorage.removeItem("gadgetpe_admin_access_token");
-        setAdminToken(null);
-        setError("Session expired. Please login again.");
-        toast.error("Session expired. Please connect again.");
-        return;
-      }
-      const message = err instanceof Error ? err.message : "Unable to save deduction rule.";
-      setError(message);
+    if (files.length === 0) {
+      const message = `Please choose at least one Excel file before ${category.toLowerCase()} upload.`;
+      if (category === "MOBILE") setMobileUploadError(message);
+      if (category === "IPAD") setIpadUploadError(message);
+      if (category === "TABLET") setTabletUploadError(message);
       toast.error(message);
-    } finally {
-      setSavingQuestionKey(null);
-    }
-  };
-
-  const resetRuleForm = () => {
-    setDeductionForm(emptyDeductionRuleForm);
-    setEditingRuleId(null);
-  };
-
-  const saveDeductionRule = async () => {
-    if (!adminToken) return;
-
-    setSavingRule(true);
-    setError(null);
-
-    try {
-      const input = parseRuleForm(deductionForm);
-      if (editingRuleId) {
-        await updateQuoteDeductionRule(adminToken, editingRuleId, input);
-        toast.success("Deduction rule updated.");
-      } else {
-        await createQuoteDeductionRule(adminToken, input);
-        toast.success("Deduction rule created.");
-      }
-      resetRuleForm();
-      await fetchDeductionRules(adminToken);
-    } catch (err) {
-      if (isTokenExpiredError(err)) {
-        localStorage.removeItem("gadgetpe_admin_access_token");
-        setAdminToken(null);
-        setError("Session expired. Please login again.");
-        toast.error("Session expired. Please connect again.");
-        return;
-      }
-
-      const message = err instanceof Error ? err.message : "Unable to save deduction rule.";
-      setError(message);
-      toast.error(message);
-    } finally {
-      setSavingRule(false);
-    }
-  };
-
-  const handleToggleRule = async (rule: QuoteDeductionRule) => {
-    if (!adminToken) return;
-
-    setRuleActionId(rule.id);
-    setError(null);
-    try {
-      await toggleQuoteDeductionRule(adminToken, rule.id, !rule.isActive);
-      await fetchDeductionRules(adminToken);
-      toast.success(!rule.isActive ? "Deduction rule activated." : "Deduction rule paused.");
-    } catch (err) {
-      if (isTokenExpiredError(err)) {
-        localStorage.removeItem("gadgetpe_admin_access_token");
-        setAdminToken(null);
-        setError("Session expired. Please login again.");
-        toast.error("Session expired. Please connect again.");
-        return;
-      }
-      const message = err instanceof Error ? err.message : "Unable to update deduction rule.";
-      setError(message);
-      toast.error(message);
-    } finally {
-      setRuleActionId(null);
-    }
-  };
-
-  const runQuotePreview = async () => {
-    if (!adminToken) return;
-    if (!previewForm.answerKey.trim()) {
-      setError("Preview answer key is required.");
       return;
     }
 
-    const listedPrice = Number(previewForm.listedPrice);
-    if (!Number.isFinite(listedPrice) || listedPrice < 0) {
-      setError("Preview base price must be a valid number.");
-      return;
-    }
-
-    setPreviewingQuote(true);
     setError(null);
-    try {
-      const result = await previewQuoteDeductions(adminToken, {
-        selectedModel: {
-          brandSlug: previewForm.brandSlug.trim(),
-          modelId: previewForm.modelId.trim(),
-          modelName: previewForm.modelName.trim(),
-          listedPrice: Math.round(listedPrice),
-        },
-        deviceDetails: buildPreviewDetails(previewForm),
-      });
-      setQuotePreview(result.quote);
-    } catch (err) {
-      if (isTokenExpiredError(err)) {
-        localStorage.removeItem("gadgetpe_admin_access_token");
-        setAdminToken(null);
-        setError("Session expired. Please login again.");
-        toast.error("Session expired. Please connect again.");
-        return;
-      }
-      const message = err instanceof Error ? err.message : "Unable to preview quote.";
-      setError(message);
-      toast.error(message);
-    } finally {
-      setPreviewingQuote(false);
+    if (category === "MOBILE") {
+      setUploadingMobile(true);
+      setMobileUploadError(null);
+      setMobileUploadSummary(null);
     }
-  };
-
-  const uploadFile = async () => {
-    if (!adminToken) return;
-    if (selectedFiles.length === 0) {
-      setError("Please choose at least one Excel file before upload.");
-      toast.error("Please choose at least one Excel file before upload.");
-      return;
+    if (category === "IPAD") {
+      setUploadingIpad(true);
+      setIpadUploadError(null);
+      setIpadUploadSummary(null);
     }
-
-    setUploading(true);
-    setError(null);
-    setLastUploadSummary(null);
+    if (category === "TABLET") {
+      setUploadingTablet(true);
+      setTabletUploadError(null);
+      setTabletUploadSummary(null);
+    }
 
     try {
-      const summary = await uploadPricingExcel(adminToken, selectedFiles);
-      setLastUploadSummary(
-        summary.uploads.map(
-          (item) =>
-            `Uploaded ${item.sourceFileName}: processed ${item.totalProcessed}, inserted ${item.insertedCount}, updated ${item.updatedCount}`,
-        ),
+      const uploader = category === "MOBILE"
+        ? uploadMobilePricingExcel
+        : category === "IPAD"
+          ? uploadIpadPricingExcel
+          : uploadTabletPricingExcel;
+
+      const summary = await uploader(adminToken, files);
+      const summaryLines = summary.uploads.map(
+        (item) =>
+          `Uploaded ${item.sourceFileName} (${category}): processed ${item.totalProcessed}, inserted ${item.insertedCount}, updated ${item.updatedCount}`,
       );
+
+      if (category === "MOBILE") {
+        setMobileUploadSummary(summaryLines);
+        setMobileFiles([]);
+        setMobileUploadInputKey((value) => value + 1);
+      }
+      if (category === "IPAD") {
+        setIpadUploadSummary(summaryLines);
+        setIpadFiles([]);
+        setIpadUploadInputKey((value) => value + 1);
+      }
+      if (category === "TABLET") {
+        setTabletUploadSummary(summaryLines);
+        setTabletFiles([]);
+        setTabletUploadInputKey((value) => value + 1);
+      }
+
       toast.success(
-        selectedFiles.length === 1
-          ? "Price catalog uploaded successfully."
-          : `${selectedFiles.length} price catalogs uploaded successfully.`,
+        files.length === 1
+          ? `${category} price catalog uploaded successfully.`
+          : `${files.length} ${category} price catalogs uploaded successfully.`,
       );
       setExpectedHeaders(summary.expectedHeaders);
-      setSelectedFiles([]);
-      setUploadInputKey((value) => value + 1);
-      await fetchCatalog(adminToken);
-      await fetchUploadHistory(adminToken);
+      setSelectedDeviceType(category);
+      await fetchCatalog(adminToken, category);
+      await fetchUploadHistory(adminToken, category);
     } catch (err) {
       if (isTokenExpiredError(err)) {
         localStorage.removeItem("gadgetpe_admin_access_token");
@@ -2413,10 +2259,14 @@ function PriceManagementSection() {
       }
 
       const message = formatUploadValidationError(err);
-      setError(message);
+      if (category === "MOBILE") setMobileUploadError(message);
+      if (category === "IPAD") setIpadUploadError(message);
+      if (category === "TABLET") setTabletUploadError(message);
       toast.error(message);
     } finally {
-      setUploading(false);
+      if (category === "MOBILE") setUploadingMobile(false);
+      if (category === "IPAD") setUploadingIpad(false);
+      if (category === "TABLET") setUploadingTablet(false);
     }
   };
 
@@ -2425,6 +2275,7 @@ function PriceManagementSection() {
     status: "ACTIVE" | "DEACTIVATED",
   ) => {
     if (!adminToken) return;
+    const activeDeviceType = selectedDeviceType;
 
     setUploadActionId(uploadId);
     setUploadActionType(status === "ACTIVE" ? "activate" : "deactivate");
@@ -2448,8 +2299,8 @@ function PriceManagementSection() {
           }.`,
         );
       }
-      await fetchCatalog(adminToken);
-      await fetchUploadHistory(adminToken);
+      await fetchCatalog(adminToken, activeDeviceType);
+      await fetchUploadHistory(adminToken, activeDeviceType);
     } catch (err) {
       if (isTokenExpiredError(err)) {
         localStorage.removeItem("gadgetpe_admin_access_token");
@@ -2469,17 +2320,24 @@ function PriceManagementSection() {
 
   const handleDeleteUpload = async (uploadId: string) => {
     if (!adminToken) return;
+    const activeDeviceType = selectedDeviceType;
+    const uploadRow = uploadHistory.find((item) => item.id === uploadId);
 
     setUploadActionId(uploadId);
     setUploadActionType("delete");
     setError(null);
     try {
+      if (uploadRow?.status === "ACTIVE") {
+        await updatePriceUploadStatus(adminToken, uploadId, "DEACTIVATED");
+      }
+
       const result = await deletePriceUpload(adminToken, uploadId);
+      setUploadHistory((prev) => prev.filter((item) => item.id !== uploadId));
       toast.success(
         `Deleted ${result.fileName} (${result.deletedSnapshotRows} snapshot rows removed).`,
       );
-      await fetchCatalog(adminToken);
-      await fetchUploadHistory(adminToken);
+      await fetchCatalog(adminToken, activeDeviceType);
+      await fetchUploadHistory(adminToken, activeDeviceType);
     } catch (err) {
       if (isTokenExpiredError(err)) {
         localStorage.removeItem("gadgetpe_admin_access_token");
@@ -2513,420 +2371,141 @@ function PriceManagementSection() {
       </div>
 
       <div className="admin-card" style={{ marginTop: 12 }}>
-        <h3 className="admin-card-title">Upload Price Excel</h3>
-
+        <h3 className="admin-card-title">Upload Price Excel - Mobile</h3>
         <input
-          key={uploadInputKey}
+          key={mobileUploadInputKey}
           type="file"
           accept=".xlsx,.xls"
           multiple
           className="admin-input"
-          onChange={(e) => setSelectedFiles(Array.from(e.target.files ?? []))}
+          onChange={(e) => setMobileFiles(Array.from(e.target.files ?? []))}
         />
-
         <div style={{ marginTop: 10 }}>
           <button
             type="button"
             className="admin-save-btn"
-            disabled={!adminToken || uploading || selectedFiles.length === 0}
-            onClick={uploadFile}
+            disabled={!adminToken || uploadingMobile || mobileFiles.length === 0}
+            onClick={() => void uploadByCategory("MOBILE")}
           >
-            {uploading ? "Uploading..." : "Upload and Save"}
+            {uploadingMobile ? "Uploading..." : "Upload Mobile Prices"}
           </button>
         </div>
-
-        {selectedFiles.length > 0 ? (
+        {mobileFiles.length > 0 ? (
           <div className="admin-muted">
             <p>
-              Selected {selectedFiles.length} file{selectedFiles.length === 1 ? "" : "s"}:
+              Selected {mobileFiles.length} file{mobileFiles.length === 1 ? "" : "s"}:
             </p>
             <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
-              {selectedFiles.map((file) => (
+              {mobileFiles.map((file) => (
                 <li key={`${file.name}-${file.lastModified}`}>{file.name}</li>
               ))}
             </ul>
           </div>
         ) : null}
-        {lastUploadSummary ? (
+        {mobileUploadSummary ? (
           <div className="admin-muted" style={{ color: "#1d9e75" }}>
-            {lastUploadSummary.map((item) => (
-              <p key={item} style={{ margin: "4px 0" }}>
-                {item}
-              </p>
+            {mobileUploadSummary.map((item) => (
+              <p key={item} style={{ margin: "4px 0" }}>{item}</p>
             ))}
           </div>
         ) : null}
+        {mobileUploadError ? (
+          <p className="admin-muted" style={{ color: "#ef4444" }}>{mobileUploadError}</p>
+        ) : null}
+
+        <div style={{ marginTop: 16 }}>
+          <h3 className="admin-card-title">Upload Price Excel - iPads</h3>
+          <input
+            key={ipadUploadInputKey}
+            type="file"
+            accept=".xlsx,.xls"
+            multiple
+            className="admin-input"
+            onChange={(e) => setIpadFiles(Array.from(e.target.files ?? []))}
+          />
+          <div style={{ marginTop: 10 }}>
+            <button
+              type="button"
+              className="admin-save-btn"
+              disabled={!adminToken || uploadingIpad || ipadFiles.length === 0}
+              onClick={() => void uploadByCategory("IPAD")}
+            >
+              {uploadingIpad ? "Uploading..." : "Upload iPad Prices"}
+            </button>
+          </div>
+          {ipadFiles.length > 0 ? (
+            <div className="admin-muted">
+              <p>
+                Selected {ipadFiles.length} file{ipadFiles.length === 1 ? "" : "s"}:
+              </p>
+              <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+                {ipadFiles.map((file) => (
+                  <li key={`${file.name}-${file.lastModified}`}>{file.name}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {ipadUploadSummary ? (
+            <div className="admin-muted" style={{ color: "#1d9e75" }}>
+              {ipadUploadSummary.map((item) => (
+                <p key={item} style={{ margin: "4px 0" }}>{item}</p>
+              ))}
+            </div>
+          ) : null}
+          {ipadUploadError ? (
+            <p className="admin-muted" style={{ color: "#ef4444" }}>{ipadUploadError}</p>
+          ) : null}
+        </div>
+
+        <div style={{ marginTop: 16 }}>
+          <h3 className="admin-card-title">Upload Price Excel - Tablets</h3>
+          <input
+            key={tabletUploadInputKey}
+            type="file"
+            accept=".xlsx,.xls"
+            multiple
+            className="admin-input"
+            onChange={(e) => setTabletFiles(Array.from(e.target.files ?? []))}
+          />
+          <div style={{ marginTop: 10 }}>
+            <button
+              type="button"
+              className="admin-save-btn"
+              disabled={!adminToken || uploadingTablet || tabletFiles.length === 0}
+              onClick={() => void uploadByCategory("TABLET")}
+            >
+              {uploadingTablet ? "Uploading..." : "Upload Tablet Prices"}
+            </button>
+          </div>
+          {tabletFiles.length > 0 ? (
+            <div className="admin-muted">
+              <p>
+                Selected {tabletFiles.length} file{tabletFiles.length === 1 ? "" : "s"}:
+              </p>
+              <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+                {tabletFiles.map((file) => (
+                  <li key={`${file.name}-${file.lastModified}`}>{file.name}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {tabletUploadSummary ? (
+            <div className="admin-muted" style={{ color: "#1d9e75" }}>
+              {tabletUploadSummary.map((item) => (
+                <p key={item} style={{ margin: "4px 0" }}>{item}</p>
+              ))}
+            </div>
+          ) : null}
+          {tabletUploadError ? (
+            <p className="admin-muted" style={{ color: "#ef4444" }}>{tabletUploadError}</p>
+          ) : null}
+        </div>
+
         {error ? (
-          <p className="admin-muted" style={{ color: "#ef4444" }}>
+          <p className="admin-muted" style={{ color: "#ef4444", marginTop: 8 }}>
             {error}
           </p>
         ) : null}
-      </div>
-
-      <div className="admin-pricing-deduction-grid">
-        <div className="admin-card">
-          <div className="admin-card-toprow">
-            <h3 className="admin-card-title">Quote Deduction Rule Master</h3>
-          </div>
-
-          <p className="admin-muted" style={{ marginBottom: 10 }}>
-            Each question group has a separate master accordion. Configure deduction type
-            (Percent or Rupees), value, and save rule per question.
-          </p>
-
-          <div style={{ display: "grid", gap: 10 }}>
-            {quoteAnswerGroups.map((group) => {
-              const questions = DEVICE_QUESTION_CATALOG[group.value] || [];
-              const activeCount = deductionRules.filter(
-                (rule) => rule.answerGroup === group.value && rule.isActive,
-              ).length;
-
-              return (
-                <details key={group.value} className="admin-card" style={{ margin: 0 }}>
-                  <summary
-                    style={{
-                      cursor: "pointer",
-                      fontWeight: 700,
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                    }}
-                  >
-                    <span>{group.label}</span>
-                    <span
-                      className="admin-muted"
-                      style={{ fontWeight: 500, display: "inline-flex", alignItems: "center", gap: 8 }}
-                    >
-                      <span>
-                        {questions.length} questions • {activeCount} active rules
-                      </span>
-                      <ChevronDown size={16} aria-hidden="true" />
-                    </span>
-                  </summary>
-
-                  <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-                    {questions.map((question) => {
-                      const draft =
-                        groupRuleDrafts[group.value]?.[question.key] ||
-                        makeQuestionDraft(group.value, question);
-                      const saveKey = `${group.value}:${question.key}`;
-                      const running = savingQuestionKey === saveKey;
-                      const existingRule = draft.ruleId
-                        ? deductionRules.find((rule) => rule.id === draft.ruleId)
-                        : null;
-
-                      return (
-                        <div
-                          key={question.key}
-                          style={{ border: "1px solid #1f4d3f2b", borderRadius: 10, padding: 10 }}
-                        >
-                          <div
-                            style={{
-                              display: "flex",
-                              justifyContent: "space-between",
-                              alignItems: "center",
-                              gap: 12,
-                              flexWrap: "wrap",
-                            }}
-                          >
-                            <strong>{question.label}</strong>
-                            <span className="admin-muted">
-                              {existingRule
-                                ? existingRule.isActive
-                                  ? "Rule ACTIVE"
-                                  : "Rule PAUSED"
-                                : "No rule yet"}
-                            </span>
-                          </div>
-
-                          <div className="admin-rule-form-grid compact" style={{ marginTop: 8 }}>
-                            {group.value === "physicalIssues" ? (
-                              <label className="admin-field-row">
-                                <span className="admin-form-label">Trigger</span>
-                                <span className="admin-rule-trigger-hint">Issue reported</span>
-                              </label>
-                            ) : (
-                              <label className="admin-field-row">
-                                <span className="admin-form-label">Answer Value</span>
-                                <select
-                                  className="admin-select"
-                                  value={draft.answerValue}
-                                  onChange={(e) =>
-                                    updateQuestionDraft(group.value, question.key, {
-                                      answerValue: e.target.value,
-                                    })
-                                  }
-                                >
-                                  <option value="">any answer</option>
-                                  {question.options.map((opt) => (
-                                    <option key={opt} value={opt}>
-                                      {opt}
-                                    </option>
-                                  ))}
-                                </select>
-                              </label>
-                            )}
-
-                            <label className="admin-field-row">
-                              <span className="admin-form-label">Label</span>
-                              <input
-                                className="admin-input"
-                                value={draft.label}
-                                onChange={(e) =>
-                                  updateQuestionDraft(group.value, question.key, {
-                                    label: e.target.value,
-                                  })
-                                }
-                                placeholder={question.label}
-                              />
-                            </label>
-
-                            <label className="admin-field-row">
-                              <span className="admin-form-label">Price Deduction</span>
-                              <div style={{ display: "inline-flex", gap: 6 }}>
-                                <button
-                                  type="button"
-                                  className="admin-mode-btn"
-                                  style={{
-                                    borderColor:
-                                      draft.deductionType === "PERCENT" ? "#0f766e" : undefined,
-                                    color:
-                                      draft.deductionType === "PERCENT" ? "#0f766e" : undefined,
-                                  }}
-                                  onClick={() =>
-                                    updateQuestionDraft(group.value, question.key, {
-                                      deductionType: "PERCENT",
-                                    })
-                                  }
-                                >
-                                  %
-                                </button>
-                                <button
-                                  type="button"
-                                  className="admin-mode-btn"
-                                  style={{
-                                    borderColor:
-                                      draft.deductionType === "RUPEES" ? "#0f766e" : undefined,
-                                    color:
-                                      draft.deductionType === "RUPEES" ? "#0f766e" : undefined,
-                                  }}
-                                  onClick={() =>
-                                    updateQuestionDraft(group.value, question.key, {
-                                      deductionType: "RUPEES",
-                                    })
-                                  }
-                                >
-                                  Rs
-                                </button>
-                              </div>
-                            </label>
-
-                            <label className="admin-field-row">
-                              <span className="admin-form-label">Value</span>
-                              <input
-                                className="admin-input"
-                                type="number"
-                                min="0"
-                                value={draft.deductionValue}
-                                onChange={(e) =>
-                                  updateQuestionDraft(group.value, question.key, {
-                                    deductionValue: e.target.value,
-                                  })
-                                }
-                                placeholder={draft.deductionType === "PERCENT" ? "10" : "1000"}
-                              />
-                            </label>
-                          </div>
-
-                          <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                            <button
-                              type="button"
-                              className="admin-save-btn"
-                              disabled={!adminToken || running}
-                              onClick={() => void saveQuestionRule(group.value, question)}
-                            >
-                              {running ? "Saving..." : draft.ruleId ? "Update Rule" : "Save Rule"}
-                            </button>
-                            {existingRule ? (
-                              <button
-                                type="button"
-                                className="admin-mode-btn"
-                                disabled
-                                onClick={() => void handleToggleRule(existingRule)}
-                              >
-                                Pause
-                              </button>
-                            ) : null}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </details>
-              );
-            })}
-          </div>
-        </div>
-
-        <div className="admin-card">
-          <div className="admin-card-toprow">
-            <div style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-              <h3 className="admin-card-title" style={{ margin: 0 }}>
-                Quote Preview
-              </h3>
-              <span className="admin-muted" style={{ fontWeight: 600 }}>
-                Paused now
-              </span>
-            </div>
-            <button
-              type="button"
-              className="admin-mode-btn"
-              disabled={!adminToken || previewingQuote}
-              onClick={runQuotePreview}
-            >
-              {previewingQuote ? "Calculating..." : "Calculate"}
-            </button>
-          </div>
-          <div className="admin-rule-form-grid compact">
-            <input
-              className="admin-input"
-              value={previewForm.brandSlug}
-              onChange={(e) => setPreviewForm((prev) => ({ ...prev, brandSlug: e.target.value }))}
-              placeholder="Brand slug"
-            />
-            <input
-              className="admin-input"
-              value={previewForm.modelId}
-              onChange={(e) => setPreviewForm((prev) => ({ ...prev, modelId: e.target.value }))}
-              placeholder="Model ID"
-            />
-            <input
-              className="admin-input"
-              value={previewForm.modelName}
-              onChange={(e) => setPreviewForm((prev) => ({ ...prev, modelName: e.target.value }))}
-              placeholder="Model name"
-            />
-            <input
-              className="admin-input"
-              type="number"
-              value={previewForm.listedPrice}
-              onChange={(e) => setPreviewForm((prev) => ({ ...prev, listedPrice: e.target.value }))}
-              placeholder="Base price"
-            />
-            <select className="admin-select" value={previewForm.answerGroup} disabled>
-              <option value={previewForm.answerGroup}>Pause</option>
-            </select>
-            <input
-              className="admin-input"
-              value={previewForm.answerKey}
-              onChange={(e) => setPreviewForm((prev) => ({ ...prev, answerKey: e.target.value }))}
-              placeholder="Answer key"
-            />
-            <input
-              className="admin-input"
-              value={previewForm.answerValue}
-              onChange={(e) => setPreviewForm((prev) => ({ ...prev, answerValue: e.target.value }))}
-              placeholder="Answer value"
-            />
-          </div>
-
-          {quotePreview ? (
-            <div className="admin-quote-preview-box">
-              <span>Base Rs. {toInr(Math.round(quotePreview.basePrice || 0))}</span>
-              <span>Deduction Rs. {toInr(Math.round(quotePreview.totalDeduction || 0))}</span>
-              <strong>Quote Rs. {toInr(Math.round(quotePreview.sellingPrice))}</strong>
-              <div className="admin-quote-deduction-list">
-                {(quotePreview.deductions || []).map((item) => (
-                  <span key={item.ruleId}>
-                    {item.label}: -Rs. {toInr(Math.round(item.deductionAmount))}
-                  </span>
-                ))}
-                {quotePreview.deductions?.length === 0 ? (
-                  <span>No active deductions matched.</span>
-                ) : null}
-              </div>
-            </div>
-          ) : null}
-        </div>
-      </div>
-
-      <div className="admin-card" style={{ marginTop: 12 }}>
-        <div className="admin-card-toprow">
-          <h3 className="admin-card-title">Saved Quote Deduction Rules</h3>
-          <button
-            type="button"
-            className="admin-mode-btn"
-            disabled={!adminToken}
-            onClick={() => adminToken && fetchDeductionRules(adminToken)}
-          >
-            Refresh
-          </button>
-        </div>
-        <div className="lead-table-wrap" style={{ margin: 0 }}>
-          <table className="lead-table admin-lead-table">
-            <thead>
-              <tr>
-                <th>Rule</th>
-                <th>Condition</th>
-                <th>Deduction</th>
-                <th>Scope</th>
-                <th>Status</th>
-                <th>Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {deductionRules.map((rule) => (
-                <tr key={rule.id}>
-                  <td>
-                    {rule.label}
-                    <br />
-                    <span className="admin-muted">Priority {rule.priority}</span>
-                  </td>
-                  <td>
-                    {rule.answerGroup}.{rule.answerKey}
-                    {rule.answerValue ? ` = ${rule.answerValue}` : ""}
-                  </td>
-                  <td>
-                    {rule.deductionType === "PERCENT"
-                      ? `${rule.deductionValue}%`
-                      : `Rs. ${toInr(rule.deductionValue)}`}
-                  </td>
-                  <td>
-                    {rule.appliesToBrand || "All brands"}
-                    {rule.appliesToModelId ? ` / ${rule.appliesToModelId}` : ""}
-                  </td>
-                  <td>
-                    <span
-                      className="admin-location-status"
-                      style={{ color: rule.isActive ? "#15803d" : "#b45309" }}
-                    >
-                      {rule.isActive ? "ACTIVE" : "PAUSED"}
-                    </span>
-                  </td>
-                  <td>
-                    <div className="admin-rule-actions">
-                      <button
-                        type="button"
-                        className="admin-mode-btn"
-                        disabled
-                        onClick={() => handleToggleRule(rule)}
-                      >
-                        Pause
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {deductionRules.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="admin-muted">
-                    No quote deduction rules found.
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
       </div>
 
       <div className="admin-card" style={{ marginTop: 12 }}>
@@ -3004,7 +2583,11 @@ function PriceManagementSection() {
             type="button"
             className="admin-mode-btn"
             disabled={!adminToken}
-            onClick={() => adminToken && fetchUploadHistory(adminToken)}
+            onClick={() => {
+              if (!adminToken) return;
+              void fetchCatalog(adminToken, selectedDeviceType);
+              void fetchUploadHistory(adminToken, selectedDeviceType);
+            }}
           >
             Refresh
           </button>
@@ -3072,9 +2655,13 @@ function PriceManagementSection() {
                         <button
                           type="button"
                           className="admin-mode-btn"
-                          disabled={!adminToken || busy || item.status !== "DEACTIVATED"}
+                          disabled={!adminToken || busy}
                           onClick={() => handleDeleteUpload(item.id)}
-                          title="Delete upload permanently"
+                          title={
+                            item.status === "ACTIVE"
+                              ? "Delete upload permanently (auto deactivates first)"
+                              : "Delete upload permanently"
+                          }
                         >
                           <Trash2 size={14} />
                           {busy && uploadActionType === "delete" ? " Deleting..." : " Delete"}
@@ -3095,6 +2682,316 @@ function PriceManagementSection() {
           </table>
         </div>
       </div>
+    </div>
+  );
+}
+
+function DeductionRuleSection() {
+  const [adminToken, setAdminToken] = useState<string | null>(() =>
+    localStorage.getItem("gadgetpe_admin_access_token"),
+  );
+  const [error, setError] = useState<string | null>(null);
+  const [rules, setRules] = useState<QuoteDeductionRule[]>([]);
+  const [drafts, setDrafts] = useState<Record<string, DeductionRuleDraft>>(() =>
+    createDefaultDeductionDrafts(),
+  );
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+
+  const groupedPresets = useMemo(() => {
+    const groups = new Map<string, DeductionRulePreset[]>();
+    DEDUCTION_RULE_PRESETS.forEach((item) => {
+      const list = groups.get(item.sectionTitle) || [];
+      list.push(item);
+      groups.set(item.sectionTitle, list);
+    });
+    return Array.from(groups.entries());
+  }, []);
+
+  const fetchRules = async (token: string) => {
+    try {
+      const result = await listQuoteDeductionRules(token);
+      setRules(result.rows);
+      const existing = buildPresetRuleMap(result.rows);
+      setDrafts((prev) => {
+        const next = createDefaultDeductionDrafts();
+        DEDUCTION_RULE_PRESETS.forEach((item) => {
+          const rule = existing.get(item.id);
+          if (rule) {
+            next[item.id] = {
+              ...next[item.id],
+              mode: rule.deductionType,
+              value: String(rule.deductionValue),
+              enabled: rule.isActive,
+              ruleId: rule.id,
+              isActive: rule.isActive,
+            };
+          } else if (prev[item.id]?.ruleId) {
+            next[item.id] = {
+              ...next[item.id],
+              mode: prev[item.id].mode,
+              value: prev[item.id].value,
+            };
+          }
+        });
+        return next;
+      });
+    } catch (err) {
+      if (isTokenExpiredError(err)) {
+        localStorage.removeItem("gadgetpe_admin_access_token");
+        setAdminToken(null);
+        setError("Session expired. Please login again.");
+        return;
+      }
+      setError(err instanceof Error ? err.message : "Unable to fetch deduction rules.");
+    }
+  };
+
+  useEffect(() => {
+    if (!adminToken) return;
+    void fetchRules(adminToken);
+  }, [adminToken]);
+
+  const updateDraft = (id: string, patch: Partial<DeductionRuleDraft>) => {
+    setDrafts((prev) => ({
+      ...prev,
+      [id]: {
+        ...(prev[id] || {
+          mode: "RUPEES",
+          value: "",
+          enabled: false,
+          ruleId: null,
+          isActive: false,
+        }),
+        ...patch,
+      },
+    }));
+  };
+
+  const saveRule = async (preset: DeductionRulePreset) => {
+    if (!adminToken) return;
+    const draft = drafts[preset.id];
+    if (!draft) return;
+
+    const numericValue = Number(draft.value);
+    if (!Number.isFinite(numericValue) || numericValue < 0) {
+      toast.error("Deduction value must be a valid non-negative number.");
+      return;
+    }
+
+    const payload: QuoteDeductionRuleInput = {
+      answerGroup: preset.answerGroup,
+      answerKey: preset.answerKey,
+      answerValue: preset.answerValue,
+      label: preset.prompt,
+      deductionType: draft.mode,
+      deductionValue: numericValue,
+      maxDeductionAmount: null,
+      priority: 100,
+      isActive: draft.enabled,
+      appliesToBrand: null,
+      appliesToModelId: null,
+    };
+
+    setSavingId(preset.id);
+    setError(null);
+    try {
+      if (draft.ruleId) {
+        await updateQuoteDeductionRule(adminToken, draft.ruleId, payload);
+        toast.success("Deduction rule updated.");
+      } else {
+        await createQuoteDeductionRule(adminToken, payload);
+        toast.success("Deduction rule created.");
+      }
+      await fetchRules(adminToken);
+    } catch (err) {
+      if (isTokenExpiredError(err)) {
+        localStorage.removeItem("gadgetpe_admin_access_token");
+        setAdminToken(null);
+        setError("Session expired. Please login again.");
+        toast.error("Session expired. Please connect again.");
+        return;
+      }
+      const message = err instanceof Error ? err.message : "Unable to save deduction rule.";
+      setError(message);
+      toast.error(message);
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const toggleRule = async (preset: DeductionRulePreset) => {
+    if (!adminToken) return;
+    const draft = drafts[preset.id];
+    if (!draft?.ruleId) {
+      toast.error("Save this rule first before toggling status.");
+      return;
+    }
+
+    setTogglingId(preset.id);
+    setError(null);
+    try {
+      await toggleQuoteDeductionRule(adminToken, draft.ruleId, !draft.isActive);
+      toast.success(draft.isActive ? "Rule paused." : "Rule activated.");
+      await fetchRules(adminToken);
+    } catch (err) {
+      if (isTokenExpiredError(err)) {
+        localStorage.removeItem("gadgetpe_admin_access_token");
+        setAdminToken(null);
+        setError("Session expired. Please login again.");
+        toast.error("Session expired. Please connect again.");
+        return;
+      }
+      const message = err instanceof Error ? err.message : "Unable to toggle deduction rule.";
+      setError(message);
+      toast.error(message);
+    } finally {
+      setTogglingId(null);
+    }
+  };
+
+  return (
+    <div className="admin-section">
+      <h2 className="admin-section-title">Deduction Rule</h2>
+
+      <div className="admin-card">
+        <div className="admin-card-toprow">
+          <h3 className="admin-card-title">Rule Setup</h3>
+          <button
+            type="button"
+            className="admin-mode-btn"
+            disabled={!adminToken}
+            onClick={() => {
+              if (!adminToken) return;
+              void fetchRules(adminToken);
+            }}
+          >
+            Refresh
+          </button>
+        </div>
+        <p className="admin-muted" style={{ marginTop: 8 }}>
+          Configure deduction rule for each fixed option. Choose one mode (Percent or Flat) and
+          enter value.
+        </p>
+      </div>
+
+      {groupedPresets.map(([sectionTitle, presets]) => (
+        <div className="admin-card" style={{ marginTop: 12 }} key={sectionTitle}>
+          <h3 className="admin-card-title" style={{ marginBottom: 10 }}>
+            {sectionTitle}
+          </h3>
+          <div style={{ display: "grid", gap: 10 }}>
+            {presets.map((preset) => {
+              const draft =
+                drafts[preset.id] ||
+                ({
+                  mode: "RUPEES",
+                  value: "",
+                  enabled: false,
+                  ruleId: null,
+                  isActive: false,
+                } as DeductionRuleDraft);
+              const busySave = savingId === preset.id;
+              const busyToggle = togglingId === preset.id;
+
+              return (
+                <div
+                  key={preset.id}
+                  style={{ border: "1px solid #1f4d3f2b", borderRadius: 10, padding: 10 }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                    <strong>{preset.prompt}</strong>
+                    <span className="admin-muted">{draft.isActive ? "ACTIVE" : "PAUSED"}</span>
+                  </div>
+
+                  <div className="admin-rule-form-grid compact" style={{ marginTop: 8 }}>
+                    <label className="admin-field-row">
+                      <span className="admin-form-label">Enable rule</span>
+                      <select
+                        className="admin-select"
+                        value={draft.enabled ? "yes" : "no"}
+                        onChange={(e) =>
+                          updateDraft(preset.id, {
+                            enabled: e.target.value === "yes",
+                          })
+                        }
+                      >
+                        <option value="yes">Yes</option>
+                        <option value="no">No</option>
+                      </select>
+                    </label>
+
+                    <label className="admin-field-row">
+                      <span className="admin-form-label">Deduction mode</span>
+                      <div style={{ display: "inline-flex", gap: 6 }}>
+                        <button
+                          type="button"
+                          className={`admin-mode-btn${draft.mode === "PERCENT" ? " active" : ""}`}
+                          style={{
+                            borderColor: draft.mode === "PERCENT" ? "#0f766e" : undefined,
+                            color: draft.mode === "PERCENT" ? "#0f766e" : undefined,
+                          }}
+                          onClick={() => updateDraft(preset.id, { mode: "PERCENT" })}
+                        >
+                          %
+                        </button>
+                        <button
+                          type="button"
+                          className={`admin-mode-btn${draft.mode === "RUPEES" ? " active" : ""}`}
+                          style={{
+                            borderColor: draft.mode === "RUPEES" ? "#0f766e" : undefined,
+                            color: draft.mode === "RUPEES" ? "#0f766e" : undefined,
+                          }}
+                          onClick={() => updateDraft(preset.id, { mode: "RUPEES" })}
+                        >
+                          Flat
+                        </button>
+                      </div>
+                    </label>
+
+                    <label className="admin-field-row">
+                      <span className="admin-form-label">Value</span>
+                      <input
+                        className="admin-input"
+                        type="number"
+                        min="0"
+                        value={draft.value}
+                        onChange={(e) => updateDraft(preset.id, { value: e.target.value })}
+                        placeholder={draft.mode === "PERCENT" ? "10" : "1000"}
+                      />
+                    </label>
+                  </div>
+
+                  <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <button
+                      type="button"
+                      className="admin-save-btn"
+                      disabled={!adminToken || busySave}
+                      onClick={() => void saveRule(preset)}
+                    >
+                      {busySave ? "Saving..." : draft.ruleId ? "Update" : "Save"}
+                    </button>
+                    <button
+                      type="button"
+                      className="admin-mode-btn"
+                      disabled={!adminToken || !draft.ruleId || busyToggle}
+                      onClick={() => void toggleRule(preset)}
+                    >
+                      {busyToggle ? "Working..." : draft.isActive ? "Pause" : "Activate"}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+
+      {error ? (
+        <p className="admin-muted" style={{ color: "#ef4444", marginTop: 12 }}>
+          {error}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -3281,28 +3178,30 @@ function KycQueueSection() {
                   </td>
                   <td className="admin-muted">{new Date(row.updatedAt).toLocaleString()}</td>
                   <td>
-                    <div className="admin-mode-toggle">
-                      <button
-                        type="button"
-                        className={`admin-mode-btn${row.verificationStatus === "VERIFIED" ? " active" : ""}`}
-                        disabled={!adminToken || savingKycId === row.id}
-                        onClick={() => handleVerification(row.id, "APPROVE")}
-                      >
-                        {savingKycId === row.id && row.verificationStatus !== "VERIFIED"
-                          ? "Saving..."
-                          : "Approve"}
-                      </button>
-                      <button
-                        type="button"
-                        className={`admin-mode-btn${row.verificationStatus === "REJECTED" ? " active" : ""}`}
-                        disabled={!adminToken || savingKycId === row.id}
-                        onClick={() => handleVerification(row.id, "REJECT")}
-                      >
-                        {savingKycId === row.id && row.verificationStatus !== "REJECTED"
-                          ? "Saving..."
-                          : "Reject"}
-                      </button>
-                    </div>
+                    {row.verificationStatus === "PENDING_REVIEW" ? (
+                      <div className="admin-mode-toggle">
+                        <button
+                          type="button"
+                          className="admin-mode-btn"
+                          disabled={!adminToken || savingKycId === row.id}
+                          onClick={() => handleVerification(row.id, "APPROVE")}
+                        >
+                          {savingKycId === row.id ? "Saving..." : "Approve"}
+                        </button>
+                        <button
+                          type="button"
+                          className="admin-mode-btn"
+                          disabled={!adminToken || savingKycId === row.id}
+                          onClick={() => handleVerification(row.id, "REJECT")}
+                        >
+                          {savingKycId === row.id ? "Saving..." : "Reject"}
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="admin-status-badge">
+                        {row.verificationStatus === "VERIFIED" ? "Approved" : "Rejected"}
+                      </span>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -3883,6 +3782,8 @@ function AdminPage() {
         return <LocationSection />;
       case "Price Mgmt":
         return <PriceManagementSection />;
+      case "Deduction Rule":
+        return <DeductionRuleSection />;
       case "KYC Queue":
         return <KycQueueSection />;
       case "Payments Verify":
@@ -3949,7 +3850,7 @@ function AdminPage() {
           onClick={() => setSidebarOpen((v) => !v)}
           aria-label="Toggle sidebar"
         >
-          ☰
+          <Menu size={18} />
         </button>
         <div className="admin-topbar-brand">
           <ShieldUser size={20} />

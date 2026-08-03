@@ -50,7 +50,6 @@ const PARTNER_SCOPE_KEY = "gadgetpe_partner_scope";
 const PARTNER_REFRESH_TOKEN_KEY = "gadgetpe_partner_refresh_token";
 const PARTNER_ACCESS_TOKEN_KEY = "gadgetpe_partner_access_token";
 const LEGACY_PARTNER_ACCESS_TOKEN_KEY = "gadgetpe_access_token";
-const SERVICE_LEADS_DATE_KEY = "gadgetpe_service_leads_date";
 
 function formatMetricValue(value: number) {
   return value > 0 ? value : "-";
@@ -68,6 +67,12 @@ function getLeadDisplayAmount(lead: PartnerLead) {
 function getPartnerAccessToken() {
   if (typeof window === "undefined") return null;
   return localStorage.getItem(PARTNER_ACCESS_TOKEN_KEY) || localStorage.getItem(LEGACY_PARTNER_ACCESS_TOKEN_KEY);
+}
+
+function persistPartnerScope(pincode: string, status: "ACTIVE" | "INACTIVE" | "LIMITED") {
+  if (typeof window === "undefined") return;
+  if (!pincode) return;
+  window.localStorage.setItem(PARTNER_SCOPE_KEY, JSON.stringify({ pincode, serviceabilityStatus: status }));
 }
 
 function PartnerDashboardPage() {
@@ -239,27 +244,32 @@ function PartnerDashboardPage() {
   const handleServiceLeadsNavigation = (event: React.MouseEvent<HTMLAnchorElement>) => {
     handleRestrictedNavigation(event);
     if (event.defaultPrevented || typeof window === "undefined") return;
-    const today = new Date().toISOString().slice(0, 10);
-    window.localStorage.setItem(SERVICE_LEADS_DATE_KEY, today);
+    const scopePincode = selectedPincode || workingPincodes[0] || "";
+    persistPartnerScope(scopePincode, serviceabilityStatus);
   };
+
+  useEffect(() => {
+    if (serviceabilityStatus !== "ACTIVE") return;
+    const scopePincode = selectedPincode || workingPincodes[0] || "";
+    if (!scopePincode) return;
+    persistPartnerScope(scopePincode, serviceabilityStatus);
+  }, [selectedPincode, workingPincodes, serviceabilityStatus]);
 
   const handleLogout = async () => {
     const refreshToken = localStorage.getItem(PARTNER_REFRESH_TOKEN_KEY) || localStorage.getItem("gadgetpe_refresh_token");
-    if (!refreshToken) {
-      toast.error("Session expired. Please login again.");
-      return;
+    if (refreshToken) {
+      try {
+        await logoutSession(refreshToken);
+      } catch {
+        // Session may already be expired/revoked; continue with local logout.
+      }
     }
 
-    try {
-      await logoutSession(refreshToken);
-      localStorage.removeItem(PARTNER_SCOPE_KEY);
-      clearRoleSession("partner");
-      setIsSidebarOpen(false);
-      toast.success("Logged out successfully.");
-      await navigate({ to: "/partner" });
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Complete active pickup before logout.");
-    }
+    localStorage.removeItem(PARTNER_SCOPE_KEY);
+    clearRoleSession("partner");
+    setIsSidebarOpen(false);
+    toast.success("Logged out successfully.");
+    await navigate({ to: "/partner" });
   };
 
   useEffect(() => {

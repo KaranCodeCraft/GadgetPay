@@ -37,6 +37,7 @@ import { calculateUserQuote } from "../pricing/quote-deduction.service.js";
 
 const EXPECTED_HEADERS = ["Brand", "Series", "Model", "Variant", "Launch Year", "GadgetPe Price"];
 const MAX_PRICING_UPLOAD_FILES = 10;
+const DEVICE_TYPES = ["MOBILE", "IPAD", "TABLET"];
 const HEADER_RULES = [
   { key: "Brand", pattern: /^brand$/i },
   { key: "Series", pattern: /^series$/i },
@@ -159,7 +160,34 @@ function normalizeKey(value) {
   return String(value || "").trim().replace(/\s+/g, " ").toUpperCase();
 }
 
+function parseDeviceType(input) {
+  const value = String(input || "").trim().toUpperCase();
+  if (!DEVICE_TYPES.includes(value)) {
+    throw badRequest("deviceType is required and must be one of MOBILE, IPAD, TABLET", {
+      allowedDeviceTypes: DEVICE_TYPES,
+    });
+  }
+  return value;
+}
+
 function resolveHeaderMap(receivedHeaders) {
+  const normalizedReceived = receivedHeaders.map((value) => String(value || "").trim().replace(/\s+/g, " "));
+  if (normalizedReceived.length !== EXPECTED_HEADERS.length) {
+    throw badRequest("Invalid Excel column labels. Use required columns only in exact order.", {
+      expectedHeaders: EXPECTED_HEADERS,
+      receivedHeaders: normalizedReceived,
+    });
+  }
+
+  for (let index = 0; index < EXPECTED_HEADERS.length; index += 1) {
+    if (normalizedReceived[index] !== EXPECTED_HEADERS[index]) {
+      throw badRequest("Invalid Excel column labels. Use required columns only in exact order.", {
+        expectedHeaders: EXPECTED_HEADERS,
+        receivedHeaders: normalizedReceived,
+      });
+    }
+  }
+
   if (receivedHeaders.length !== HEADER_RULES.length) {
     throw badRequest("Invalid Excel column labels. Use required columns only.", {
       expectedHeaders: EXPECTED_HEADERS,
@@ -346,7 +374,7 @@ function validatePricingUploadFile(file) {
   });
 }
 
-function persistPricingUpload({ file, parsed, uploadedBy, now }) {
+function persistPricingUpload({ file, parsed, uploadedBy, now, deviceType }) {
   const uploadId = randomUUID();
   const mediaRelativePath = buildMediaRelativePath({
     tenantType: "admin",
@@ -378,6 +406,7 @@ function persistPricingUpload({ file, parsed, uploadedBy, now }) {
   });
 
   const upsertInput = parsed.map((item) => ({
+    deviceType,
     brand: item.normalized.brand,
     series: item.normalized.series,
     model: item.normalized.model,
@@ -393,6 +422,7 @@ function persistPricingUpload({ file, parsed, uploadedBy, now }) {
 
   const snapshotInput = parsed.map((item) => ({
     uploadId,
+    deviceType,
     brand: item.normalized.brand,
     series: item.normalized.series,
     model: item.normalized.model,
@@ -407,6 +437,7 @@ function persistPricingUpload({ file, parsed, uploadedBy, now }) {
   const summary = upsertDevicePriceCatalogRows(upsertInput);
   createDevicePriceUploadHistory({
     id: uploadId,
+    deviceType,
     fileName: file.originalname,
     uploadedBy,
     uploadedAt: now,
@@ -423,18 +454,67 @@ function persistPricingUpload({ file, parsed, uploadedBy, now }) {
   };
 }
 
+function processPricingUploadRequest({ req, deviceType }) {
+  const files = getPricingUploadFiles(req);
+  if (files.length === 0) {
+    throw badRequest("Excel file is required");
+  }
+
+  const validatedFiles = files.map((file) => validatePricingUploadFile(file));
+  const now = new Date().toISOString();
+  const uploads = validatedFiles.map((item) =>
+    persistPricingUpload({ ...item, uploadedBy: req.auth.sub, now, deviceType }),
+  );
+  const aggregate = uploads.reduce(
+    (total, item) => ({
+      insertedCount: total.insertedCount + item.insertedCount,
+      updatedCount: total.updatedCount + item.updatedCount,
+      totalProcessed: total.totalProcessed + item.totalProcessed,
+    }),
+    { insertedCount: 0, updatedCount: 0, totalProcessed: 0 },
+  );
+  const singleUpload = uploads.length === 1 ? uploads[0] : null;
+
+  return {
+    ...aggregate,
+    ...(singleUpload
+      ? { uploadId: singleUpload.uploadId, sourceFileName: singleUpload.sourceFileName }
+      : {}),
+    deviceType,
+    expectedHeaders: EXPECTED_HEADERS,
+    uploads,
+  };
+}
+
+function makePricingUploadHandler(fixedDeviceType, options = {}) {
+  return (req, res, next) => {
+    try {
+      const deviceType = fixedDeviceType || parseDeviceType(req.body?.deviceType);
+      const payload = processPricingUploadRequest({ req, deviceType });
+      if (options.deprecatedEndpoint) {
+        payload.deprecatedEndpoint = true;
+      }
+      res.json(success(payload));
+    } catch (err) {
+      next(err);
+    }
+  };
+}
+
 export const adminPricingRouter = Router();
 
 adminPricingRouter.use(requireAuth, requireRole("admin"));
 
 adminPricingRouter.get("/catalog", (req, res) => {
   const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
-  const rows = listDevicePriceCatalog({ search });
+  const deviceType = parseDeviceType(req.query.deviceType || "MOBILE");
+  const rows = listDevicePriceCatalog({ search, deviceType });
   res.json(success({ rows, count: rows.length, expectedHeaders: EXPECTED_HEADERS }));
 });
 
 adminPricingRouter.get("/uploads", (req, res) => {
-  const rows = listDevicePriceUploadHistory();
+  const deviceType = parseDeviceType(req.query.deviceType || "MOBILE");
+  const rows = listDevicePriceUploadHistory({ deviceType });
   res.json(success({ rows, count: rows.length }));
 });
 
@@ -510,38 +590,10 @@ adminPricingRouter.post("/deductions/preview", (req, res, next) => {
   }
 });
 
-adminPricingRouter.post("/upload", handlePricingUploadMultipart, (req, res, next) => {
-  try {
-    const files = getPricingUploadFiles(req);
-    if (files.length === 0) {
-      throw badRequest("Excel file is required");
-    }
-
-    const validatedFiles = files.map((file) => validatePricingUploadFile(file));
-    const now = new Date().toISOString();
-    const uploads = validatedFiles.map((item) => persistPricingUpload({ ...item, uploadedBy: req.auth.sub, now }));
-    const aggregate = uploads.reduce(
-      (total, item) => ({
-        insertedCount: total.insertedCount + item.insertedCount,
-        updatedCount: total.updatedCount + item.updatedCount,
-        totalProcessed: total.totalProcessed + item.totalProcessed,
-      }),
-      { insertedCount: 0, updatedCount: 0, totalProcessed: 0 },
-    );
-    const singleUpload = uploads.length === 1 ? uploads[0] : null;
-
-    res.json(
-      success({
-        ...aggregate,
-        ...(singleUpload ? { uploadId: singleUpload.uploadId, sourceFileName: singleUpload.sourceFileName } : {}),
-        expectedHeaders: EXPECTED_HEADERS,
-        uploads,
-      }),
-    );
-  } catch (err) {
-    next(err);
-  }
-});
+adminPricingRouter.post("/upload/mobile", handlePricingUploadMultipart, makePricingUploadHandler("MOBILE"));
+adminPricingRouter.post("/upload/ipad", handlePricingUploadMultipart, makePricingUploadHandler("IPAD"));
+adminPricingRouter.post("/upload/tablet", handlePricingUploadMultipart, makePricingUploadHandler("TABLET"));
+adminPricingRouter.post("/upload", handlePricingUploadMultipart, makePricingUploadHandler(null, { deprecatedEndpoint: true }));
 
 adminPricingRouter.patch("/uploads/:uploadId/status", (req, res, next) => {
   try {

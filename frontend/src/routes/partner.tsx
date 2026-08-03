@@ -24,11 +24,11 @@ function PartnerAuthPage() {
   const [signupPhone, setSignupPhone] = useState("");
   const [signupOtp, setSignupOtp] = useState("");
   const [signupStep, setSignupStep] = useState<"phone" | "otp">("phone");
+  const [signupFormStep, setSignupFormStep] = useState<1 | 2 | 3>(1);
   const [devSignupAuth, setDevSignupAuth] = useState<Awaited<ReturnType<typeof partnerDevLogin>> | null>(null);
   const [fullName, setFullName] = useState("");
   const [age, setAge] = useState("");
-  const [address, setAddress] = useState("");
-  const [aadharNumber, setAadharNumber] = useState("");
+  const [gender, setGender] = useState("");
   const [gstNumber, setGstNumber] = useState("");
   const [identityProof, setIdentityProof] = useState<IdentityProof>("Aadhar");
   const [identityFile, setIdentityFile] = useState<File | null>(null);
@@ -41,8 +41,23 @@ function PartnerAuthPage() {
   const [latestKycUrl, setLatestKycUrl] = useState<string | null>(null);
 
   const hasSignupBasics = fullName.trim().length > 0 && age.trim().length > 0;
-  const hasSignupAddressProof = hasSignupBasics && address.trim().length > 0 && aadharNumber.trim().length === 12;
-  const canSendSignupOtp = hasSignupAddressProof && signupPhone.trim().length >= 10;
+  const step1Valid = hasSignupBasics && gender.trim().length > 0;
+  const step2Valid = step1Valid && identityFile !== null;
+  const canSendSignupOtp = step2Valid && signupPhone.trim().length >= 10;
+
+  const handleStep1Next = () => {
+    if (!fullName.trim()) { setError("Please enter your full name."); return; }
+    if (!age.trim()) { setError("Please enter your age."); return; }
+    if (!gender.trim()) { setError("Please select your gender."); return; }
+    setError(null); setNotice(null);
+    setSignupFormStep(2);
+  };
+
+  const handleStep2Next = () => {
+    if (!identityFile) { setError("Please upload your government ID."); return; }
+    setError(null); setNotice(null);
+    setSignupFormStep(3);
+  };
 
   useEffect(() => {
     const activeRole = getActiveRole();
@@ -154,19 +169,15 @@ function PartnerAuthPage() {
 
   const handleDevSignupOtpBypass = async () => {
     if (!fullName.trim()) {
-      setError("Please enter full name as per Aadhar.");
+      setError("Please enter full name.");
       return;
     }
     if (!age.trim()) {
       setError("Please enter your age.");
       return;
     }
-    if (!address.trim()) {
-      setError("Please enter your address.");
-      return;
-    }
-    if (!aadharNumber.trim() || aadharNumber.trim().length !== 12) {
-      setError("Please enter a valid 12-digit Aadhar number.");
+    if (!gender.trim()) {
+      setError("Please select your gender.");
       return;
     }
     if (signupPhone.trim().length < 10) {
@@ -191,7 +202,7 @@ function PartnerAuthPage() {
       setDevSignupAuth(result);
       setSignupOtp("6767");
       setSignupStep("otp");
-      setNotice("Dev registration bypass enabled. Upload identity image and submit.");
+      setNotice("Dev registration bypass enabled. Submit to complete.");
     } catch (apiError) {
       setError(apiError instanceof Error ? apiError.message : "Failed to use dev registration bypass.");
     } finally {
@@ -223,19 +234,19 @@ function PartnerAuthPage() {
   const handleSendSignupOtp = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!fullName.trim()) {
-      setError("Please enter full name as per Aadhar.");
+      setError("Please enter your full name.");
       return;
     }
     if (!age.trim()) {
       setError("Please enter your age.");
       return;
     }
-    if (!address.trim()) {
-      setError("Please enter your address.");
+    if (!gender.trim()) {
+      setError("Please select your gender.");
       return;
     }
-    if (!aadharNumber.trim() || aadharNumber.trim().length !== 12) {
-      setError("Please enter a valid 12-digit Aadhar number.");
+    if (!identityFile) {
+      setError("Please upload your government ID.");
       return;
     }
     if (signupPhone.trim().length < 10) {
@@ -267,26 +278,19 @@ function PartnerAuthPage() {
       return;
     }
     if (!fullName.trim()) {
-      setError("Please enter full name as per Aadhar.");
+      setError("Please enter your full name.");
       return;
     }
     if (!age.trim()) {
       setError("Please enter your age.");
       return;
     }
-    if (!address.trim()) {
-      setError("Please enter your address.");
+    if (!gender.trim()) {
+      setError("Please select your gender.");
       return;
     }
-    if (!aadharNumber.trim() || aadharNumber.trim().length !== 12) {
-      setError("Please enter a valid 12-digit Aadhar number.");
-      return;
-    }
-    // GST is optional in this flow typically but let's just make it required or optional
-    // We will keep it optional for now, or just require it based on prompt (it says "Aadhar number, gst, then mobile")
-    
     if (!identityFile) {
-      setError("Please upload your proof of identity image.");
+      setError("Please upload your government ID.");
       return;
     }
 
@@ -308,8 +312,8 @@ function PartnerAuthPage() {
         identityProof,
         file: identityFile,
         age,
-        address,
-        aadharNumber,
+        address: gender,
+        aadharNumber: gstNumber || "",
         gstNumber
       });
 
@@ -375,6 +379,7 @@ function PartnerAuthPage() {
             onClick={() => {
               setTab("signup");
               setSignupStep("phone");
+              setSignupFormStep(1);
               setSignupOtp("");
                 setDevSignupAuth(null);
               setError(null);
@@ -468,176 +473,225 @@ function PartnerAuthPage() {
             </form>
           )
         ) : (
-          signupStep === "phone" ? (
-            <form className="partner-auth-form" onSubmit={handleSendSignupOtp}>
-              <label>
-                Full Name
-                <input
-                  type="text"
-                  placeholder="Enter your full name"
-                  value={fullName}
-                  onChange={(event) => setFullName(event.target.value)}
-                  required
-                />
-              </label>
-
-              <label>
-                Age
-                <input
-                  type="number"
-                  placeholder="Enter your age"
-                  value={age}
-                  onChange={(event) => setAge(event.target.value)}
-                  required
-                />
-              </label>
-
-              {hasSignupBasics ? (
-                <>
-                  <label>
-                    Address
-                    <textarea
-                      placeholder="Enter your address"
-                      value={address}
-                      onChange={(event) => setAddress(event.target.value)}
-                      required
-                      rows={3}
-                    />
-                  </label>
-
-                  <label>
-                    Aadhar Number
-                    <input
-                      type="text"
-                      placeholder="Enter 12-digit Aadhar number"
-                      value={aadharNumber}
-                      maxLength={12}
-                      onChange={(event) => setAadharNumber(event.target.value.replace(/\D/g, ""))}
-                      required
-                    />
-                  </label>
-                </>
-              ) : null}
-
-              {hasSignupAddressProof ? (
-                <>
-                  <label>
-                    GST Number (Optional)
-                    <input
-                      type="text"
-                      placeholder="Enter GST number"
-                      value={gstNumber}
-                      onChange={(event) => setGstNumber(event.target.value)}
-                    />
-                  </label>
-
-                  <label>
-                    Phone Number
-                    <input
-                      type="tel"
-                      placeholder="Enter your phone"
-                      value={signupPhone}
-                      maxLength={10}
-                      onChange={(event) => setSignupPhone(event.target.value.replace(/\D/g, ""))}
-                      required
-                    />
-                  </label>
-                </>
-              ) : null}
-
-              {error && <div className="partner-auth-error">{error}</div>}
-              {notice && <div className="partner-otp-hint">{notice}</div>}
-
-              <button type="submit" className="partner-submit-btn" disabled={isSendingOtp || !canSendSignupOtp}>
-                {isSendingOtp ? "Sending..." : "Send OTP"}
+          <>
+            {/* ── Progress bar ── */}
+            <div className="partner-signup-steps" role="tablist" aria-label="Registration steps">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={signupFormStep === 1}
+                className={`partner-step-dot${signupFormStep === 1 ? " current" : ""}${signupFormStep > 1 ? " done" : ""}`}
+                onClick={() => setSignupFormStep(1)}
+              >
+                <span className="partner-step-circle">{signupFormStep > 1 ? "✓" : "1"}</span>
+                <span className="partner-step-label">Basic Info</span>
               </button>
-              {isDevOtpBypassEnabled ? (
-                <button
-                  type="button"
-                  className="partner-inline-link-btn"
-                  onClick={handleDevSignupOtpBypass}
-                  disabled={isSendingOtp || !canSendSignupOtp}
-                >
-                  Dev registration bypass
-                </button>
-              ) : null}
-            </form>
-          ) : (
-            <form className="partner-auth-form" onSubmit={handleSignup}>
-              <label>
-                Enter OTP
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  maxLength={4}
-                  placeholder="Enter OTP"
-                  value={signupOtp}
-                  onChange={(event) => setSignupOtp(event.target.value)}
-                />
-              </label>
+              <div className={`partner-step-line${signupFormStep > 1 ? " done" : ""}`} />
+              <button
+                type="button"
+                role="tab"
+                aria-selected={signupFormStep === 2}
+                className={`partner-step-dot${signupFormStep === 2 ? " current" : ""}${signupFormStep > 2 ? " done" : ""}${!step1Valid ? " disabled" : ""}`}
+                onClick={() => { if (step1Valid || signupFormStep > 1) setSignupFormStep(2); }}
+              >
+                <span className="partner-step-circle">{signupFormStep > 2 ? "✓" : "2"}</span>
+                <span className="partner-step-label">Documents</span>
+              </button>
+              <div className={`partner-step-line${signupFormStep > 2 ? " done" : ""}`} />
+              <button
+                type="button"
+                role="tab"
+                aria-selected={signupFormStep === 3}
+                className={`partner-step-dot${signupFormStep === 3 ? " current" : ""}${!step2Valid ? " disabled" : ""}`}
+                onClick={() => { if (step2Valid || signupFormStep > 2) setSignupFormStep(3); }}
+              >
+                <span className="partner-step-circle">3</span>
+                <span className="partner-step-label">Verify</span>
+              </button>
+            </div>
 
-              <div className="partner-otp-hint">
-                OTP sent to {signupPhone}.{" "}
+            {/* ── Step 1 : Basic Info ── */}
+            {signupFormStep === 1 && (
+              <div className="partner-signup-card">
+                <label>
+                  Full Name
+                  <input
+                    type="text"
+                    placeholder="Enter your full name"
+                    value={fullName}
+                    onChange={(e) => setFullName(e.target.value)}
+                    autoFocus
+                  />
+                </label>
+                <label>
+                  Age
+                  <input
+                    type="number"
+                    placeholder="Enter your age"
+                    min="18"
+                    max="99"
+                    value={age}
+                    onChange={(e) => setAge(e.target.value)}
+                  />
+                </label>
+                <label>
+                  Gender
+                  <select value={gender} onChange={(e) => setGender(e.target.value)}>
+                    <option value="">Select gender</option>
+                    <option value="Male">Male</option>
+                    <option value="Female">Female</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </label>
+                {error && <div className="partner-auth-error">{error}</div>}
                 <button
                   type="button"
-                  className="partner-inline-link-btn"
-                  disabled={isSendingOtp}
-                  onClick={() => {
-                    void handleResendSignupOtp();
-                  }}
+                  className="partner-submit-btn"
+                  onClick={handleStep1Next}
                 >
-                  {isSendingOtp ? "Sending..." : "Send OTP again"}
-                </button>{" "}
-                <button
-                  type="button"
-                  className="partner-inline-link-btn"
-                  onClick={() => {
-                    setSignupStep("phone");
-                    setSignupOtp("");
-                    setDevSignupAuth(null);
-                    setError(null);
-                    setNotice(null);
-                  }}
-                >
-                  Change number
+                  Next →
                 </button>
               </div>
+            )}
 
-              <label>
-                Proof of Identity
-                <select
-                  value={identityProof}
-                  onChange={(event) => setIdentityProof(event.target.value as IdentityProof)}
-                >
-                  <option value="Aadhar">Aadhar</option>
-                  <option value="Voter ID">Voter ID</option>
-                  <option value="Driving License">Driving License</option>
-                  <option value="PAN Card">PAN Card</option>
-                  <option value="Passport">Passport</option>
-                </select>
-              </label>
+            {/* ── Step 2 : Documents ── */}
+            {signupFormStep === 2 && (
+              <div className="partner-signup-card">
+                <label>
+                  GST Number{" "}
+                  <span className="partner-optional-label">(Optional)</span>
+                  <input
+                    type="text"
+                    placeholder="Enter GST number"
+                    value={gstNumber}
+                    onChange={(e) => setGstNumber(e.target.value)}
+                  />
+                </label>
+                <label>
+                  Government ID Type
+                  <select
+                    value={identityProof}
+                    onChange={(e) => setIdentityProof(e.target.value as IdentityProof)}
+                  >
+                    <option value="Aadhar">Aadhar</option>
+                    <option value="Voter ID">Voter ID</option>
+                    <option value="Driving License">Driving License</option>
+                    <option value="PAN Card">PAN Card</option>
+                    <option value="Passport">Passport</option>
+                  </select>
+                </label>
+                <label className="partner-file-label">
+                  Upload Government ID
+                  <input
+                    type="file"
+                    accept="image/*,.pdf"
+                    onChange={(e) => setIdentityFile(e.target.files?.[0] ?? null)}
+                  />
+                </label>
+                {identityFile ? (
+                  <p className="partner-file-selected">✓ {identityFile.name}</p>
+                ) : null}
+                {error && <div className="partner-auth-error">{error}</div>}
+                <div className="partner-step-nav-row">
+                  <button
+                    type="button"
+                    className="partner-step-back-btn"
+                    onClick={() => { setError(null); setSignupFormStep(1); }}
+                  >
+                    ← Back
+                  </button>
+                  <button
+                    type="button"
+                    className="partner-submit-btn"
+                    onClick={handleStep2Next}
+                  >
+                    Next →
+                  </button>
+                </div>
+              </div>
+            )}
 
-              <label className="partner-file-label">
-                Upload Identity Image
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={(event) => setIdentityFile(event.target.files?.[0] ?? null)}
-                />
-              </label>
-
-              <button type="button" className="partner-upload-btn">
-                {identityFile ? `Uploaded: ${identityFile.name}` : "Upload"}
-              </button>
-
-              {error && <div className="partner-auth-error">{error}</div>}
-              {notice && <div className="partner-otp-hint">{notice}</div>}
-
-              <button type="submit" className="partner-submit-btn" disabled={isSubmitting}>
-                {isSubmitting ? "Please wait..." : "Submit"}
-              </button>
-            </form>
-          )
+            {/* ── Step 3 : Verify (phone → OTP) ── */}
+            {signupFormStep === 3 && (
+              signupStep === "phone" ? (
+                <form className="partner-signup-card" onSubmit={handleSendSignupOtp}>
+                  <label>
+                    Mobile Number
+                    <input
+                      type="tel"
+                      placeholder="Enter your mobile number"
+                      value={signupPhone}
+                      maxLength={10}
+                      autoFocus
+                      onChange={(e) => setSignupPhone(e.target.value.replace(/\D/g, ""))}
+                    />
+                  </label>
+                  {error && <div className="partner-auth-error">{error}</div>}
+                  {notice && <div className="partner-otp-hint">{notice}</div>}
+                  <div className="partner-step-nav-row">
+                    <button
+                      type="button"
+                      className="partner-step-back-btn"
+                      onClick={() => { setError(null); setSignupFormStep(2); }}
+                    >
+                      ← Back
+                    </button>
+                    <button type="submit" className="partner-submit-btn" disabled={isSendingOtp}>
+                      {isSendingOtp ? "Sending..." : "Send OTP"}
+                    </button>
+                  </div>
+                  {isDevOtpBypassEnabled ? (
+                    <button
+                      type="button"
+                      className="partner-inline-link-btn"
+                      onClick={handleDevSignupOtpBypass}
+                      disabled={isSendingOtp}
+                    >
+                      Dev registration bypass
+                    </button>
+                  ) : null}
+                </form>
+              ) : (
+                <form className="partner-signup-card" onSubmit={handleSignup}>
+                  <div className="partner-otp-hint">
+                    OTP sent to {signupPhone}.{" "}
+                    <button
+                      type="button"
+                      className="partner-inline-link-btn"
+                      disabled={isSendingOtp}
+                      onClick={() => { void handleResendSignupOtp(); }}
+                    >
+                      {isSendingOtp ? "Sending..." : "Resend OTP"}
+                    </button>{" "}
+                    <button
+                      type="button"
+                      className="partner-inline-link-btn"
+                      onClick={() => { setSignupStep("phone"); setSignupOtp(""); setDevSignupAuth(null); setError(null); setNotice(null); }}
+                    >
+                      Change number
+                    </button>
+                  </div>
+                  <label>
+                    Enter OTP
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={6}
+                      placeholder="Enter OTP"
+                      autoFocus
+                      value={signupOtp}
+                      onChange={(e) => setSignupOtp(e.target.value)}
+                    />
+                  </label>
+                  {error && <div className="partner-auth-error">{error}</div>}
+                  {notice && <div className="partner-otp-hint">{notice}</div>}
+                  <button type="submit" className="partner-submit-btn" disabled={isSubmitting}>
+                    {isSubmitting ? "Please wait..." : "Submit"}
+                  </button>
+                </form>
+              )
+            )}
+          </>
         )}
       </section>
 
@@ -658,6 +712,7 @@ function PartnerAuthPage() {
                   setTab("login");
                   setLoginStep("phone");
                   setSignupStep("phone");
+                  setSignupFormStep(1);
                   setSignupOtp("");
                   setLoginPhone(signupPhone.trim());
                   setLoginOtp("");

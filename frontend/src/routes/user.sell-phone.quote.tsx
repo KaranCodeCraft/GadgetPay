@@ -22,6 +22,7 @@ import {
   saveUserDeviceDetails,
   saveUserPickupSchedule,
   sendUserOtp,
+  userDevLogin,
   verifyUserOtp,
   type UserSellFlowDeviceDetails,
   type UserSellFlowQuote,
@@ -41,6 +42,7 @@ const USER_REFRESH_KEY = "gadgetpe_user_refresh_token";
 const USER_NAME_KEY = "gadgetpe_user_name";
 const USER_ID_KEY = "gadgetpe_user_id";
 const USER_SCOPE_KEY = "gadgetpe_user_scope";
+const isDevOtpBypassEnabled = import.meta.env.DEV;
 
 const timeSlots = [
   "11:00 AM - 12:00 PM",
@@ -273,7 +275,12 @@ function UserSellPhoneQuotePage() {
 
   const isPrimarySlotComplete = Boolean(primaryDate && primaryTime);
   const isScheduleComplete = Boolean(primaryDate && primaryTime && alternateDate && alternateTime);
-  const isAddressComplete = Boolean(sellerName.trim() && callingPhoneNumber.trim().length >= 10 && addressLine.trim() && validatedPincode);
+  const isAddressComplete = Boolean(
+    sellerName.trim() &&
+    callingPhoneNumber.trim().length >= 10 &&
+    addressLine.trim() &&
+    /^\d{6}$/.test(pincode.trim()),
+  );
   const confirmedPickupText = `${formatPickupDate(primaryDate)} at ${primaryTime}`;
 
   const handleValidatePincode = async (rawPincode?: string) => {
@@ -457,6 +464,7 @@ function UserSellPhoneQuotePage() {
       }
       setIsPhoneVerified(true);
       void loadBackendQuotePreview(selectedModel);
+      toast.success(`Welcome, ${result.user.name}!`);
       setAuthError(null);
     } catch (err) {
       const message = err instanceof ApiClientError || err instanceof Error ? err.message : "Unable to verify phone.";
@@ -466,37 +474,59 @@ function UserSellPhoneQuotePage() {
     }
   };
 
-  const handleBypassOtp = () => {
+  const handleBypassOtp = async () => {
     const phone = quoteAccessPhone.trim();
-    if (phone && !/^\d{10}$/.test(phone)) {
+    if (!/^\d{10}$/.test(phone)) {
       setAuthError("Enter a valid 10-digit phone number.");
       return;
     }
-    const bypassPhone = phone || "9999999999";
-    const bypassName = sellerName.trim() || "Test User";
-    setCallingPhoneNumber(bypassPhone);
-    setSellerName(bypassName);
-    setVerifiedUser({ id: "bypass", name: bypassName });
-    setVerifiedToken("bypass-dev");
+
     setAuthError(null);
-    setIsPhoneVerified(true);
-    void loadBackendQuotePreview(selectedModel);
+    setIsQuoteSendingOtp(true);
+    try {
+      const result = await userDevLogin(phone, sellerName.trim() || undefined);
+      window.localStorage.setItem(USER_TOKEN_KEY, result.accessToken);
+      window.localStorage.setItem(USER_REFRESH_KEY, result.refreshToken);
+      window.localStorage.setItem(USER_NAME_KEY, result.user.name);
+      window.localStorage.setItem(USER_ID_KEY, result.user.id);
+      window.localStorage.setItem("gadgetpe_user_phone", result.user.phone);
+      activateRoleSession("user");
+      setVerifiedToken(result.accessToken);
+      setVerifiedUser(result.user);
+      setCallingPhoneNumber(phone);
+      if (!sellerName.trim()) {
+        setSellerName(result.user.name || "");
+      }
+      setIsPhoneVerified(true);
+      void loadBackendQuotePreview(selectedModel);
+      toast.success(`Dev login successful. Welcome, ${result.user.name}!`);
+    } catch (err) {
+      const message = err instanceof ApiClientError || err instanceof Error ? err.message : "Unable to use dev OTP bypass.";
+      setAuthError(message);
+    } finally {
+      setIsQuoteSendingOtp(false);
+    }
   };
 
   const handleSchedulePickup = async () => {
     const token = verifiedToken || window.localStorage.getItem(USER_TOKEN_KEY);
     const userId = verifiedUser?.id || window.localStorage.getItem(USER_ID_KEY) || "";
     const userName = verifiedUser?.name || window.localStorage.getItem(USER_NAME_KEY) || sellerName.trim();
+    const trimmedPincode = pincode.trim();
 
     if (!token || !userId) {
       setAuthError("Phone verification required before scheduling pickup.");
       return;
     }
 
-    // Dev bypass — skip backend commit and go straight to success
-    if (token === "bypass-dev") {
-      setModalStep("success");
+    if (!/^\d{6}$/.test(trimmedPincode)) {
+      setAuthError("Enter a valid 6-digit pincode.");
       return;
+    }
+
+    if (validatedPincode !== trimmedPincode) {
+      const isPincodeValid = await handleValidatePincode(trimmedPincode);
+      if (!isPincodeValid) return;
     }
 
     setSchedulingPickup(true);
@@ -600,15 +630,18 @@ function UserSellPhoneQuotePage() {
                   </button>
                 )}
               </div>
-              <div style={{ textAlign: "center", marginTop: 10 }}>
-                <button
-                  type="button"
-                  onClick={handleBypassOtp}
-                  style={{ background: "none", border: "none", color: "#a0aec0", fontSize: 12, textDecoration: "underline", cursor: "pointer", padding: 0 }}
-                >
-                  Bypass OTP (dev only)
-                </button>
-              </div>
+              {isDevOtpBypassEnabled ? (
+                <div style={{ textAlign: "center", marginTop: 10 }}>
+                  <button
+                    type="button"
+                    onClick={() => void handleBypassOtp()}
+                    disabled={isQuoteSendingOtp}
+                    style={{ background: "none", border: "none", color: "#a0aec0", fontSize: 12, textDecoration: "underline", cursor: "pointer", padding: 0 }}
+                  >
+                    Bypass OTP (dev only)
+                  </button>
+                </div>
+              ) : null}
             </section>
           ) : (
             <>

@@ -4,11 +4,14 @@ import { success } from "../../shared/http/response.js";
 import { findDevicePriceByExactMatch, listDistinctBrands, listModelsForBrand } from "../../db/repository.js";
 import { calculateUserQuote } from "./quote-deduction.service.js";
 
+const deviceTypeSchema = z.enum(["MOBILE", "IPAD", "TABLET"]);
+
 function normalizeKey(value) {
   return String(value || "").trim().replace(/\s+/g, " ").toUpperCase();
 }
 
 const lookupSchema = z.object({
+  deviceType: deviceTypeSchema,
   brand: z.string().min(1),
   series: z.string().min(1),
   model: z.string().min(1),
@@ -48,8 +51,9 @@ export const pricingRouter = Router();
 
 pricingRouter.get("/catalog/brands", (req, res, next) => {
   try {
-    const brands = listDistinctBrands();
-    res.json(success({ brands }));
+    const deviceType = deviceTypeSchema.parse(typeof req.query.deviceType === "string" ? req.query.deviceType.toUpperCase() : undefined);
+    const brands = listDistinctBrands(deviceType);
+    res.json(success({ deviceType, brands }));
   } catch (err) {
     next(err);
   }
@@ -57,12 +61,13 @@ pricingRouter.get("/catalog/brands", (req, res, next) => {
 
 pricingRouter.get("/catalog/models", (req, res, next) => {
   try {
+    const deviceType = deviceTypeSchema.parse(typeof req.query.deviceType === "string" ? req.query.deviceType.toUpperCase() : undefined);
     const brandRaw = req.query.brand;
     if (!brandRaw || typeof brandRaw !== "string" || !brandRaw.trim()) {
       return res.status(400).json({ success: false, error: "brand query parameter is required" });
     }
     const brand = normalizeKey(brandRaw);
-    const rows = listModelsForBrand(brand);
+    const rows = listModelsForBrand(brand, deviceType);
 
     const seriesMap = new Map();
     for (const row of rows) {
@@ -84,7 +89,7 @@ pricingRouter.get("/catalog/models", (req, res, next) => {
       })),
     }));
 
-    res.json(success({ brand, series }));
+    res.json(success({ deviceType, brand, series }));
   } catch (err) {
     next(err);
   }
@@ -108,6 +113,7 @@ pricingRouter.post("/lookup", (req, res, next) => {
   try {
     const input = lookupSchema.parse(req.body);
     const row = findDevicePriceByExactMatch({
+      deviceType: input.deviceType,
       brand: normalizeKey(input.brand),
       series: normalizeKey(input.series),
       model: normalizeKey(input.model),
@@ -132,6 +138,7 @@ pricingRouter.post("/lookup", (req, res, next) => {
         currency: "INR",
         sourceFileName: row.sourceFileName,
         matchedDevice: {
+          deviceType: row.deviceType,
           brand: row.brand,
           series: row.series,
           model: row.model,

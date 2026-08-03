@@ -84,6 +84,7 @@ function LeadBucketDetailsPage() {
   const [lead, setLead] = useState<PartnerLead | null>(null);
   const [loading, setLoading] = useState(false);
   const [accepting, setAccepting] = useState(false);
+  const [deviceDetailsOpen, setDeviceDetailsOpen] = useState(false);
 
   const leadId = search.leadId || "";
 
@@ -124,7 +125,6 @@ function LeadBucketDetailsPage() {
   const acceptButtonLabel = useMemo(() => {
     if (accepting) return "Accepting...";
     if (!lead) return "Accept Lead";
-    if (lead.status === "ACCEPTED") return "Already Accepted";
     if (lead.status === "IN_PROGRESS") return "In Progress";
     if (lead.status === "COMPLETED") return "Completed";
     if (lead.status === "REJECTED") return "Rejected";
@@ -198,25 +198,37 @@ function LeadBucketDetailsPage() {
               </div>
 
               <div className="lead-booking-box">
-                <h3>Full Device Details</h3>
-                <div className="lead-device-table-wrap">
-                  <table className="lead-device-table" aria-label="Full device details">
-                    <thead>
-                      <tr>
-                        <th>Field</th>
-                        <th>Value</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {deviceRows.map((row, index) => (
-                        <tr key={`${row.key}-${index}`}>
-                          <td>{row.key}</td>
-                          <td>{row.value}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <button
+                  type="button"
+                  className="lead-accordion-trigger"
+                  aria-expanded={deviceDetailsOpen}
+                  onClick={() => setDeviceDetailsOpen((open) => !open)}
+                >
+                  <span>Full Device Details</span>
+                  <span>{deviceDetailsOpen ? "−" : "+"}</span>
+                </button>
+                {deviceDetailsOpen ? (
+                  <div className="lead-accordion-body">
+                    <div className="lead-device-table-wrap">
+                      <table className="lead-device-table" aria-label="Full device details">
+                        <thead>
+                          <tr>
+                            <th>Field</th>
+                            <th>Value</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {deviceRows.map((row, index) => (
+                            <tr key={`${row.key}-${index}`}>
+                              <td>{row.key}</td>
+                              <td>{row.value}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ) : null}
               </div>
             </>
           ) : (
@@ -225,15 +237,17 @@ function LeadBucketDetailsPage() {
 
           <div className="lead-booking-box">
             <h3>Partner Actions</h3>
-            <p className="lead-hint">Pickup schedule is set by user and read-only for partners.</p>
-            {!acceptEnabled && lead ? (
-              <p className="lead-hint">This lead cannot be accepted in current status: {lead.status}</p>
-            ) : null}
 
             <div className="lead-decision-row">
-              <button type="button" className="lead-book-btn" onClick={handleAccept} disabled={!acceptEnabled || accepting}>
-                {acceptButtonLabel}
-              </button>
+              {lead?.status === "ACCEPTED" ? (
+                <button type="button" className="lead-book-btn" onClick={() => { void navigate({ to: "/service-Leads" }); }}>
+                  Go to Assigned Leads
+                </button>
+              ) : (
+                <button type="button" className="lead-book-btn" onClick={handleAccept} disabled={!acceptEnabled || accepting}>
+                  {acceptButtonLabel}
+                </button>
+              )}
             </div>
           </div>
         </section>

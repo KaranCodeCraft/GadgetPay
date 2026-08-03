@@ -50,7 +50,7 @@ function UserSellPhonePage() {
 
   useEffect(() => {
     setBrandsLoading(true);
-    getCatalogBrands()
+    getCatalogBrands("MOBILE")
       .then(({ brands: b }) => setBrands(b))
       .catch(() => setBrands([]))
       .finally(() => setBrandsLoading(false));
@@ -65,7 +65,7 @@ function UserSellPhonePage() {
       return;
     }
     setModelsLoading(true);
-    getCatalogModels(selectedBrandSlug)
+    getCatalogModels(selectedBrandSlug, "MOBILE")
       .then(({ series }) => setSeriesGroups(series))
       .catch(() => setSeriesGroups([]))
       .finally(() => setModelsLoading(false));

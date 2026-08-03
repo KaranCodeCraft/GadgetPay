@@ -291,7 +291,12 @@ function UserSellTabletQuotePage() {
 
   const isPrimarySlotComplete = Boolean(primaryDate && primaryTime);
   const isScheduleComplete = Boolean(primaryDate && primaryTime && alternateDate && alternateTime);
-  const isAddressComplete = Boolean(sellerName.trim() && callingPhoneNumber.trim().length >= 10 && addressLine.trim() && validatedPincode);
+  const isAddressComplete = Boolean(
+    sellerName.trim() &&
+    callingPhoneNumber.trim().length >= 10 &&
+    addressLine.trim() &&
+    /^\d{6}$/.test(pincode.trim()),
+  );
   const confirmedPickupText = `${formatPickupDate(primaryDate)} at ${primaryTime}`;
 
   const handleValidatePincode = async (rawPincode?: string) => {
@@ -492,10 +497,21 @@ function UserSellTabletQuotePage() {
     const token = verifiedToken || window.localStorage.getItem(USER_TOKEN_KEY);
     const userId = verifiedUser?.id || window.localStorage.getItem(USER_ID_KEY) || "";
     const userName = verifiedUser?.name || window.localStorage.getItem(USER_NAME_KEY) || sellerName.trim();
+    const trimmedPincode = pincode.trim();
 
     if (!token || !userId) {
       setAuthError("Phone verification required before scheduling pickup.");
       return;
+    }
+
+    if (!/^\d{6}$/.test(trimmedPincode)) {
+      setAuthError("Enter a valid 6-digit pincode.");
+      return;
+    }
+
+    if (validatedPincode !== trimmedPincode) {
+      const isPincodeValid = await handleValidatePincode(trimmedPincode);
+      if (!isPincodeValid) return;
     }
 
     setSchedulingPickup(true);

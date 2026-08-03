@@ -8,19 +8,10 @@ export const Route = createFileRoute("/service-Leads/")({
   component: ServiceLeadsPage,
 });
 
-const TIME_SLOTS = [
-  "09:00 AM - 12:00 PM",
-  "12:00 PM - 03:00 PM",
-  "03:00 PM - 06:00 PM",
-  "06:00 PM - 09:00 PM",
-] as const;
-
 const PAGE_SIZE = 5;
 const PARTNER_SCOPE_KEY = "gadgetpe_partner_scope";
 const PARTNER_TOKEN_KEY = "gadgetpe_partner_access_token";
 const LEGACY_PARTNER_TOKEN_KEY = "gadgetpe_access_token";
-const SERVICE_LEADS_DATE_KEY = "gadgetpe_service_leads_date";
-const SERVICE_LEADS_TIME_KEY = "gadgetpe_service_leads_time";
 
 function canUseStorage() {
   return typeof window !== "undefined";
@@ -46,15 +37,8 @@ function formatInr(value: number) {
   return new Intl.NumberFormat("en-IN").format(value);
 }
 
-function isTodayPickup(lead: PartnerLead, selectedDate: string) {
-  const primary = lead.pickupSchedule?.primaryDate;
-  return Boolean(primary && primary.slice(0, 10) === selectedDate);
-}
-
 function ServiceLeadsPage() {
   const navigate = useNavigate();
-  const [selectedDate, setSelectedDate] = useState(() => getStored(SERVICE_LEADS_DATE_KEY) || new Date().toISOString().slice(0, 10));
-  const [selectedTime, setSelectedTime] = useState(() => getStored(SERVICE_LEADS_TIME_KEY) || "All");
   const [page, setPage] = useState(1);
   const [leads, setLeads] = useState<PartnerLead[]>([]);
   const [loading, setLoading] = useState(false);
@@ -113,24 +97,13 @@ function ServiceLeadsPage() {
     setLoading(true);
     listPartnerServiceLeads(token, {
       pincode: scopePincode,
-      date: selectedDate,
-      timeSlot: selectedTime,
+      status: "ACCEPTED",
       limit: 100,
     })
       .then((result) => setLeads(result.rows))
       .catch((err) => toast.error(err instanceof Error ? err.message : "Unable to load service leads."))
       .finally(() => setLoading(false));
-  }, [scopePincode, selectedDate, selectedTime]);
-
-  useEffect(() => {
-    if (!canUseStorage()) return;
-    window.localStorage.setItem(SERVICE_LEADS_DATE_KEY, selectedDate);
-  }, [selectedDate]);
-
-  useEffect(() => {
-    if (!canUseStorage()) return;
-    window.localStorage.setItem(SERVICE_LEADS_TIME_KEY, selectedTime);
-  }, [selectedTime]);
+  }, [scopePincode]);
 
   const filtered = useMemo(() => leads, [leads]);
 
@@ -151,26 +124,9 @@ function ServiceLeadsPage() {
       </div>
       <section className="partner-simple-card partner-lead-card service-leads-card">
         <h1>Service Leads</h1>
-        <p>Start Today's Leads: only selected-date primary pickup leads are shown.</p>
+        <p>Accepted leads ready for pickup start.</p>
 
-        <div className="lead-booking-box service-leads-filter-box">
-          <h3>Filter</h3>
-          <div className="lead-booking-calendar service-leads-filter-row">
-            <div className="service-leads-filter-field">
-              <label htmlFor="service-date">Calendar</label>
-              <input id="service-date" type="date" value={selectedDate} onChange={(e) => { setSelectedDate(e.target.value); setPage(1); }} />
-            </div>
-            <div className="service-leads-filter-field">
-              <label htmlFor="service-time">Time</label>
-              <select id="service-time" value={selectedTime} onChange={(e) => { setSelectedTime(e.target.value); setPage(1); }} className="lead-select">
-                <option value="All">All</option>
-                {TIME_SLOTS.map((slot) => <option key={slot} value={slot}>{slot}</option>)}
-              </select>
-            </div>
-          </div>
-        </div>
-
-        <p className="lead-hint service-leads-hint">Selected date: {selectedDate} | Pincode: {scopePincode || "-"} | Total: {filtered.length}</p>
+        <p className="lead-hint service-leads-hint">Pincode: {scopePincode || "-"} | Accepted Leads: {filtered.length}</p>
 
         <div className="lead-table-wrap service-leads-table-wrap">
           <table className="lead-table">
@@ -185,10 +141,7 @@ function ServiceLeadsPage() {
               </tr>
             </thead>
             <tbody>
-              {rows.length > 0 ? rows.map((row, idx) => {
-                const scheduleEligible = row.status === "ACCEPTED" && isTodayPickup(row, selectedDate);
-                const canCall = Boolean(row.seller.phone);
-                return (
+              {rows.length > 0 ? rows.map((row, idx) => (
                   <tr key={`${row.id}-${idx}`}>
                     <td data-label="Phone Name">{row.selectedModel.modelName}</td>
                     <td data-label="Price Listed">Rs. {formatInr(row.quote?.sellingPrice ?? row.selectedModel.listedPrice ?? 0)}</td>
@@ -197,22 +150,11 @@ function ServiceLeadsPage() {
                     <td data-label="Pickup Time Zone">{row.pickupSchedule?.primaryTime || "-"}</td>
                     <td data-label="Action" className="service-leads-action-cell">
                       <div className="lead-decision-row service-leads-action-row">
-                        {scheduleEligible ? (
-                          <Link to="/service-Leads/transaction" search={{ leadId: row.id }} className="lead-view-btn lead-view-link">Schedule Pickup</Link>
-                        ) : (
-                          <span className="lead-view-disabled">{row.status === "ACCEPTED" ? "Not Today" : row.status}</span>
-                        )}
-                        <Link to="/service-Leads/transaction" search={{ leadId: row.id }} className="lead-view-btn lead-view-btn-details lead-view-link">View Details</Link>
-                        {canCall ? (
-                          <a className="lead-view-btn lead-view-link" href={`tel:${row.seller.phone}`}>Call Customer</a>
-                        ) : (
-                          <span className="lead-view-disabled">No Number</span>
-                        )}
+                        <Link to="/service-Leads/transaction" search={{ leadId: row.id }} className="lead-view-btn lead-view-link">Start Pickup</Link>
                       </div>
                     </td>
                   </tr>
-                );
-              }) : (
+              )) : (
                 <tr><td colSpan={6}>{loading ? "Loading service leads..." : "No service leads available."}</td></tr>
               )}
             </tbody>

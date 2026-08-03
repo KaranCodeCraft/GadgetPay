@@ -525,6 +525,7 @@ sqlite.exec(`
 
   CREATE TABLE IF NOT EXISTS device_price_catalog (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    device_type TEXT NOT NULL DEFAULT 'MOBILE' CHECK(device_type IN ('MOBILE', 'IPAD', 'TABLET')),
     brand TEXT NOT NULL,
     series TEXT NOT NULL,
     model TEXT NOT NULL,
@@ -536,7 +537,7 @@ sqlite.exec(`
     source_file_name TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    UNIQUE(brand, series, model, storage, launch_year)
+    UNIQUE(device_type, brand, series, model, storage, launch_year)
   );
 
   CREATE TABLE IF NOT EXISTS quote_deduction_rules (
@@ -559,6 +560,7 @@ sqlite.exec(`
 
   CREATE TABLE IF NOT EXISTS device_price_upload_history (
     id TEXT PRIMARY KEY,
+    device_type TEXT NOT NULL DEFAULT 'MOBILE' CHECK(device_type IN ('MOBILE', 'IPAD', 'TABLET')),
     file_name TEXT NOT NULL,
     uploaded_by TEXT NOT NULL,
     uploaded_at TEXT NOT NULL,
@@ -574,6 +576,7 @@ sqlite.exec(`
   CREATE TABLE IF NOT EXISTS device_price_upload_rows (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     upload_id TEXT NOT NULL,
+    device_type TEXT NOT NULL DEFAULT 'MOBILE' CHECK(device_type IN ('MOBILE', 'IPAD', 'TABLET')),
     brand TEXT NOT NULL,
     series TEXT NOT NULL,
     model TEXT NOT NULL,
@@ -583,12 +586,12 @@ sqlite.exec(`
     row_json TEXT NOT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    UNIQUE(upload_id, brand, series, model, storage, launch_year),
+    UNIQUE(upload_id, device_type, brand, series, model, storage, launch_year),
     FOREIGN KEY(upload_id) REFERENCES device_price_upload_history(id)
   );
 
   CREATE INDEX IF NOT EXISTS idx_price_catalog_lookup
-    ON device_price_catalog(brand, series, model, storage, launch_year);
+    ON device_price_catalog(device_type, brand, series, model, storage, launch_year);
 
   CREATE INDEX IF NOT EXISTS idx_price_upload_rows_upload
     ON device_price_upload_rows(upload_id);
@@ -619,6 +622,7 @@ function ensureDevicePriceCatalogColumn(columnName, sqlType) {
 }
 
 ensureDevicePriceCatalogColumn("source_upload_id", "TEXT");
+ensureDevicePriceCatalogColumn("device_type", "TEXT NOT NULL DEFAULT 'MOBILE'");
 
 sqlite.exec(`
   CREATE INDEX IF NOT EXISTS idx_serviceability_source_upload
@@ -645,10 +649,21 @@ function ensureDevicePriceUploadHistoryColumn(columnName, sqlType) {
   }
 }
 
+ensureDevicePriceUploadHistoryColumn("device_type", "TEXT NOT NULL DEFAULT 'MOBILE'");
 ensureDevicePriceUploadHistoryColumn("status", "TEXT NOT NULL DEFAULT 'ACTIVE'");
 ensureDevicePriceUploadHistoryColumn("deactivated_by", "TEXT");
 ensureDevicePriceUploadHistoryColumn("deactivated_at", "TEXT");
 ensureDevicePriceUploadHistoryColumn("deactivated_row_count", "INTEGER NOT NULL DEFAULT 0");
+
+function ensureDevicePriceUploadRowsColumn(columnName, sqlType) {
+  const columns = sqlite.prepare("PRAGMA table_info(device_price_upload_rows)").all();
+  const exists = columns.some((column) => column.name === columnName);
+  if (!exists) {
+    sqlite.exec(`ALTER TABLE device_price_upload_rows ADD COLUMN ${columnName} ${sqlType}`);
+  }
+}
+
+ensureDevicePriceUploadRowsColumn("device_type", "TEXT NOT NULL DEFAULT 'MOBILE'");
 
 function migrateDevicePriceUploadHistorySchema() {
   const table = sqlite
@@ -819,6 +834,158 @@ function repairDevicePriceUploadRowsForeignKey() {
 }
 
 repairDevicePriceUploadRowsForeignKey();
+
+function migrateDevicePriceCatalogDeviceTypeSchema() {
+  const table = sqlite
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'device_price_catalog'")
+    .get();
+  if (!table?.sql) return;
+
+  const sqlText = String(table.sql);
+  const needsMigration =
+    !sqlText.includes("device_type") ||
+    !sqlText.includes("UNIQUE(device_type, brand, series, model, storage, launch_year)");
+
+  if (!needsMigration) return;
+
+  const columns = sqlite
+    .prepare("PRAGMA table_info(device_price_catalog)")
+    .all()
+    .map((column) => column.name);
+  const deviceTypeExpr = columns.includes("device_type")
+    ? "COALESCE(NULLIF(device_type, ''), 'MOBILE')"
+    : "'MOBILE'";
+
+  sqlite.exec("BEGIN TRANSACTION");
+  try {
+    sqlite.exec("ALTER TABLE device_price_catalog RENAME TO device_price_catalog_old");
+
+    sqlite.exec(`
+      CREATE TABLE device_price_catalog (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        device_type TEXT NOT NULL DEFAULT 'MOBILE' CHECK(device_type IN ('MOBILE', 'IPAD', 'TABLET')),
+        brand TEXT NOT NULL,
+        series TEXT NOT NULL,
+        model TEXT NOT NULL,
+        storage TEXT NOT NULL,
+        launch_year INTEGER NOT NULL,
+        cashify_price REAL NOT NULL,
+        row_json TEXT NOT NULL,
+        source_upload_id TEXT,
+        source_file_name TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(device_type, brand, series, model, storage, launch_year)
+      )
+    `);
+
+    sqlite.exec(`
+      INSERT INTO device_price_catalog (
+        id, device_type, brand, series, model, storage, launch_year, cashify_price, row_json, source_upload_id, source_file_name, created_at, updated_at
+      )
+      SELECT
+        id,
+        ${deviceTypeExpr},
+        brand,
+        series,
+        model,
+        storage,
+        launch_year,
+        cashify_price,
+        row_json,
+        source_upload_id,
+        source_file_name,
+        created_at,
+        updated_at
+      FROM device_price_catalog_old
+    `);
+
+    sqlite.exec("DROP TABLE device_price_catalog_old");
+    sqlite.exec("CREATE INDEX IF NOT EXISTS idx_price_catalog_lookup ON device_price_catalog(device_type, brand, series, model, storage, launch_year)");
+    sqlite.exec("CREATE INDEX IF NOT EXISTS idx_price_catalog_upload ON device_price_catalog(source_upload_id)");
+    sqlite.exec("COMMIT");
+  } catch (error) {
+    sqlite.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+migrateDevicePriceCatalogDeviceTypeSchema();
+
+function migrateDevicePriceUploadRowsDeviceTypeSchema() {
+  const table = sqlite
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'device_price_upload_rows'")
+    .get();
+  if (!table?.sql) return;
+
+  const sqlText = String(table.sql);
+  const needsMigration =
+    !sqlText.includes("device_type") ||
+    !sqlText.includes("UNIQUE(upload_id, device_type, brand, series, model, storage, launch_year)");
+
+  if (!needsMigration) return;
+
+  const columns = sqlite
+    .prepare("PRAGMA table_info(device_price_upload_rows)")
+    .all()
+    .map((column) => column.name);
+  const deviceTypeExpr = columns.includes("device_type")
+    ? "COALESCE(NULLIF(device_type, ''), 'MOBILE')"
+    : "'MOBILE'";
+
+  sqlite.exec("BEGIN TRANSACTION");
+  try {
+    sqlite.exec("ALTER TABLE device_price_upload_rows RENAME TO device_price_upload_rows_old");
+
+    sqlite.exec(`
+      CREATE TABLE device_price_upload_rows (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        upload_id TEXT NOT NULL,
+        device_type TEXT NOT NULL DEFAULT 'MOBILE' CHECK(device_type IN ('MOBILE', 'IPAD', 'TABLET')),
+        brand TEXT NOT NULL,
+        series TEXT NOT NULL,
+        model TEXT NOT NULL,
+        storage TEXT NOT NULL,
+        launch_year INTEGER NOT NULL,
+        cashify_price REAL NOT NULL,
+        row_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(upload_id, device_type, brand, series, model, storage, launch_year),
+        FOREIGN KEY(upload_id) REFERENCES device_price_upload_history(id)
+      )
+    `);
+
+    sqlite.exec(`
+      INSERT INTO device_price_upload_rows (
+        id, upload_id, device_type, brand, series, model, storage, launch_year, cashify_price, row_json, created_at, updated_at
+      )
+      SELECT
+        id,
+        upload_id,
+        ${deviceTypeExpr},
+        brand,
+        series,
+        model,
+        storage,
+        launch_year,
+        cashify_price,
+        row_json,
+        created_at,
+        updated_at
+      FROM device_price_upload_rows_old
+    `);
+
+    sqlite.exec("DROP TABLE device_price_upload_rows_old");
+    sqlite.exec("CREATE INDEX IF NOT EXISTS idx_price_upload_rows_upload ON device_price_upload_rows(upload_id)");
+    sqlite.exec("COMMIT");
+  } catch (error) {
+    sqlite.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+migrateDevicePriceUploadRowsDeviceTypeSchema();
 
 function ensurePartnerLeadColumn(columnName, sqlType) {
   const columns = sqlite.prepare("PRAGMA table_info(partner_leads)").all();

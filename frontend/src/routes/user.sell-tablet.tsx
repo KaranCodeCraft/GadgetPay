@@ -47,7 +47,7 @@ function UserSellTabletPage() {
 
   useEffect(() => {
     setBrandsLoading(true);
-    getCatalogBrands()
+    getCatalogBrands("TABLET")
       .then(({ brands: b }) => setBrands(b))
       .catch(() => setBrands([]))
       .finally(() => setBrandsLoading(false));
@@ -59,7 +59,7 @@ function UserSellTabletPage() {
       return;
     }
     setModelsLoading(true);
-    getCatalogModels(selectedBrandSlug)
+    getCatalogModels(selectedBrandSlug, "TABLET")
       .then(({ series }) => setSeriesGroups(series))
       .catch(() => setSeriesGroups([]))
       .finally(() => setModelsLoading(false));

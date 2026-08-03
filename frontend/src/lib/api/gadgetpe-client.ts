@@ -449,6 +449,25 @@ export type UserSellFlow = {
   updatedAt: string;
 };
 
+export type UserSellFlowLeadStatus = {
+  found: boolean;
+  lead: {
+    id: string;
+    status: PartnerLeadStatus;
+    completedAt: string | null;
+    completionEvent: unknown;
+    paymentProof: {
+      amountCollected: number;
+      paymentMode: "UPI" | "BANK_TRANSFER" | "CASH" | "OTHER";
+      transactionRef: string | null;
+      submittedAt: string;
+      mediaUrl: string | null;
+    } | null;
+    paymentSubmittedAt: string | null;
+    onsiteValidation: unknown;
+  } | null;
+};
+
 export type DevicePriceUploadHistoryRow = {
   id: string;
   fileName: string;
@@ -696,6 +715,13 @@ export type PartnerPincodeScope = {
   updatedAt: string;
   partnerName: string;
   partnerPhone: string;
+};
+
+export type WorkingPincode = {
+  pincode: string;
+  state: string | null;
+  district: string | null;
+  createdAt: string;
 };
 
 export type AdminBulkLeadAssignmentResult = {
@@ -1055,41 +1081,31 @@ export async function cancelUserSellFlow(token: string, flowId: string): Promise
   return parseResponse<{ flow: UserSellFlow }>(response);
 }
 
-export type UserSellFlowLeadStatus = {
-  found: boolean;
-  lead: {
-    id: string;
-    status: string;
-    completedAt: string | null;
-    paymentProof: {
-      amountCollected: number;
-      paymentMode: string;
-      transactionRef: string | null;
-      submittedAt: string;
-      mediaUrl: string | null;
-    } | null;
-    paymentSubmittedAt: string | null;
-  } | null;
-};
-
-export async function getUserSellFlowLeadStatus(token: string, flowId: string): Promise<UserSellFlowLeadStatus> {
-  const response = await fetch(`${API_BASE}/user/sell-flows/${encodeURIComponent(flowId)}/lead-status`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  return parseResponse<UserSellFlowLeadStatus>(response);
-}
-
 export async function rescheduleUserSellFlow(
   token: string,
   flowId: string,
-  body: { primaryDate: string; primaryTime: string; alternateDate: string; alternateTime: string },
+  input: { primaryDate: string; primaryTime: string; alternateDate: string; alternateTime: string },
 ): Promise<{ flow: UserSellFlow; rescheduled: boolean }> {
   const response = await fetch(`${API_BASE}/user/sell-flows/${encodeURIComponent(flowId)}/reschedule`, {
     method: "PATCH",
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(input),
   });
+
   return parseResponse<{ flow: UserSellFlow; rescheduled: boolean }>(response);
+}
+
+export async function getUserSellFlowLeadStatus(token: string, flowId: string): Promise<UserSellFlowLeadStatus> {
+  const response = await fetch(`${API_BASE}/user/sell-flows/${encodeURIComponent(flowId)}/lead-status`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  return parseResponse<UserSellFlowLeadStatus>(response);
 }
 
 export type UserSellFlowInvoice = {
@@ -1163,6 +1179,41 @@ export async function getPartnerDashboard(pincode: string, token: string): Promi
   return parseResponse<PartnerDashboardResponse>(response);
 }
 
+export async function getPartnerWorkingPincodes(token: string): Promise<{ pincodes: WorkingPincode[] }> {
+  const response = await fetch(`${API_BASE}/partner/pincodes`, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  return parseResponse<{ pincodes: WorkingPincode[] }>(response);
+}
+
+export async function addPartnerWorkingPincode(token: string, pincode: string): Promise<{ pincodes: WorkingPincode[] }> {
+  const response = await fetch(`${API_BASE}/partner/pincodes`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ pincode }),
+  });
+
+  return parseResponse<{ pincodes: WorkingPincode[] }>(response);
+}
+
+export async function removePartnerWorkingPincode(token: string, pincode: string): Promise<{ pincodes: WorkingPincode[] }> {
+  const response = await fetch(`${API_BASE}/partner/pincodes/${encodeURIComponent(pincode)}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  return parseResponse<{ pincodes: WorkingPincode[] }>(response);
+}
+
 export async function listPartnerLeadBucket(
   token: string,
   filters: { pincode?: string; pincodes?: string[]; status?: PartnerLeadStatus; limit?: number },
@@ -1202,40 +1253,6 @@ export async function listPartnerServiceLeads(
   });
 
   return parseResponse<{ rows: PartnerLead[]; count: number }>(response);
-}
-
-export type WorkingPincode = {
-  pincode: string;
-  state: string | null;
-  district: string | null;
-  createdAt: string;
-};
-
-export async function getPartnerWorkingPincodes(token: string): Promise<{ pincodes: WorkingPincode[] }> {
-  const response = await fetch(`${API_BASE}/partner/pincodes`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  return parseResponse<{ pincodes: WorkingPincode[] }>(response);
-}
-
-export async function addPartnerWorkingPincode(token: string, pincode: string): Promise<{ pincodes: WorkingPincode[] }> {
-  const response = await fetch(`${API_BASE}/partner/pincodes`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({ pincode }),
-  });
-  return parseResponse<{ pincodes: WorkingPincode[] }>(response);
-}
-
-export async function removePartnerWorkingPincode(token: string, pincode: string): Promise<{ pincodes: WorkingPincode[] }> {
-  const response = await fetch(`${API_BASE}/partner/pincodes/${encodeURIComponent(pincode)}`, {
-    method: "DELETE",
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  return parseResponse<{ pincodes: WorkingPincode[] }>(response);
 }
 
 export async function getPartnerLead(token: string, leadId: string): Promise<{ lead: PartnerLead }> {
@@ -2103,6 +2120,44 @@ export async function uploadPricingExcel(
   });
 
   return parseResponse<PriceUploadResponse>(response);
+}
+
+async function uploadPricingExcelByCategory(
+  token: string,
+  category: "MOBILE" | "IPAD" | "TABLET",
+  files: File | File[],
+): Promise<PriceUploadResponse> {
+  const formData = new FormData();
+  const uploadFiles = Array.isArray(files) ? files : [files];
+  uploadFiles.forEach((file) => formData.append("files", file));
+
+  const endpoint = category === "MOBILE"
+    ? "/mobile"
+    : category === "IPAD"
+      ? "/ipad"
+      : "/tablet";
+
+  const response = await fetch(`${API_BASE}/admin/pricing/upload${endpoint}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    body: formData,
+  });
+
+  return parseResponse<PriceUploadResponse>(response);
+}
+
+export async function uploadMobilePricingExcel(token: string, files: File | File[]): Promise<PriceUploadResponse> {
+  return uploadPricingExcelByCategory(token, "MOBILE", files);
+}
+
+export async function uploadIpadPricingExcel(token: string, files: File | File[]): Promise<PriceUploadResponse> {
+  return uploadPricingExcelByCategory(token, "IPAD", files);
+}
+
+export async function uploadTabletPricingExcel(token: string, files: File | File[]): Promise<PriceUploadResponse> {
+  return uploadPricingExcelByCategory(token, "TABLET", files);
 }
 
 export async function listPriceCatalog(

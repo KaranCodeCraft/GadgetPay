@@ -16,6 +16,7 @@ export const Route = createFileRoute("/user/active-orders")({
 });
 
 const USER_TOKEN_KEY = "gadgetpe_user_access_token";
+const USER_REFRESH_KEY = "gadgetpe_user_refresh_token";
 
 const TIME_SLOTS = [
   "8:00 AM - 10:00 AM",
@@ -25,9 +26,29 @@ const TIME_SLOTS = [
   "4:00 PM - 6:00 PM",
 ];
 
-function canModify(primaryDate: string): boolean {
-  const pickupMs = new Date(primaryDate).getTime();
-  return (pickupMs - Date.now()) > 6 * 60 * 60 * 1000;
+function getSlotStartHourAndMinute(primaryTime: string) {
+  const firstWindow = primaryTime.split("-")[0]?.trim() || primaryTime.trim();
+  const match = firstWindow.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (!match) return null;
+
+  const hourRaw = Number(match[1]);
+  const minute = Number(match[2]);
+  const meridiem = match[3].toUpperCase();
+  const hour = (hourRaw % 12) + (meridiem === "PM" ? 12 : 0);
+
+  return { hour, minute };
+}
+
+function canModify(primaryDate: string, primaryTime: string): boolean {
+  const pickupDate = new Date(primaryDate);
+  if (Number.isNaN(pickupDate.getTime())) return false;
+
+  const slotStart = getSlotStartHourAndMinute(primaryTime);
+  if (slotStart) {
+    pickupDate.setHours(slotStart.hour, slotStart.minute, 0, 0);
+  }
+
+  return (pickupDate.getTime() - Date.now()) > 6 * 60 * 60 * 1000;
 }
 
 function formatDate(iso: string) {
@@ -36,23 +57,6 @@ function formatDate(iso: string) {
 
 function formatInr(n: number) {
   return n.toLocaleString("en-IN");
-}
-
-function leadStatusLabel(status: string) {
-  const map: Record<string, string> = {
-    AVAILABLE: "Awaiting Partner",
-    ASSIGNED: "Partner Assigned",
-    COMPLETED: "Pickup Done",
-    CANCELLED: "Cancelled",
-  };
-  return map[status] ?? status;
-}
-
-function leadStatusColor(status: string) {
-  if (status === "COMPLETED") return "#16a34a";
-  if (status === "ASSIGNED") return "#2563eb";
-  if (status === "CANCELLED") return "#dc2626";
-  return "#d97706";
 }
 
 type RescheduleForm = {
@@ -72,7 +76,10 @@ function UserActiveOrdersPage() {
   const [rescheduleForm, setRescheduleForm] = useState<Record<string, RescheduleForm>>({});
   const [confirmCancelId, setConfirmCancelId] = useState<string | null>(null);
 
-  const token = typeof window !== "undefined" ? window.localStorage.getItem(USER_TOKEN_KEY) : null;
+  const token =
+    typeof window !== "undefined"
+      ? window.localStorage.getItem(USER_TOKEN_KEY) || window.localStorage.getItem(USER_REFRESH_KEY)
+      : null;
 
   useEffect(() => {
     if (!token) { setLoading(false); return; }
@@ -190,7 +197,7 @@ function UserActiveOrdersPage() {
             const price = flow.quote?.sellingPrice ?? 0;
             const lead = leadStatuses[flow.id];
             const leadInfo = lead?.found ? lead.lead : null;
-            const modifiable = ps ? canModify(ps.primaryDate) : false;
+            const modifiable = ps ? canModify(ps.primaryDate, ps.primaryTime) : false;
             const isRescheduling = rescheduleForm[flow.id] !== undefined;
 
             return (
@@ -211,15 +218,6 @@ function UserActiveOrdersPage() {
                       </div>
                     )}
                   </div>
-                  {leadInfo && (
-                    <span style={{
-                      fontSize: 12, fontWeight: 600, padding: "3px 10px",
-                      borderRadius: 999, background: "#f0fdf4", color: leadStatusColor(leadInfo.status),
-                      border: `1px solid ${leadStatusColor(leadInfo.status)}33`,
-                    }}>
-                      {leadStatusLabel(leadInfo.status)}
-                    </span>
-                  )}
                 </div>
 
                 {/* Pickup details */}
