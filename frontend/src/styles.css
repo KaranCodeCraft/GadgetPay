@@ -6438,6 +6438,12 @@ button {
 
 }
 
+.user-auth-submit:disabled {
+  cursor: not-allowed;
+  filter: saturate(0.65);
+  opacity: 0.58;
+}
+
 .user-auth-overlay {
   position: fixed;
   inset: 0;
@@ -7971,6 +7977,23 @@ button {
   gap: 12px;
 }
 
+.user-body-defect-section-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.user-required-pill {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: #fff5e5;
+  color: #9a5b12;
+  font-size: 11px;
+  font-weight: 800;
+}
+
 .user-body-defect-section-header h3 {
   font-size: 15px;
   font-weight: 700;
@@ -8182,6 +8205,16 @@ button {
   display: flex;
   justify-content: center;
   gap: 12px;
+}
+
+.user-question-action-hint {
+  max-width: 680px;
+  margin: 8px auto 0;
+  color: #8a4d12;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.4;
+  text-align: center;
 }
 
 .user-inline-link {

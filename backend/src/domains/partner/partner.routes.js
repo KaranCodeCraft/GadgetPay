@@ -295,7 +295,7 @@ const ONSITE_DEDUCTION_FIELD_CONFIG = [
     key: "screenOriginal",
     triggerOn: "no",
     candidates: [
-      { answerGroup: "basicFunctionality", answerKey: "screenReplaced", answerValues: ["yes"] },
+      { answerGroup: "basicFunctionality", answerKey: "screenReplaced", answerValues: ["no"] },
       { answerGroup: "basicFunctionality", answerKey: "originalDisplay", answerValues: ["no"] },
     ],
   },
@@ -313,7 +313,32 @@ const ONSITE_DEDUCTION_FIELD_CONFIG = [
     candidates: [
       { answerGroup: "warrantyAndBill", answerKey: "billInvoice", answerValues: ["no"] },
       { answerGroup: "accessoriesAndOwnership", answerKey: "billInvoice", answerValues: ["no"] },
-      { answerGroup: "accessoriesAndOwnership", answerKey: "originalBoxWithIMEI", answerValues: ["no"] },
+    ],
+  },
+  { key: "originalBoxWithIMEI", triggerOn: "no", candidates: [{ answerGroup: "accessories", answerKey: "originalBoxWithIMEI" }] },
+  { key: "screenDeadPixelsNoSpots", triggerOn: "no", candidates: [{ answerGroup: "nestedPhysicalIssueAnswers", answerKey: "screenDeadPixels", answerValues: ["noSpots"] }] },
+  {
+    key: "screenVisibleLinesNoLines",
+    triggerOn: "no",
+    candidates: [
+      { answerGroup: "nestedPhysicalIssueAnswers", answerKey: "screenVisibleLines", answerValues: ["noLines"] },
+      { answerGroup: "nestedPhysicalIssueAnswers", answerKey: "visibleLines", answerValues: ["line"] },
+    ],
+  },
+  {
+    key: "screenDiscolorationMajor",
+    triggerOn: "no",
+    candidates: [
+      { answerGroup: "nestedPhysicalIssueAnswers", answerKey: "screenDiscoloration", answerValues: ["majorDiscoloration"] },
+      { answerGroup: "nestedPhysicalIssueAnswers", answerKey: "discoloration", answerValues: ["major"] },
+    ],
+  },
+  {
+    key: "screenCracksChippedOutsideDisplay",
+    triggerOn: "no",
+    candidates: [
+      { answerGroup: "nestedPhysicalIssueAnswers", answerKey: "screenCracks", answerValues: ["chippedOrCrackedOutsideDisplay"] },
+      { answerGroup: "nestedPhysicalIssueAnswers", answerKey: "screenPhysical", answerValues: ["chippedOutside"] },
     ],
   },
   { key: "brokenScratchScreen", triggerOn: "yes", candidates: [{ answerGroup: "physicalIssues", answerKey: "Broken/scratch on device screen" }] },
@@ -346,8 +371,8 @@ function isRuleMatchForCandidate(rule, candidate) {
   if (candidate.answerGroup && normalizeRuleValue(rule.answerGroup) !== normalizeRuleValue(candidate.answerGroup)) return false;
   if (candidate.answerKey && toCanonicalLookupKey(rule.answerKey) !== toCanonicalLookupKey(candidate.answerKey)) return false;
   if (Array.isArray(candidate.answerValues) && candidate.answerValues.length > 0) {
-    const value = normalizeRuleValue(rule.answerValue);
-    const allowed = candidate.answerValues.map((item) => normalizeRuleValue(item));
+    const value = toCanonicalAnswerValue(rule.answerValue);
+    const allowed = candidate.answerValues.map((item) => toCanonicalAnswerValue(item));
     if (!allowed.includes(value)) return false;
   }
   return true;
@@ -421,11 +446,27 @@ const ANSWER_KEY_ALIASES = new Map([
   ["vibration", "vibratornotworking"],
   ["originaldisplay", "screenreplaced"],
   ["originalbox", "originalboxwithimei"],
+  ["deadpixels", "screendeadpixels"],
+  ["visiblelines", "screenvisiblelines"],
+  ["discoloration", "screendiscoloration"],
+  ["screenphysical", "screencracks"],
 ]);
 
 function toCanonicalLookupKey(value) {
   const key = toLookupKey(value);
   return ANSWER_KEY_ALIASES.get(key) || key;
+}
+
+const ANSWER_VALUE_ALIASES = new Map([
+  ["major", "majordiscoloration"],
+  ["minor", "minordiscoloration"],
+  ["line", "nolines"],
+  ["chippedoutside", "chippedorcrackedoutsidedisplay"],
+]);
+
+function toCanonicalAnswerValue(value) {
+  const key = toLookupKey(value);
+  return ANSWER_VALUE_ALIASES.get(key) || key;
 }
 
 const ARRAY_ANSWER_GROUP_LOOKUPS = new Set(["physicalissues", "functionalproblems", "accessories"]);
@@ -446,8 +487,17 @@ const ONSITE_ROW_FIELD_ALIASES = new Map([
   ["warrantyandbillbillinvoice", ["gstBillSameImei"]],
   ["accessoriesandownershipbillinvoice", ["gstBillSameImei"]],
   ["billinvoice", ["gstBillSameImei"]],
-  ["accessoriesandownershiporiginalboxwithimei", ["gstBillSameImei"]],
-  ["originalboxwithimei", ["gstBillSameImei"]],
+  ["accessoriesoriginalboxwithimei", ["originalBoxWithIMEI"]],
+  ["accessoriesandownershiporiginalboxwithimei", ["originalBoxWithIMEI"]],
+  ["originalboxwithimei", ["originalBoxWithIMEI"]],
+  ["nestedphysicalissueanswersscreendeadpixels", ["screenDeadPixelsNoSpots"]],
+  ["screendeadpixels", ["screenDeadPixelsNoSpots"]],
+  ["nestedphysicalissueanswersscreenvisiblelines", ["screenVisibleLinesNoLines"]],
+  ["screenvisiblelines", ["screenVisibleLinesNoLines"]],
+  ["nestedphysicalissueanswersscreendiscoloration", ["screenDiscolorationMajor"]],
+  ["screendiscoloration", ["screenDiscolorationMajor"]],
+  ["nestedphysicalissueanswersscreencracks", ["screenCracksChippedOutsideDisplay"]],
+  ["screencracks", ["screenCracksChippedOutsideDisplay"]],
   ["mobileage", ["mobileAge"]],
 ]);
 
@@ -540,7 +590,7 @@ function shouldApplyRuleForPartnerCheck(check, rule) {
   }
 
   // For categorical answers, only apply the value-specific rule when partner disputes user input.
-  return partnerInput === "no" && normalizedRuleAnswer === userValue;
+  return partnerInput === "no" && toCanonicalAnswerValue(normalizedRuleAnswer) === toCanonicalAnswerValue(userValue);
 }
 
 function getCatalogRulesForPartnerCheck(check, catalog) {

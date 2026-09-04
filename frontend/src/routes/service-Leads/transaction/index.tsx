@@ -84,6 +84,50 @@ function formatFieldLabel(path: string) {
     .replace(/\b\w/g, (ch) => ch.toUpperCase());
 }
 
+const INTERNAL_DEVICE_DETAIL_KEYS = new Set([
+  "detailStep",
+  "questionnaireSlide",
+  "updatedAt",
+  "metadata",
+  "canMakeCalls",
+  "touchWorking",
+  "screenReplaced",
+  "selectedIssues",
+]);
+
+const DEVICE_DETAIL_LABEL_OVERRIDES: Record<string, string> = {
+  "basicFunctionality.canMakeCalls": "Are you able to make and receive calls?",
+  "basicFunctionality.touchWorking": "Is your device's touch screen working properly?",
+  "basicFunctionality.screenReplaced": "Is your phone's screen original?",
+  "warrantyAndBill.underWarranty": "Is your device under manufacturer warranty?",
+  "warrantyAndBill.billInvoice": "Do you have GST valid bill with the same IMEI?",
+  "physicalIssues.Dead Spot/Visible line and Discoloration on screen": "Dead Spot/Visible line and Discoloration on screen",
+  "functionalProblems.backCameraNotWorking": "Back Camera not working",
+  "accessories.originalBoxWithIMEI": "Original Box with same IMEI",
+  mobileAge: "What is your mobile age?",
+};
+
+const DEVICE_DETAIL_VALUE_OVERRIDES: Record<string, string> = {
+  "nestedPhysicalIssueAnswers.screenDeadPixels.noSpots": "No spots on screen",
+  "nestedPhysicalIssueAnswers.screenVisibleLines.noLines": "No line(s) on Display",
+  "nestedPhysicalIssueAnswers.screenDiscoloration.majorDiscoloration": "Major Discoloration",
+  "nestedPhysicalIssueAnswers.screenCracks.chippedOrCrackedOutsideDisplay": "Chipped/cracked outside display area",
+  "mobileAge.months3To6": "3 months - 6 months",
+  "mobileAge.months6To11": "6 months - 11 months",
+  "mobileAge.below3Months": "Below 3 months",
+  "mobileAge.above11Months": "Above 11 months",
+};
+
+const SELECTED_OPTION_GROUPS = new Set(["physicalIssues", "functionalProblems", "accessories"]);
+
+function getDeviceDetailLabel(path: string) {
+  return DEVICE_DETAIL_LABEL_OVERRIDES[path] || formatFieldLabel(path);
+}
+
+function getDeviceDetailDisplayValue(path: string, value: string) {
+  return DEVICE_DETAIL_VALUE_OVERRIDES[`${path}.${value}`] || value;
+}
+
 function toReadableValue(value: unknown): string {
   if (value === null || value === undefined) return "-";
   if (typeof value === "boolean") return value ? "Yes" : "No";
@@ -94,17 +138,27 @@ function toReadableValue(value: unknown): string {
 
 function flattenDeviceDetails(value: unknown, path = ""): ValidationRow[] {
   if (value === null || value === undefined) {
-    return path ? [{ key: path, label: formatFieldLabel(path), userValue: "-" }] : [];
+    return [];
   }
 
   if (Array.isArray(value)) {
     if (value.length === 0) {
-      return path ? [{ key: path, label: formatFieldLabel(path), userValue: "-" }] : [];
+      return [];
     }
 
     const primitive = value.every((item) => item === null || ["string", "number", "boolean"].includes(typeof item));
     if (primitive) {
-      return [{ key: path || "value", label: formatFieldLabel(path || "value"), userValue: value.map((item) => toReadableValue(item)).join(", ") }];
+      if (path && SELECTED_OPTION_GROUPS.has(path)) {
+        return value.flatMap((item) => {
+          if (item === null || item === undefined) return [];
+          const optionValue = toReadableValue(item);
+          const optionPath = `${path}.${optionValue}`;
+          return [{ key: optionPath, label: getDeviceDetailLabel(optionPath), userValue: "yes" }];
+        });
+      }
+      const valuePath = path || "value";
+      const readableValue = value.map((item) => toReadableValue(item)).join(", ");
+      return [{ key: valuePath, label: getDeviceDetailLabel(valuePath), userValue: readableValue, displayValue: getDeviceDetailDisplayValue(valuePath, readableValue) }];
     }
 
     return value.flatMap((item, index) => flattenDeviceDetails(item, path ? `${path}.${index + 1}` : String(index + 1)));
@@ -113,12 +167,17 @@ function flattenDeviceDetails(value: unknown, path = ""): ValidationRow[] {
   if (typeof value === "object") {
     const entries = Object.entries(value as Record<string, unknown>);
     if (!entries.length && path) {
-      return [{ key: path, label: formatFieldLabel(path), userValue: "-" }];
+      return [];
     }
-    return entries.flatMap(([childKey, childValue]) => flattenDeviceDetails(childValue, path ? `${path}.${childKey}` : childKey));
+    return entries.flatMap(([childKey, childValue]) => {
+      if (!path && INTERNAL_DEVICE_DETAIL_KEYS.has(childKey)) return [];
+      return flattenDeviceDetails(childValue, path ? `${path}.${childKey}` : childKey);
+    });
   }
 
-  return [{ key: path || "value", label: formatFieldLabel(path || "value"), userValue: toReadableValue(value) }];
+  const valuePath = path || "value";
+  const readableValue = toReadableValue(value);
+  return [{ key: valuePath, label: getDeviceDetailLabel(valuePath), userValue: readableValue, displayValue: getDeviceDetailDisplayValue(valuePath, readableValue) }];
 }
 
 function ServiceLeadTransactionPage() {
@@ -683,7 +742,7 @@ function ServiceLeadTransactionPage() {
                     return (
                     <tr key={row.key}>
                       <td>{row.label}</td>
-                      <td>{row.userValue}</td>
+                      <td>{row.displayValue ?? row.userValue}</td>
                       <td>
                         <div className="lead-radio-group" role="radiogroup" aria-label={`${row.label} partner input`}>
                           <label className="lead-radio-pill">

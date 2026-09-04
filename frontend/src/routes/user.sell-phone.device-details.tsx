@@ -722,6 +722,17 @@ function getAccessoryOptions(isApple: boolean) {
   return accessoryOptions.filter((option) => option.value !== "originalCharger");
 }
 
+function getDefectSectionDisplayTitle(title: string) {
+  return title.replace(/^\d+\.\s*/, "");
+}
+
+function getContinueDisabledReason(missingLabels: string[]) {
+  if (missingLabels.length === 0) return "";
+  if (missingLabels.length === 1) return `Choose an option for ${missingLabels[0]} to continue.`;
+  if (missingLabels.length === 2) return `Choose options for ${missingLabels[0]} and ${missingLabels[1]} to continue.`;
+  return `Choose options for ${missingLabels.slice(0, -1).join(", ")}, and ${missingLabels[missingLabels.length - 1]} to continue.`;
+}
+
 function hasScreenIssueSelection(selectedIssues: string[]) {
   return selectedIssues.some((issue) => SCREEN_ISSUE_LABELS.has(issue));
 }
@@ -936,15 +947,20 @@ function renderDefectSection({
     nextAccessories?: string[],
   ) => StoredDetails | null;
 }) {
+  const selectedValue = nestedAnswers[section.key];
+
   return (
-    <div key={section.key} className="user-body-defect-section">
+    <div key={section.key} className={`user-body-defect-section${selectedValue ? "" : " user-body-defect-section-incomplete"}`}>
       <div className="user-body-defect-section-header">
-        <h3>{section.title}</h3>
+        <div className="user-body-defect-section-title-row">
+          <h3>{section.title}</h3>
+          {!selectedValue && <span className="user-required-pill">Required</span>}
+        </div>
         <p>{section.prompt}</p>
       </div>
       <div className="user-issue-img-grid">
         {section.options.map((opt) => {
-          const selected = nestedAnswers[section.key] === opt.value;
+          const selected = selectedValue === opt.value;
           return (
             <button
               key={opt.value}
@@ -1151,16 +1167,24 @@ function UserSellPhoneDeviceDetailsPage() {
     window.location.href = "/user/sell-phone/quote";
   };
 
-  const isSlideComplete = activeSlide.every((item) => {
-    if (item.kind === "issue") return true;
-    if (item.kind === "screenDefectDetail") return screenSections.every((section) => Boolean(nestedPhysicalIssueAnswers[section.key]));
-    if (item.kind === "bodyDefectDetail") return bodySections.every((section) => Boolean(nestedPhysicalIssueAnswers[section.key]));
-    if (item.kind === "functionalProblemsDetail") return true;
-    if (item.kind === "mobileAge") return Boolean(mobileAge);
-    if (item.kind === "accessoriesDetail") return true;
-    if (item.kind === "appleBatteryHealth") return Boolean(appleBatteryHealth);
-    return Boolean(answerMaps[item.group][item.question.key]);
+  const incompleteSlideRequirements = activeSlide.flatMap((item) => {
+    if (item.kind === "screenDefectDetail") {
+      return screenSections
+        .filter((section) => !nestedPhysicalIssueAnswers[section.key])
+        .map((section) => getDefectSectionDisplayTitle(section.title));
+    }
+    if (item.kind === "bodyDefectDetail") {
+      return bodySections
+        .filter((section) => !nestedPhysicalIssueAnswers[section.key])
+        .map((section) => getDefectSectionDisplayTitle(section.title));
+    }
+    if (item.kind === "mobileAge") return mobileAge ? [] : ["mobile age"];
+    if (item.kind === "appleBatteryHealth") return appleBatteryHealth ? [] : ["battery health"];
+    if (item.kind === "question") return answerMaps[item.group][item.question.key] ? [] : [item.question.label];
+    return [];
   });
+  const isSlideComplete = incompleteSlideRequirements.length === 0;
+  const continueDisabledReason = getContinueDisabledReason(incompleteSlideRequirements);
 
   const progressItems = slides.flat().filter((item) => item.kind !== "issue" && item.kind !== "functionalProblemsDetail" && item.kind !== "accessoriesDetail");
   const answeredCount = progressItems.filter((item) => {
@@ -1433,11 +1457,17 @@ function UserSellPhoneDeviceDetailsPage() {
               className="user-auth-submit"
               style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
               disabled={!isSlideComplete}
+              aria-describedby={continueDisabledReason ? "user-question-action-hint" : undefined}
               onClick={isLastSlide ? completeFinalStep : () => moveToSlide(activeSlideIndex + 1)}
             >
               {isLastSlide ? "Continue to Quote" : (<>Continue <ArrowRight size={16} /></>)}
             </button>
           </div>
+          {continueDisabledReason && (
+            <p id="user-question-action-hint" className="user-question-action-hint" role="status">
+              {continueDisabledReason}
+            </p>
+          )}
           {storedSelectedModel?.modelName && (
             <div className="user-device-model-info">
               <span className="user-device-model-label">Device Details</span>

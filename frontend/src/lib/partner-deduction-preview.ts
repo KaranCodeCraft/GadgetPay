@@ -4,6 +4,7 @@ export type ValidationRow = {
   key: string;
   label: string;
   userValue: string;
+  displayValue?: string;
 };
 
 export type PartnerFieldDecision = {
@@ -38,11 +39,27 @@ const ANSWER_KEY_ALIASES: Record<string, string> = {
   vibration: "vibratornotworking",
   originaldisplay: "screenreplaced",
   originalbox: "originalboxwithimei",
+  deadpixels: "screendeadpixels",
+  visiblelines: "screenvisiblelines",
+  discoloration: "screendiscoloration",
+  screenphysical: "screencracks",
 };
 
 function toCanonicalLookupKey(value: string) {
   const key = toLookupKey(value);
   return ANSWER_KEY_ALIASES[key] || key;
+}
+
+const ANSWER_VALUE_ALIASES: Record<string, string> = {
+  major: "majordiscoloration",
+  minor: "minordiscoloration",
+  line: "nolines",
+  chippedoutside: "chippedorcrackedoutsidedisplay",
+};
+
+function toCanonicalAnswerValue(value: string) {
+  const key = toLookupKey(value);
+  return ANSWER_VALUE_ALIASES[key] || key;
 }
 
 const ARRAY_ANSWER_GROUP_LOOKUPS = new Set(["physicalissues", "functionalproblems", "accessories"]);
@@ -63,8 +80,17 @@ const ONSITE_ROW_FIELD_ALIASES: Record<string, string[]> = {
   warrantyandbillbillinvoice: ["gstBillSameImei"],
   accessoriesandownershipbillinvoice: ["gstBillSameImei"],
   billinvoice: ["gstBillSameImei"],
-  accessoriesandownershiporiginalboxwithimei: ["gstBillSameImei"],
-  originalboxwithimei: ["gstBillSameImei"],
+  accessoriesoriginalboxwithimei: ["originalBoxWithIMEI"],
+  accessoriesandownershiporiginalboxwithimei: ["originalBoxWithIMEI"],
+  originalboxwithimei: ["originalBoxWithIMEI"],
+  nestedphysicalissueanswersscreendeadpixels: ["screenDeadPixelsNoSpots"],
+  screendeadpixels: ["screenDeadPixelsNoSpots"],
+  nestedphysicalissueanswersscreenvisiblelines: ["screenVisibleLinesNoLines"],
+  screenvisiblelines: ["screenVisibleLinesNoLines"],
+  nestedphysicalissueanswersscreendiscoloration: ["screenDiscolorationMajor"],
+  screendiscoloration: ["screenDiscolorationMajor"],
+  nestedphysicalissueanswersscreencracks: ["screenCracksChippedOutsideDisplay"],
+  screencracks: ["screenCracksChippedOutsideDisplay"],
   mobileage: ["mobileAge"],
 };
 
@@ -128,7 +154,7 @@ function shouldApplyRuleForRow(
     return normalizedRuleAnswer === verifiedValue;
   }
 
-  return partnerInput === "no" && toLookupKey(rawRuleAnswer) === toLookupKey(row.userValue);
+  return partnerInput === "no" && toCanonicalAnswerValue(rawRuleAnswer) === toCanonicalAnswerValue(row.userValue);
 }
 
 function getCatalogRulesForRow(row: ValidationRow, catalog: PartnerOnsiteDeductionCatalog | null) {

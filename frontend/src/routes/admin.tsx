@@ -1877,6 +1877,38 @@ const DEDUCTION_RULE_PRESETS: DeductionRulePreset[] = [
     answerValue: null,
   },
   {
+    id: "screenDeadPixelsNoSpots",
+    sectionTitle: "Screen condition details",
+    prompt: "No spots on screen",
+    answerGroup: "nestedPhysicalIssueAnswers",
+    answerKey: "screenDeadPixels",
+    answerValue: "noSpots",
+  },
+  {
+    id: "screenVisibleLinesNoLines",
+    sectionTitle: "Screen condition details",
+    prompt: "No line(s) on Display",
+    answerGroup: "nestedPhysicalIssueAnswers",
+    answerKey: "screenVisibleLines",
+    answerValue: "noLines",
+  },
+  {
+    id: "screenDiscolorationMajor",
+    sectionTitle: "Screen condition details",
+    prompt: "Major Discoloration",
+    answerGroup: "nestedPhysicalIssueAnswers",
+    answerKey: "screenDiscoloration",
+    answerValue: "majorDiscoloration",
+  },
+  {
+    id: "screenCracksChippedOutsideDisplay",
+    sectionTitle: "Screen condition details",
+    prompt: "Chipped/cracked outside display area",
+    answerGroup: "nestedPhysicalIssueAnswers",
+    answerKey: "screenCracks",
+    answerValue: "chippedOrCrackedOutsideDisplay",
+  },
+  {
     id: "bodyDamageIssue",
     sectionTitle: "Condition",
     prompt: "Scratch/Dent on device body",
@@ -2089,6 +2121,24 @@ const RULE_KEY_ALIASES: Record<string, string> = {
   vibration: "vibratorNotWorking",
   originalDisplay: "screenReplaced",
   originalBox: "originalBoxWithIMEI",
+  deadPixels: "screenDeadPixels",
+  visibleLines: "screenVisibleLines",
+  discoloration: "screenDiscoloration",
+  screenPhysical: "screenCracks",
+};
+
+const RULE_VALUE_ALIASES: Record<string, Record<string, string>> = {
+  screenVisibleLines: {
+    line: "noLines",
+  },
+  screenDiscoloration: {
+    major: "majorDiscoloration",
+    minor: "minorDiscoloration",
+  },
+  screenCracks: {
+    chippedOutside: "chippedOrCrackedOutsideDisplay",
+    moreThan2Scratches: "moreThanTwoScratches",
+  },
 };
 
 const FUNCTIONAL_PROBLEM_KEYS = new Set([
@@ -2124,9 +2174,14 @@ function toCanonicalAnswerKey(key: string) {
   return RULE_KEY_ALIASES[key] || key;
 }
 
+function toCanonicalAnswerValue(answerKey: string, answerValue: string | null) {
+  if (!answerValue) return answerValue;
+  return RULE_VALUE_ALIASES[answerKey]?.[answerValue] || answerValue;
+}
+
 function toCanonicalRuleRef(input: CanonicalRuleRef): CanonicalRuleRef {
   const answerKey = toCanonicalAnswerKey(input.answerKey);
-  const answerValue = normalizeAnswerValue(input.answerValue);
+  const answerValue = toCanonicalAnswerValue(answerKey, normalizeAnswerValue(input.answerValue));
 
   if (FUNCTIONAL_PROBLEM_KEYS.has(answerKey)) {
     return { answerGroup: "functionalProblems", answerKey, answerValue: null };
@@ -3677,13 +3732,29 @@ function PaymentsVerifySection() {
 
 //  Section: Partners Activity 
 
-function PartnersSection() {
+function PartnersSection({ overview }: { overview: AdminOverviewMetricsResponse | null }) {
   const [search, setSearch] = useState("");
 
-  const filtered = DUMMY_PARTNERS.filter(
+  const partners = useMemo<Partner[]>(() => {
+    return (overview?.partnerActivity ?? []).map((partner) => ({
+      id: partner.partnerId,
+      name: partner.partnerName || partner.partnerId,
+      area: "-",
+      pincode: "-",
+      leadsToday: partner.leadsTouched,
+      leadsTotal: partner.completedLeads,
+      earnings: 0,
+      status: partner.activeLeads > 0 ? "Active" : "Inactive",
+      rating: 0,
+    }));
+  }, [overview]);
+
+  const filtered = partners.filter(
     (p) =>
       p.name.toLowerCase().includes(search.toLowerCase()) ||
-      p.area.toLowerCase().includes(search.toLowerCase()),
+      p.id.toLowerCase().includes(search.toLowerCase()) ||
+      p.area.toLowerCase().includes(search.toLowerCase()) ||
+      p.pincode.toLowerCase().includes(search.toLowerCase()),
   );
 
   return (
@@ -3693,28 +3764,28 @@ function PartnersSection() {
       <div className="admin-stat-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
         <StatCard
           label="Total Partners"
-          value={DUMMY_PARTNERS.length}
+          value={partners.length}
           sub="Onboarded"
           icon={Users}
           accent="#1d9e75"
         />
         <StatCard
           label="Active Today"
-          value={DUMMY_PARTNERS.filter((p) => p.status === "Active").length}
+          value={overview?.activePartners ?? partners.filter((p) => p.status === "Active").length}
           sub="Online now"
           icon={Activity}
           accent="#0ea5c9"
         />
         <StatCard
           label="Total Leads Done"
-          value={DUMMY_PARTNERS.reduce((s, p) => s + p.leadsTotal, 0)}
+          value={partners.reduce((s, p) => s + p.leadsTotal, 0)}
           sub="All time"
           icon={CheckCircle2}
           accent="#1d9e75"
         />
         <StatCard
           label="Total Earnings"
-          value={`Rs. ${toInr(DUMMY_PARTNERS.reduce((s, p) => s + p.earnings, 0))}`}
+          value={`Rs. ${toInr(partners.reduce((s, p) => s + p.earnings, 0))}`}
           sub="Payouts"
           icon={IndianRupee}
           accent="#8b5cf6"
@@ -3799,14 +3870,35 @@ function PartnersSection() {
 
 //  Section: Revenue 
 
-function RevenueSection() {
+function RevenueSection({ leads }: { leads: Lead[] }) {
   const [period, setPeriod] = useState<"Daily" | "Weekly" | "Monthly">("Daily");
 
+  const revenue = useMemo(() => {
+    const completedLeads = leads.filter((lead) => lead.status === "Completed");
+    const toSeries = (format: Intl.DateTimeFormatOptions): RevenueBar[] => {
+      const totals = new Map<string, number>();
+      completedLeads.forEach((lead) => {
+        const date = new Date(lead.updatedAt || lead.createdAt);
+        if (Number.isNaN(date.getTime())) return;
+        const label = date.toLocaleDateString("en-IN", format);
+        totals.set(label, (totals.get(label) ?? 0) + lead.quotedPrice);
+      });
+      return Array.from(totals, ([label, value]) => ({ label, value }));
+    };
+
+    return {
+      Daily: toSeries({ day: "2-digit", month: "short" }),
+      Weekly: WEEKLY_REVENUE,
+      Monthly: toSeries({ month: "short", year: "numeric" }),
+    };
+  }, [leads]);
+
   const data =
-    period === "Daily" ? DAILY_REVENUE : period === "Weekly" ? WEEKLY_REVENUE : MONTHLY_REVENUE;
+    period === "Daily" ? revenue.Daily : period === "Weekly" ? revenue.Weekly : revenue.Monthly;
   const total = data.reduce((s, d) => s + d.value, 0);
   const peak = data.length ? Math.max(...data.map((d) => d.value)) : 0;
   const avg = data.length ? Math.round(total / data.length) : 0;
+  const monthToDate = revenue.Monthly.reduce((s, d) => s + d.value, 0);
 
   return (
     <div className="admin-section">
@@ -3836,7 +3928,7 @@ function RevenueSection() {
         />
         <StatCard
           label="MTD Revenue"
-          value={`Rs. ${toInr(MONTHLY_REVENUE.reduce((s, d) => s + d.value, 0))}`}
+          value={`Rs. ${toInr(monthToDate)}`}
           sub="All months"
           icon={ArrowUpRight}
           accent="#f59e0b"
@@ -4262,9 +4354,9 @@ function AdminPage() {
       case "Payments Verify":
         return <PaymentsVerifySection />;
       case "Partners":
-        return <PartnersSection />;
+        return <PartnersSection overview={overviewMetrics} />;
       case "Revenue":
-        return <RevenueSection />;
+        return <RevenueSection leads={leads} />;
       case "Settings":
         return <SettingsSection />;
       default:

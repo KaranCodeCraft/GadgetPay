@@ -2066,6 +2066,7 @@ test("onsite mismatch applies only matching categorical nested rule", async () =
         basicFunctionality: { canMakeCalls: "yes", touchWorking: "yes", screenReplaced: "yes" },
         physicalIssues: ["Dead Spot/Visible line and Discoloration on screen"],
         nestedPhysicalIssueAnswers: { screenDiscoloration: "majorDiscoloration" },
+        accessories: ["originalBoxWithIMEI"],
       },
     })
     .expect(200);
@@ -2099,8 +2100,8 @@ test("onsite mismatch applies only matching categorical nested rule", async () =
     .set("Authorization", `Bearer ${adminToken}`)
     .send({
       answerGroup: "nestedPhysicalIssueAnswers",
-      answerKey: "screenDiscoloration",
-      answerValue: "majorDiscoloration",
+      answerKey: "discoloration",
+      answerValue: "major",
       label: "Major Discoloration",
       deductionType: "RUPEES",
       deductionValue: 7000,
@@ -2115,9 +2116,26 @@ test("onsite mismatch applies only matching categorical nested rule", async () =
     .post("/api/v1/admin/pricing/deductions")
     .set("Authorization", `Bearer ${adminToken}`)
     .send({
+      answerGroup: "accessories",
+      answerKey: "originalBoxWithIMEI",
+      answerValue: null,
+      label: "Original Box with same IMEI",
+      deductionType: "RUPEES",
+      deductionValue: 100,
+      priority: 13,
+      isActive: true,
+      appliesToBrand: "apple",
+      appliesToModelId: "iphone-13-categorical-check",
+    })
+    .expect(200);
+
+  await request(app)
+    .post("/api/v1/admin/pricing/deductions")
+    .set("Authorization", `Bearer ${adminToken}`)
+    .send({
       answerGroup: "nestedPhysicalIssueAnswers",
-      answerKey: "screenDiscoloration",
-      answerValue: "minorDiscoloration",
+      answerKey: "discoloration",
+      answerValue: "minor",
       label: "Minor Discoloration",
       deductionType: "RUPEES",
       deductionValue: 3000,
@@ -2170,6 +2188,20 @@ test("onsite mismatch applies only matching categorical nested rule", async () =
     .send({ status: "IN_PROGRESS" })
     .expect(200);
 
+  const onsiteCatalog = await request(app)
+    .get(`/api/v1/partner/leads/${leadId}/onsite-deduction-catalog`)
+    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
+    .expect(200);
+
+  const screenOriginalRules = onsiteCatalog.body.data.catalog.fields.screenOriginal.rules;
+  assert.equal(screenOriginalRules.some((rule) => rule.label === "Screen Not Original" && rule.answerValue === "no"), true);
+  const screenDiscolorationRules = onsiteCatalog.body.data.catalog.fields.screenDiscolorationMajor.rules;
+  assert.equal(screenDiscolorationRules.some((rule) => rule.label === "Major Discoloration" && rule.answerKey === "discoloration" && rule.answerValue === "major"), true);
+  const originalBoxRules = onsiteCatalog.body.data.catalog.fields.originalBoxWithIMEI.rules;
+  assert.equal(originalBoxRules.some((rule) => rule.label === "Original Box with same IMEI" && rule.answerGroup === "accessories"), true);
+  const gstBillRules = onsiteCatalog.body.data.catalog.fields.gstBillSameImei.rules;
+  assert.equal(gstBillRules.some((rule) => rule.label === "Original Box with same IMEI"), false);
+
   const confirmedValidation = await request(app)
     .post(`/api/v1/partner/leads/${leadId}/onsite-validation`)
     .set("Authorization", `Bearer ${partnerSession.accessToken}`)
@@ -2186,6 +2218,12 @@ test("onsite mismatch applies only matching categorical nested rule", async () =
         partnerInput: "yes",
         comment: "Original display confirmed",
       }),
+      originalBoxWithIMEI: JSON.stringify({
+        field: "Original Box with same IMEI",
+        userInput: "yes",
+        partnerInput: "yes",
+        comment: "Original box confirmed",
+      }),
     }))
     .field("partnerChecks", JSON.stringify([
       {
@@ -2201,6 +2239,13 @@ test("onsite mismatch applies only matching categorical nested rule", async () =
         userValue: "yes",
         partnerInput: "yes",
         comment: "Original display confirmed",
+      },
+      {
+        key: "accessories.originalBoxWithIMEI",
+        label: "Original Box with same IMEI",
+        userValue: "yes",
+        partnerInput: "yes",
+        comment: "Original box confirmed",
       },
     ]))
     .field("observedIssues", JSON.stringify([]))
@@ -2233,6 +2278,12 @@ test("onsite mismatch applies only matching categorical nested rule", async () =
         partnerInput: "no",
         comment: "Screen was replaced",
       }),
+      originalBoxWithIMEI: JSON.stringify({
+        field: "Original Box with same IMEI",
+        userInput: "yes",
+        partnerInput: "no",
+        comment: "Box IMEI did not match",
+      }),
     }))
     .field("partnerChecks", JSON.stringify([
       {
@@ -2249,6 +2300,13 @@ test("onsite mismatch applies only matching categorical nested rule", async () =
         partnerInput: "no",
         comment: "Screen was replaced",
       },
+      {
+        key: "accessories.originalBoxWithIMEI",
+        label: "Original Box with same IMEI",
+        userValue: "yes",
+        partnerInput: "no",
+        comment: "Box IMEI did not match",
+      },
     ]))
     .field("observedIssues", JSON.stringify([]))
     .field("observedIssueDeductions", JSON.stringify([]))
@@ -2261,11 +2319,12 @@ test("onsite mismatch applies only matching categorical nested rule", async () =
     .expect(200);
 
   const deductions = JSON.parse(validation.body.data.lead.onsiteValidation.checklist.__deductions);
-  assert.equal(deductions.questionDeductions.length, 2);
+  assert.equal(deductions.questionDeductions.length, 3);
   assert.equal(deductions.questionDeductions[0].label, "Major Discoloration");
   assert.equal(deductions.questionDeductions[0].deductRupees, 7000);
   assert.equal(deductions.questionDeductions.filter((item) => item.label === "Screen Not Original").length, 1);
-  assert.equal(deductions.totalDeductionAmount, 9000);
+  assert.equal(deductions.questionDeductions.filter((item) => item.label === "Original Box with same IMEI").length, 1);
+  assert.equal(deductions.totalDeductionAmount, 9100);
 
   const discolorationTrace = deductions.decisionTrace.find((item) => item.key === "nestedPhysicalIssueAnswers.screenDiscoloration");
   assert.equal(discolorationTrace.appliedRules[0].label, "Major Discoloration");
