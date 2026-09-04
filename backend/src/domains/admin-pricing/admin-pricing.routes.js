@@ -62,8 +62,12 @@ const optionalTrimmedString = z.preprocess(
 
 const answerGroupSchema = z.enum([
   "basicFunctionality",
+  "warrantyAndBill",
   "physicalIssues",
   "nestedPhysicalIssueAnswers",
+  "functionalProblems",
+  "accessories",
+  "mobileAge",
   "cameraAndBiometrics",
   "sensorsAndConnectivity",
   "batteryAndCharging",

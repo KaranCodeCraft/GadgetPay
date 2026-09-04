@@ -5497,9 +5497,6 @@ button {
 }
 
 .lead-transaction-sticky-wrap {
-  position: sticky;
-  top: 112px;
-  z-index: 50;
   margin: -4px -4px 18px;
   padding: 4px 4px 14px;
   background: #fff;
@@ -5797,7 +5794,6 @@ button {
   }
 
   .service-lead-transaction-page .lead-transaction-sticky-wrap {
-    top: 112px;
     margin: -2px -2px 14px;
     padding: 2px 2px 12px;
   }

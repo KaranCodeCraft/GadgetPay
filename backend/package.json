@@ -17,7 +17,9 @@
     "repair:auto-expired:apply": "node scripts/repair-auto-expired-by-alt-slot.mjs --apply",
     "seed:partner-leads": "node scripts/seed-partner-leads.mjs",
     "repair:lead-ownership": "node scripts/repair-lead-ownership.mjs",
-    "backfill:admin-metrics": "node scripts/backfill-admin-metrics.mjs"
+    "backfill:admin-metrics": "node scripts/backfill-admin-metrics.mjs",
+    "migrate:deduction-rules:dry": "node scripts/migrate-deduction-rules-canonical.mjs --dry-run",
+    "migrate:deduction-rules:apply": "node scripts/migrate-deduction-rules-canonical.mjs --apply"
   },
   "dependencies": {
     "cors": "^2.8.5",

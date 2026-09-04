@@ -8,6 +8,7 @@
     "build": "vite build",
     "build:dev": "vite build --mode development",
     "preview": "vite preview",
+    "test:unit": "node --experimental-strip-types --test tests/unit/*.test.ts",
     "test:e2e:user-flow": "playwright test tests/e2e/user-sell-phone-otp-flow.spec.ts",
     "test:e2e:tablet-flow": "playwright test tests/e2e/user-sell-tablet-otp-flow.spec.ts",
     "lint": "eslint .",

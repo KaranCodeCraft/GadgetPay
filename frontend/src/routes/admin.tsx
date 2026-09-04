@@ -1841,14 +1841,14 @@ const DEDUCTION_RULE_PRESETS: DeductionRulePreset[] = [
     sectionTitle: "Tell us more about your device?",
     prompt: "Is your phone's screen original?",
     answerGroup: "basicFunctionality",
-    answerKey: "originalDisplay",
+    answerKey: "screenReplaced",
     answerValue: "no",
   },
   {
     id: "underWarranty",
     sectionTitle: "Tell us more about your device?",
     prompt: "Is your device under manufacturer warranty?",
-    answerGroup: "accessoriesAndOwnership",
+    answerGroup: "warrantyAndBill",
     answerKey: "underWarranty",
     answerValue: "no",
   },
@@ -1856,7 +1856,7 @@ const DEDUCTION_RULE_PRESETS: DeductionRulePreset[] = [
     id: "billInvoice",
     sectionTitle: "Tell us more about your device?",
     prompt: "Do you have GST valid bill with the same IMEI?",
-    answerGroup: "accessoriesAndOwnership",
+    answerGroup: "warrantyAndBill",
     answerKey: "billInvoice",
     answerValue: "no",
   },
@@ -1865,7 +1865,7 @@ const DEDUCTION_RULE_PRESETS: DeductionRulePreset[] = [
     sectionTitle: "Condition",
     prompt: "Broken/scratch on device screen",
     answerGroup: "physicalIssues",
-    answerKey: "Broken or Screen Scratches",
+    answerKey: "Broken/scratch on device screen",
     answerValue: null,
   },
   {
@@ -1873,7 +1873,7 @@ const DEDUCTION_RULE_PRESETS: DeductionRulePreset[] = [
     sectionTitle: "Condition",
     prompt: "Dead Spot/Visible line and Discoloration on screen",
     answerGroup: "physicalIssues",
-    answerKey: "Any Dead spots",
+    answerKey: "Dead Spot/Visible line and Discoloration on screen",
     answerValue: null,
   },
   {
@@ -1881,7 +1881,7 @@ const DEDUCTION_RULE_PRESETS: DeductionRulePreset[] = [
     sectionTitle: "Condition",
     prompt: "Scratch/Dent on device body",
     answerGroup: "physicalIssues",
-    answerKey: "Dent or Marks on body",
+    answerKey: "Scratch/Dent on device body",
     answerValue: null,
   },
   {
@@ -1889,186 +1889,294 @@ const DEDUCTION_RULE_PRESETS: DeductionRulePreset[] = [
     sectionTitle: "Condition",
     prompt: "Device panel missing/broken",
     answerGroup: "physicalIssues",
-    answerKey: "Device Panel Broken / Missing",
+    answerKey: "Device panel missing/broken",
     answerValue: null,
   },
   {
     id: "frontCamera",
     sectionTitle: "Functional or Physical Problems",
     prompt: "Front Camera not working",
-    answerGroup: "cameraAndBiometrics",
-    answerKey: "frontCamera",
-    answerValue: "no",
+    answerGroup: "functionalProblems",
+    answerKey: "frontCameraNotWorking",
+    answerValue: null,
   },
   {
     id: "rearCamera",
     sectionTitle: "Functional or Physical Problems",
     prompt: "Back Camera not working",
-    answerGroup: "cameraAndBiometrics",
-    answerKey: "rearCamera",
-    answerValue: "no",
+    answerGroup: "functionalProblems",
+    answerKey: "backCameraNotWorking",
+    answerValue: null,
   },
   {
     id: "volumeButtons",
     sectionTitle: "Functional or Physical Problems",
     prompt: "Volume Button not working",
-    answerGroup: "batteryAndCharging",
-    answerKey: "volumeButtons",
-    answerValue: "no",
+    answerGroup: "functionalProblems",
+    answerKey: "volumeButtonNotWorking",
+    answerValue: null,
   },
   {
     id: "touchProblem",
     sectionTitle: "Functional or Physical Problems",
     prompt: "Finger Touch not working",
-    answerGroup: "basicFunctionality",
-    answerKey: "touchWorking",
-    answerValue: "no",
+    answerGroup: "functionalProblems",
+    answerKey: "fingerTouchNotWorking",
+    answerValue: null,
   },
   {
     id: "wifi",
     sectionTitle: "Functional or Physical Problems",
     prompt: "WiFi not working",
-    answerGroup: "sensorsAndConnectivity",
-    answerKey: "wifi",
-    answerValue: "no",
+    answerGroup: "functionalProblems",
+    answerKey: "wifiNotWorking",
+    answerValue: null,
   },
   {
     id: "speaker",
     sectionTitle: "Functional or Physical Problems",
     prompt: "Speaker Faulty",
-    answerGroup: "cameraAndBiometrics",
-    answerKey: "speaker",
-    answerValue: "no",
+    answerGroup: "functionalProblems",
+    answerKey: "speakerFaulty",
+    answerValue: null,
   },
   {
     id: "powerButton",
     sectionTitle: "Functional or Physical Problems",
     prompt: "Power Button not working",
-    answerGroup: "batteryAndCharging",
-    answerKey: "powerButton",
-    answerValue: "no",
+    answerGroup: "functionalProblems",
+    answerKey: "powerButtonNotWorking",
+    answerValue: null,
   },
   {
     id: "chargingPort",
     sectionTitle: "Functional or Physical Problems",
     prompt: "Charging Port not working",
-    answerGroup: "batteryAndCharging",
-    answerKey: "chargingPort",
-    answerValue: "no",
+    answerGroup: "functionalProblems",
+    answerKey: "chargingPortNotWorking",
+    answerValue: null,
   },
   {
     id: "faceUnlock",
     sectionTitle: "Functional or Physical Problems",
     prompt: "Face Sensor not working",
-    answerGroup: "cameraAndBiometrics",
-    answerKey: "faceUnlock",
-    answerValue: "no",
+    answerGroup: "functionalProblems",
+    answerKey: "faceSensorNotWorking",
+    answerValue: null,
   },
   {
     id: "alertSlider",
     sectionTitle: "Functional or Physical Problems",
     prompt: "Silent Button not working",
-    answerGroup: "batteryAndCharging",
-    answerKey: "alertSlider",
-    answerValue: "no",
+    answerGroup: "functionalProblems",
+    answerKey: "silentButtonNotWorking",
+    answerValue: null,
   },
   {
     id: "earSpeaker",
     sectionTitle: "Functional or Physical Problems",
     prompt: "Audio Receiver not working",
-    answerGroup: "cameraAndBiometrics",
-    answerKey: "earSpeaker",
-    answerValue: "no",
+    answerGroup: "functionalProblems",
+    answerKey: "audioReceiverNotWorking",
+    answerValue: null,
   },
   {
     id: "cameraGlassBroken",
     sectionTitle: "Functional or Physical Problems",
     prompt: "Camera Glass Broken",
-    answerGroup: "physicalIssues",
-    answerKey: "Device Panel Broken / Missing",
+    answerGroup: "functionalProblems",
+    answerKey: "cameraGlassBroken",
     answerValue: null,
   },
   {
     id: "bluetooth",
     sectionTitle: "Functional or Physical Problems",
     prompt: "Bluetooth not working",
-    answerGroup: "sensorsAndConnectivity",
-    answerKey: "bluetooth",
-    answerValue: "no",
+    answerGroup: "functionalProblems",
+    answerKey: "bluetoothNotWorking",
+    answerValue: null,
   },
   {
     id: "vibration",
     sectionTitle: "Functional or Physical Problems",
     prompt: "Vibrator is not working",
-    answerGroup: "sensorsAndConnectivity",
-    answerKey: "vibration",
-    answerValue: "no",
+    answerGroup: "functionalProblems",
+    answerKey: "vibratorNotWorking",
+    answerValue: null,
   },
   {
     id: "microphone",
     sectionTitle: "Functional or Physical Problems",
     prompt: "Microphone not working",
-    answerGroup: "cameraAndBiometrics",
-    answerKey: "microphone",
-    answerValue: "no",
+    answerGroup: "functionalProblems",
+    answerKey: "microphoneNotWorking",
+    answerValue: null,
   },
   {
     id: "proximitySensor",
     sectionTitle: "Functional or Physical Problems",
     prompt: "Proximity Sensor not working",
-    answerGroup: "sensorsAndConnectivity",
-    answerKey: "proximitySensor",
-    answerValue: "no",
+    answerGroup: "functionalProblems",
+    answerKey: "proximitySensorNotWorking",
+    answerValue: null,
   },
   {
     id: "batteryService",
     sectionTitle: "Functional or Physical Problems",
     prompt: "Battery health Below 80 (battery in service)",
-    answerGroup: "batteryAndCharging",
-    answerKey: "batteryDrain",
-    answerValue: "yes",
+    answerGroup: "functionalProblems",
+    answerKey: "batteryHealthBelow80Service",
+    answerValue: null,
   },
   {
     id: "mobileAgeBelow3",
     sectionTitle: "What is your mobile age?",
     prompt: "Below 3 months",
-    answerGroup: "accessoriesAndOwnership",
-    answerKey: "underWarranty",
-    answerValue: "yes",
+    answerGroup: "mobileAge",
+    answerKey: "mobileAge",
+    answerValue: "below3Months",
   },
   {
     id: "mobileAge3to6",
     sectionTitle: "What is your mobile age?",
     prompt: "3 months - 6 months",
-    answerGroup: "accessoriesAndOwnership",
-    answerKey: "underWarranty",
-    answerValue: "yes",
+    answerGroup: "mobileAge",
+    answerKey: "mobileAge",
+    answerValue: "months3To6",
   },
   {
     id: "mobileAge6to11",
     sectionTitle: "What is your mobile age?",
     prompt: "6 months - 11 months",
-    answerGroup: "accessoriesAndOwnership",
-    answerKey: "underWarranty",
-    answerValue: "yes",
+    answerGroup: "mobileAge",
+    answerKey: "mobileAge",
+    answerValue: "months6To11",
   },
   {
     id: "mobileAgeAbove11",
     sectionTitle: "What is your mobile age?",
     prompt: "Above 11 months",
-    answerGroup: "accessoriesAndOwnership",
-    answerKey: "underWarranty",
-    answerValue: "no",
+    answerGroup: "mobileAge",
+    answerKey: "mobileAge",
+    answerValue: "above11Months",
   },
   {
     id: "originalBox",
     sectionTitle: "Do you have the following?",
     prompt: "Original Box with same IMEI",
-    answerGroup: "accessoriesAndOwnership",
-    answerKey: "originalBox",
-    answerValue: "yes",
+    answerGroup: "accessories",
+    answerKey: "originalBoxWithIMEI",
+    answerValue: null,
   },
 ];
+
+type CanonicalRuleRef = {
+  answerGroup: QuoteDeductionAnswerGroup;
+  answerKey: string;
+  answerValue: string | null;
+};
+
+const RULE_KEY_ALIASES: Record<string, string> = {
+  "broken or screen scratches": "Broken/scratch on device screen",
+  "any dead spots": "Dead Spot/Visible line and Discoloration on screen",
+  "dent or marks on body": "Scratch/Dent on device body",
+  "device panel broken / missing": "Device panel missing/broken",
+  rearCamera: "backCameraNotWorking",
+  volumeButtons: "volumeButtonNotWorking",
+  faceUnlock: "faceSensorNotWorking",
+  alertSlider: "silentButtonNotWorking",
+  earSpeaker: "audioReceiverNotWorking",
+  vibration: "vibratorNotWorking",
+  originalDisplay: "screenReplaced",
+  originalBox: "originalBoxWithIMEI",
+};
+
+const FUNCTIONAL_PROBLEM_KEYS = new Set([
+  "frontCameraNotWorking",
+  "backCameraNotWorking",
+  "volumeButtonNotWorking",
+  "fingerTouchNotWorking",
+  "wifiNotWorking",
+  "speakerFaulty",
+  "powerButtonNotWorking",
+  "chargingPortNotWorking",
+  "faceSensorNotWorking",
+  "silentButtonNotWorking",
+  "audioReceiverNotWorking",
+  "cameraGlassBroken",
+  "bluetoothNotWorking",
+  "vibratorNotWorking",
+  "microphoneNotWorking",
+  "proximitySensorNotWorking",
+  "batteryHealthBelow80Service",
+]);
+
+function normalizeAnswerValue(value: string | null) {
+  if (value == null) return null;
+  const trimmed = String(value).trim();
+  if (!trimmed) return null;
+  const lowered = trimmed.toLowerCase();
+  if (lowered === "yes" || lowered === "no" || lowered === "na") return lowered;
+  return trimmed;
+}
+
+function toCanonicalAnswerKey(key: string) {
+  return RULE_KEY_ALIASES[key] || key;
+}
+
+function toCanonicalRuleRef(input: CanonicalRuleRef): CanonicalRuleRef {
+  const answerKey = toCanonicalAnswerKey(input.answerKey);
+  const answerValue = normalizeAnswerValue(input.answerValue);
+
+  if (FUNCTIONAL_PROBLEM_KEYS.has(answerKey)) {
+    return { answerGroup: "functionalProblems", answerKey, answerValue: null };
+  }
+
+  if (answerKey === "underWarranty" || answerKey === "billInvoice") {
+    return { answerGroup: "warrantyAndBill", answerKey, answerValue };
+  }
+
+  if (answerKey === "originalBoxWithIMEI") {
+    return { answerGroup: "accessories", answerKey, answerValue: null };
+  }
+
+  return {
+    answerGroup: input.answerGroup,
+    answerKey,
+    answerValue,
+  };
+}
+
+function getCanonicalPresetRule(preset: DeductionRulePreset): CanonicalRuleRef {
+  const presetRef = toCanonicalRuleRef({
+    answerGroup: preset.answerGroup,
+    answerKey: preset.answerKey,
+    answerValue: preset.answerValue,
+  });
+
+  if (preset.id === "mobileAgeBelow3") {
+    return { answerGroup: "mobileAge", answerKey: "mobileAge", answerValue: "below3Months" };
+  }
+  if (preset.id === "mobileAge3to6") {
+    return { answerGroup: "mobileAge", answerKey: "mobileAge", answerValue: "months3To6" };
+  }
+  if (preset.id === "mobileAge6to11") {
+    return { answerGroup: "mobileAge", answerKey: "mobileAge", answerValue: "months6To11" };
+  }
+  if (preset.id === "mobileAgeAbove11") {
+    return { answerGroup: "mobileAge", answerKey: "mobileAge", answerValue: "above11Months" };
+  }
+
+  return presetRef;
+}
+
+function getCanonicalSavedRule(rule: QuoteDeductionRule): CanonicalRuleRef {
+  return toCanonicalRuleRef({
+    answerGroup: rule.answerGroup,
+    answerKey: rule.answerKey,
+    answerValue: rule.answerValue,
+  });
+}
 
 function createDefaultDeductionDrafts() {
   return DEDUCTION_RULE_PRESETS.reduce<Record<string, DeductionRuleDraft>>((acc, item) => {
@@ -2086,11 +2194,14 @@ function createDefaultDeductionDrafts() {
 function buildPresetRuleMap(rules: QuoteDeductionRule[]) {
   const map = new Map<string, QuoteDeductionRule>();
   rules.forEach((rule) => {
+    const canonicalRule = getCanonicalSavedRule(rule);
     const preset = DEDUCTION_RULE_PRESETS.find(
-      (item) =>
-        item.answerGroup === rule.answerGroup &&
-        item.answerKey === rule.answerKey &&
-        (item.answerValue ?? null) === (rule.answerValue ?? null),
+      (item) => {
+        const canonicalPreset = getCanonicalPresetRule(item);
+        return canonicalPreset.answerGroup === canonicalRule.answerGroup
+          && canonicalPreset.answerKey === canonicalRule.answerKey
+          && (canonicalPreset.answerValue ?? null) === (canonicalRule.answerValue ?? null);
+      },
     );
     if (preset) {
       map.set(preset.id, rule);
@@ -2782,10 +2893,12 @@ function DeductionRuleSection() {
       return;
     }
 
+    const canonicalPreset = getCanonicalPresetRule(preset);
+
     const payload: QuoteDeductionRuleInput = {
-      answerGroup: preset.answerGroup,
-      answerKey: preset.answerKey,
-      answerValue: preset.answerValue,
+      answerGroup: canonicalPreset.answerGroup,
+      answerKey: canonicalPreset.answerKey,
+      answerValue: canonicalPreset.answerValue,
       label: preset.prompt,
       deductionType: draft.mode,
       deductionValue: numericValue,

@@ -357,7 +357,7 @@ test("user sell flow API creates quote schedule and lists history", async () => 
       deviceDetails: {
         basicFunctionality: { canMakeCalls: "yes", touchWorking: "yes" },
         physicalIssues: ["Any Dead spots"],
-        nestedPhysicalIssueAnswers: { "Any Dead spots": ["Top"] },
+        nestedPhysicalIssueAnswers: { "Any Dead spots": "Top" },
         cameraAndBiometrics: { frontCamera: "yes" },
         sensorsAndConnectivity: { proximitySensor: "yes" },
         batteryAndCharging: { charging: "yes" },
@@ -738,6 +738,86 @@ test("admin quote deduction rules drive user quotes and schedule snapshots", asy
     .expect(200);
 
   assert.equal(fetched.body.data.flow.quote.sellingPrice, 44000);
+});
+
+test("canonical device detail groups drive quote preview and user quote", async () => {
+  const adminToken = await createAdminToken();
+  const userSession = await createUserSession("8000000321");
+  const model = {
+    brandSlug: "phase4",
+    modelId: "phase4-canonical-device-details",
+    modelName: "Phase 4 Canonical Device",
+    listedPrice: 40000,
+  };
+
+  const ruleInputs = [
+    { answerGroup: "warrantyAndBill", answerKey: "underWarranty", answerValue: "no", label: "Warranty expired", deductionValue: 1000 },
+    { answerGroup: "functionalProblems", answerKey: "speakerFaulty", answerValue: null, label: "Speaker faulty", deductionValue: 1200 },
+    { answerGroup: "accessories", answerKey: "originalCharger", answerValue: null, label: "Original charger missing", deductionValue: 700 },
+    { answerGroup: "mobileAge", answerKey: "mobileAge", answerValue: "above11Months", label: "Older than 11 months", deductionValue: 1500 },
+    { answerGroup: "nestedPhysicalIssueAnswers", answerKey: "phase4ScreenPhysical", answerValue: "phase4Cracked", label: "Screen cracked", deductionValue: 500 },
+  ];
+
+  for (const [index, rule] of ruleInputs.entries()) {
+    await request(app)
+      .post("/api/v1/admin/pricing/deductions")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({
+        ...rule,
+        deductionType: "RUPEES",
+        priority: 100 + index,
+        isActive: true,
+        appliesToBrand: model.brandSlug,
+        appliesToModelId: model.modelId,
+      })
+      .expect(200);
+  }
+
+  const deviceDetails = {
+    warrantyAndBill: { underWarranty: "no" },
+    functionalProblems: ["speakerFaulty"],
+    accessories: ["originalCharger"],
+    mobileAge: "above11Months",
+    physicalIssues: ["Broken/scratch on device screen"],
+    nestedPhysicalIssueAnswers: { phase4ScreenPhysical: ["phase4Cracked", "oneToTwoScratches"] },
+  };
+
+  const preview = await request(app)
+    .post("/api/v1/pricing/quote-preview")
+    .send({ selectedModel: model, deviceDetails })
+    .expect(200);
+
+  assert.equal(preview.body.data.quote.totalDeduction, 4900);
+  assert.equal(preview.body.data.quote.sellingPrice, 35100);
+  assert.deepEqual(preview.body.data.quote.deductions.map((item) => item.label).sort(), [
+    "Older than 11 months",
+    "Original charger missing",
+    "Screen cracked",
+    "Speaker faulty",
+    "Warranty expired",
+  ]);
+
+  const createFlow = await request(app)
+    .post("/api/v1/user/sell-flows")
+    .set("Authorization", `Bearer ${userSession.accessToken}`)
+    .send({ servicePincode: "560001", selectedModel: model })
+    .expect(200);
+
+  const flowId = createFlow.body.data.flow.id;
+
+  await request(app)
+    .patch(`/api/v1/user/sell-flows/${flowId}/device-details`)
+    .set("Authorization", `Bearer ${userSession.accessToken}`)
+    .send({ deviceDetails })
+    .expect(200);
+
+  const quote = await request(app)
+    .post(`/api/v1/user/sell-flows/${flowId}/quote`)
+    .set("Authorization", `Bearer ${userSession.accessToken}`)
+    .expect(200);
+
+  assert.equal(quote.body.data.quote.totalDeduction, 4900);
+  assert.equal(quote.body.data.quote.sellingPrice, 35100);
 });
 
 test("partner token cannot access admin quote deduction APIs", async () => {
@@ -1955,6 +2035,241 @@ test("onsite validation requires exactly six validation photos", async () => {
     .expect(400);
 
   assert.equal(response.body.error.message, "Exactly 6 validation photos are required.");
+});
+
+test("onsite mismatch applies only matching categorical nested rule", async () => {
+  const userSession = await createUserSession("8000000320");
+  const partnerSession = await createPartnerSession("9000000320");
+  const adminToken = await createAdminToken();
+
+  const create = await request(app)
+    .post("/api/v1/user/sell-flows")
+    .set("Authorization", `Bearer ${userSession.accessToken}`)
+    .send({
+      servicePincode: "560001",
+      selectedModel: {
+        brandSlug: "apple",
+        modelId: "iphone-13-categorical-check",
+        modelName: "iPhone 13 Categorical Check",
+        listedPrice: 50000,
+      },
+    })
+    .expect(200);
+
+  const flowId = create.body.data.flow.id;
+
+  await request(app)
+    .patch(`/api/v1/user/sell-flows/${flowId}/device-details`)
+    .set("Authorization", `Bearer ${userSession.accessToken}`)
+    .send({
+      deviceDetails: {
+        basicFunctionality: { canMakeCalls: "yes", touchWorking: "yes", screenReplaced: "yes" },
+        physicalIssues: ["Dead Spot/Visible line and Discoloration on screen"],
+        nestedPhysicalIssueAnswers: { screenDiscoloration: "majorDiscoloration" },
+      },
+    })
+    .expect(200);
+
+  await request(app)
+    .post(`/api/v1/user/sell-flows/${flowId}/quote`)
+    .set("Authorization", `Bearer ${userSession.accessToken}`)
+    .expect(200);
+
+  await request(app)
+    .patch(`/api/v1/user/sell-flows/${flowId}/pickup-schedule`)
+    .set("Authorization", `Bearer ${userSession.accessToken}`)
+    .send({
+      pickupSchedule: {
+        pincode: "560001",
+        primaryDate: "2026-08-01T00:00:00.000Z",
+        primaryTime: "12:00 PM - 1:00 PM",
+        alternateDate: "2026-08-02T00:00:00.000Z",
+        alternateTime: "2:00 PM - 3:00 PM",
+        sellerName: "Categorical User",
+        callingPhoneNumber: "8000000320",
+        addressLine: "House 320, Test Street",
+        landmark: "Near Test Circle",
+        city: "Bengaluru",
+      },
+    })
+    .expect(200);
+
+  await request(app)
+    .post("/api/v1/admin/pricing/deductions")
+    .set("Authorization", `Bearer ${adminToken}`)
+    .send({
+      answerGroup: "nestedPhysicalIssueAnswers",
+      answerKey: "screenDiscoloration",
+      answerValue: "majorDiscoloration",
+      label: "Major Discoloration",
+      deductionType: "RUPEES",
+      deductionValue: 7000,
+      priority: 10,
+      isActive: true,
+      appliesToBrand: "apple",
+      appliesToModelId: "iphone-13-categorical-check",
+    })
+    .expect(200);
+
+  await request(app)
+    .post("/api/v1/admin/pricing/deductions")
+    .set("Authorization", `Bearer ${adminToken}`)
+    .send({
+      answerGroup: "nestedPhysicalIssueAnswers",
+      answerKey: "screenDiscoloration",
+      answerValue: "minorDiscoloration",
+      label: "Minor Discoloration",
+      deductionType: "RUPEES",
+      deductionValue: 3000,
+      priority: 11,
+      isActive: true,
+      appliesToBrand: "apple",
+      appliesToModelId: "iphone-13-categorical-check",
+    })
+    .expect(200);
+
+  await request(app)
+    .post("/api/v1/admin/pricing/deductions")
+    .set("Authorization", `Bearer ${adminToken}`)
+    .send({
+      answerGroup: "basicFunctionality",
+      answerKey: "screenReplaced",
+      answerValue: "no",
+      label: "Screen Not Original",
+      deductionType: "RUPEES",
+      deductionValue: 2000,
+      priority: 12,
+      isActive: true,
+      appliesToBrand: "apple",
+      appliesToModelId: "iphone-13-categorical-check",
+    })
+    .expect(200);
+
+  const leadBucket = await request(app)
+    .get("/api/v1/partner/lead-bucket?pincode=560001")
+    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
+    .expect(200);
+
+  const leadId = leadBucket.body.data.rows.find((row) => row.userSellFlowId === flowId)?.id;
+  assert.equal(Boolean(leadId), true);
+
+  await request(app)
+    .post(`/api/v1/partner/leads/${leadId}/claim`)
+    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
+    .expect(200);
+
+  await request(app)
+    .patch(`/api/v1/partner/leads/${leadId}/status`)
+    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
+    .send({ status: "ACCEPTED" })
+    .expect(200);
+
+  await request(app)
+    .patch(`/api/v1/partner/leads/${leadId}/status`)
+    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
+    .send({ status: "IN_PROGRESS" })
+    .expect(200);
+
+  const confirmedValidation = await request(app)
+    .post(`/api/v1/partner/leads/${leadId}/onsite-validation`)
+    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
+    .field("checklist", JSON.stringify({
+      screenDiscoloration: JSON.stringify({
+        field: "Nested Physical Issue Answers / Screen Discoloration",
+        userInput: "majorDiscoloration",
+        partnerInput: "yes",
+        comment: "User condition confirmed",
+      }),
+      screenReplaced: JSON.stringify({
+        field: "Basic Functionality / Screen Original",
+        userInput: "yes",
+        partnerInput: "yes",
+        comment: "Original display confirmed",
+      }),
+    }))
+    .field("partnerChecks", JSON.stringify([
+      {
+        key: "nestedPhysicalIssueAnswers.screenDiscoloration",
+        label: "Nested Physical Issue Answers / Screen Discoloration",
+        userValue: "majorDiscoloration",
+        partnerInput: "yes",
+        comment: "User condition confirmed",
+      },
+      {
+        key: "basicFunctionality.screenReplaced",
+        label: "Basic Functionality / Screen Original",
+        userValue: "yes",
+        partnerInput: "yes",
+        comment: "Original display confirmed",
+      },
+    ]))
+    .field("observedIssues", JSON.stringify([]))
+    .field("observedIssueDeductions", JSON.stringify([]))
+    .attach("photos", Buffer.from("confirmed-photo-1"), { filename: "confirmed-photo-1.png", contentType: "image/png" })
+    .attach("photos", Buffer.from("confirmed-photo-2"), { filename: "confirmed-photo-2.png", contentType: "image/png" })
+    .attach("photos", Buffer.from("confirmed-photo-3"), { filename: "confirmed-photo-3.png", contentType: "image/png" })
+    .attach("photos", Buffer.from("confirmed-photo-4"), { filename: "confirmed-photo-4.png", contentType: "image/png" })
+    .attach("photos", Buffer.from("confirmed-photo-5"), { filename: "confirmed-photo-5.png", contentType: "image/png" })
+    .attach("photos", Buffer.from("confirmed-photo-6"), { filename: "confirmed-photo-6.png", contentType: "image/png" })
+    .expect(200);
+
+  const confirmedDeductions = JSON.parse(confirmedValidation.body.data.lead.onsiteValidation.checklist.__deductions);
+  assert.equal(confirmedDeductions.questionDeductions.length, 0);
+  assert.equal(confirmedDeductions.totalDeductionAmount, 0);
+
+  const validation = await request(app)
+    .post(`/api/v1/partner/leads/${leadId}/onsite-validation`)
+    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
+    .field("checklist", JSON.stringify({
+      screenDiscoloration: JSON.stringify({
+        field: "Nested Physical Issue Answers / Screen Discoloration",
+        userInput: "majorDiscoloration",
+        partnerInput: "no",
+        comment: "Not matching condition",
+      }),
+      screenReplaced: JSON.stringify({
+        field: "Basic Functionality / Screen Original",
+        userInput: "yes",
+        partnerInput: "no",
+        comment: "Screen was replaced",
+      }),
+    }))
+    .field("partnerChecks", JSON.stringify([
+      {
+        key: "nestedPhysicalIssueAnswers.screenDiscoloration",
+        label: "Nested Physical Issue Answers / Screen Discoloration",
+        userValue: "majorDiscoloration",
+        partnerInput: "no",
+        comment: "Not matching condition",
+      },
+      {
+        key: "basicFunctionality.screenReplaced",
+        label: "Basic Functionality / Screen Original",
+        userValue: "yes",
+        partnerInput: "no",
+        comment: "Screen was replaced",
+      },
+    ]))
+    .field("observedIssues", JSON.stringify([]))
+    .field("observedIssueDeductions", JSON.stringify([]))
+    .attach("photos", Buffer.from("photo-1"), { filename: "photo-1.png", contentType: "image/png" })
+    .attach("photos", Buffer.from("photo-2"), { filename: "photo-2.png", contentType: "image/png" })
+    .attach("photos", Buffer.from("photo-3"), { filename: "photo-3.png", contentType: "image/png" })
+    .attach("photos", Buffer.from("photo-4"), { filename: "photo-4.png", contentType: "image/png" })
+    .attach("photos", Buffer.from("photo-5"), { filename: "photo-5.png", contentType: "image/png" })
+    .attach("photos", Buffer.from("photo-6"), { filename: "photo-6.png", contentType: "image/png" })
+    .expect(200);
+
+  const deductions = JSON.parse(validation.body.data.lead.onsiteValidation.checklist.__deductions);
+  assert.equal(deductions.questionDeductions.length, 2);
+  assert.equal(deductions.questionDeductions[0].label, "Major Discoloration");
+  assert.equal(deductions.questionDeductions[0].deductRupees, 7000);
+  assert.equal(deductions.questionDeductions.filter((item) => item.label === "Screen Not Original").length, 1);
+  assert.equal(deductions.totalDeductionAmount, 9000);
+
+  const discolorationTrace = deductions.decisionTrace.find((item) => item.key === "nestedPhysicalIssueAnswers.screenDiscoloration");
+  assert.equal(discolorationTrace.appliedRules[0].label, "Major Discoloration");
+  assert.equal(discolorationTrace.skippedRules.some((item) => item.label === "Minor Discoloration" && item.reason === "answer_value_or_partner_input_mismatch"), true);
 });
 
 test("admin lead assignment scope mapping and partner search support onboarding", async () => {

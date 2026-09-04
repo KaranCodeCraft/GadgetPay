@@ -316,9 +316,9 @@ const ONSITE_DEDUCTION_FIELD_CONFIG = [
       { answerGroup: "accessoriesAndOwnership", answerKey: "originalBoxWithIMEI", answerValues: ["no"] },
     ],
   },
-  { key: "brokenScratchScreen", triggerOn: "yes", candidates: [{ answerGroup: "physicalIssues", answerKey: "Broken/scratch on screen" }] },
-  { key: "brokenScratchDeviceScreen", triggerOn: "yes", candidates: [{ answerGroup: "physicalIssues", answerKey: "Broken/scratch on screen" }] },
-  { key: "deadSpotLineDiscoloration", triggerOn: "yes", candidates: [{ answerGroup: "physicalIssues", answerKey: "Dead spot/line" }] },
+  { key: "brokenScratchScreen", triggerOn: "yes", candidates: [{ answerGroup: "physicalIssues", answerKey: "Broken/scratch on device screen" }] },
+  { key: "brokenScratchDeviceScreen", triggerOn: "yes", candidates: [{ answerGroup: "physicalIssues", answerKey: "Broken/scratch on device screen" }] },
+  { key: "deadSpotLineDiscoloration", triggerOn: "yes", candidates: [{ answerGroup: "physicalIssues", answerKey: "Dead Spot/Visible line and Discoloration on screen" }] },
   { key: "scratchDentBody", triggerOn: "yes", candidates: [{ answerGroup: "physicalIssues", answerKey: "Scratch/Dent on device body" }] },
   { key: "panelMissingBroken", triggerOn: "yes", candidates: [{ answerGroup: "physicalIssues", answerKey: "Device panel missing/broken" }] },
   { key: "frontCamera", triggerOn: "yes", candidates: [{ answerGroup: "functionalProblems", answerKey: "frontCameraNotWorking" }] },
@@ -344,7 +344,7 @@ const ONSITE_DEDUCTION_FIELD_CONFIG = [
 function isRuleMatchForCandidate(rule, candidate) {
   if (!rule || !candidate) return false;
   if (candidate.answerGroup && normalizeRuleValue(rule.answerGroup) !== normalizeRuleValue(candidate.answerGroup)) return false;
-  if (candidate.answerKey && normalizeRuleValue(rule.answerKey) !== normalizeRuleValue(candidate.answerKey)) return false;
+  if (candidate.answerKey && toCanonicalLookupKey(rule.answerKey) !== toCanonicalLookupKey(candidate.answerKey)) return false;
   if (Array.isArray(candidate.answerValues) && candidate.answerValues.length > 0) {
     const value = normalizeRuleValue(rule.answerValue);
     const allowed = candidate.answerValues.map((item) => normalizeRuleValue(item));
@@ -404,6 +404,32 @@ function toLookupKey(value) {
   return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
 
+const ANSWER_KEY_ALIASES = new Map([
+  ["brokenscratchonscreen", "brokenscratchondevicescreen"],
+  ["brokenorscreenscratches", "brokenscratchondevicescreen"],
+  ["anydeadspots", "deadspotvisiblelineanddiscolorationonscreen"],
+  ["deadspotline", "deadspotvisiblelineanddiscolorationonscreen"],
+  ["dentormarksonbody", "scratchdentondevicebody"],
+  ["devicepanelbrokenmissing", "devicepanelmissingbroken"],
+  ["rearcamera", "backcameranotworking"],
+  ["backcamera", "backcameranotworking"],
+  ["volumebuttons", "volumebuttonnotworking"],
+  ["speaker", "speakerfaulty"],
+  ["faceunlock", "facesensornotworking"],
+  ["alertslider", "silentbuttonnotworking"],
+  ["earspeaker", "audioreceivernotworking"],
+  ["vibration", "vibratornotworking"],
+  ["originaldisplay", "screenreplaced"],
+  ["originalbox", "originalboxwithimei"],
+]);
+
+function toCanonicalLookupKey(value) {
+  const key = toLookupKey(value);
+  return ANSWER_KEY_ALIASES.get(key) || key;
+}
+
+const ARRAY_ANSWER_GROUP_LOOKUPS = new Set(["physicalissues", "functionalproblems", "accessories"]);
+
 const ONSITE_ROW_FIELD_ALIASES = new Map([
   ["basicfunctionalitycanmakecalls", ["makeReceiveCalls"]],
   ["canmakecalls", ["makeReceiveCalls"]],
@@ -455,9 +481,9 @@ function parsePartnerChecksFromChecklist(checklist) {
 }
 
 function getCatalogFieldKeysForPartnerCheck(check) {
-  const rowKey = toLookupKey(check.key);
-  const rowLabel = toLookupKey(check.label);
-  const userValue = toLookupKey(check.userValue);
+  const rowKey = toCanonicalLookupKey(check.key);
+  const rowLabel = toCanonicalLookupKey(check.label);
+  const rowValue = toCanonicalLookupKey(check.userValue);
   const direct = ONSITE_ROW_FIELD_ALIASES.get(rowKey) || ONSITE_ROW_FIELD_ALIASES.get(rowLabel);
   if (direct) return direct;
 
@@ -471,9 +497,9 @@ function getCatalogFieldKeysForPartnerCheck(check) {
 
     const matchedCandidate = fieldConfig.candidates.some((candidate) => {
       const group = toLookupKey(candidate.answerGroup);
-      const answerKey = toLookupKey(candidate.answerKey);
+      const answerKey = toCanonicalLookupKey(candidate.answerKey);
       const hasGroup = group && (rowKey.includes(group) || rowLabel.includes(group));
-      const hasAnswerKey = answerKey && (rowKey.includes(answerKey) || rowLabel.includes(answerKey) || userValue.includes(answerKey));
+      const hasAnswerKey = answerKey && (rowKey.includes(answerKey) || rowLabel.includes(answerKey) || (ARRAY_ANSWER_GROUP_LOOKUPS.has(group) && rowValue.includes(answerKey)));
       return hasGroup && (!answerKey || hasAnswerKey);
     });
 
@@ -484,17 +510,45 @@ function getCatalogFieldKeysForPartnerCheck(check) {
 }
 
 function ruleMatchesPartnerCheck(rule, check) {
-  const rowKey = toLookupKey(check.key);
-  const rowLabel = toLookupKey(check.label);
-  const rowValue = toLookupKey(check.userValue);
+  const rowKey = toCanonicalLookupKey(check.key);
+  const rowLabel = toCanonicalLookupKey(check.label);
+  const rowValue = toCanonicalLookupKey(check.userValue);
   const answerGroup = toLookupKey(rule.answerGroup);
-  const answerKey = toLookupKey(rule.answerKey);
+  const answerKey = toCanonicalLookupKey(rule.answerKey);
   const hasGroup = answerGroup && (rowKey.includes(answerGroup) || rowLabel.includes(answerGroup));
-  const hasAnswerKey = answerKey && (rowKey.includes(answerKey) || rowLabel.includes(answerKey) || rowValue.includes(answerKey));
+  const hasAnswerKey = answerKey && (rowKey.includes(answerKey) || rowLabel.includes(answerKey) || (ARRAY_ANSWER_GROUP_LOOKUPS.has(answerGroup) && rowValue.includes(answerKey)));
   return Boolean(hasGroup && hasAnswerKey);
 }
 
+function shouldApplyRuleForPartnerCheck(check, rule) {
+  const partnerInput = normalizeVerificationValue(check.partnerInput);
+  const userValue = normalizeVerificationValue(check.userValue);
+  if (!partnerInput || partnerInput === "na") return false;
+
+  const normalizedRuleAnswer = normalizeRuleValue(rule.answerValue);
+  if (!normalizedRuleAnswer) {
+    return partnerInput === "no";
+  }
+
+  if (userValue === "yes" || userValue === "no") {
+    const verifiedValue = partnerInput === "yes"
+      ? userValue
+      : userValue === "yes"
+        ? "no"
+        : "yes";
+    return normalizedRuleAnswer === verifiedValue;
+  }
+
+  // For categorical answers, only apply the value-specific rule when partner disputes user input.
+  return partnerInput === "no" && normalizedRuleAnswer === userValue;
+}
+
 function getCatalogRulesForPartnerCheck(check, catalog) {
+  return getCatalogCandidateRulesForPartnerCheck(check, catalog)
+    .filter((rule) => shouldApplyRuleForPartnerCheck(check, rule));
+}
+
+function getCatalogCandidateRulesForPartnerCheck(check, catalog) {
   const rules = [];
   const seenRuleIds = new Set();
 
@@ -522,16 +576,55 @@ function computeOnsiteRequote({ lead, checklist, partnerChecks, observedIssueDed
   const catalog = buildPartnerOnsiteDeductionCatalog(lead);
   const checks = partnerChecks.length ? partnerChecks : parsePartnerChecksFromChecklist(checklist);
   const questionDeductions = [];
+  const decisionTrace = [];
   const seenRuleIds = new Set();
 
   for (const check of checks) {
-    const userValue = normalizeVerificationValue(check.userValue);
     const partnerInput = normalizeVerificationValue(check.partnerInput);
-    if (!userValue || !partnerInput || partnerInput === "na" || userValue === partnerInput) continue;
+    const traceEntry = {
+      key: check.key,
+      field: check.label,
+      userInput: check.userValue,
+      partnerInput: check.partnerInput,
+      appliedRules: [],
+      skippedRules: [],
+      skippedDuplicateRuleIds: [],
+      skippedReason: null,
+    };
 
-    for (const rule of getCatalogRulesForPartnerCheck(check, catalog)) {
-      if (seenRuleIds.has(rule.ruleId)) continue;
+    if (!partnerInput || partnerInput === "na") {
+      traceEntry.skippedReason = "partner_input_empty_or_na";
+      decisionTrace.push(traceEntry);
+      continue;
+    }
+
+    const matchingRules = getCatalogCandidateRulesForPartnerCheck(check, catalog);
+    if (!matchingRules.length) {
+      traceEntry.skippedReason = "no_matching_applicable_rule";
+      decisionTrace.push(traceEntry);
+      continue;
+    }
+
+    for (const rule of matchingRules) {
+      if (!shouldApplyRuleForPartnerCheck(check, rule)) {
+        traceEntry.skippedRules.push({
+          ruleId: rule.ruleId,
+          label: rule.label,
+          reason: "answer_value_or_partner_input_mismatch",
+        });
+        continue;
+      }
+      if (seenRuleIds.has(rule.ruleId)) {
+        traceEntry.skippedDuplicateRuleIds.push(rule.ruleId);
+        continue;
+      }
       seenRuleIds.add(rule.ruleId);
+      const deductRupees = Math.max(0, Math.round(Number(rule.amount || 0)));
+      traceEntry.appliedRules.push({
+        ruleId: rule.ruleId,
+        label: rule.label,
+        deductRupees,
+      });
       questionDeductions.push({
         key: check.key,
         field: check.label,
@@ -541,9 +634,17 @@ function computeOnsiteRequote({ lead, checklist, partnerChecks, observedIssueDed
         label: rule.label,
         answerGroup: rule.answerGroup,
         answerKey: rule.answerKey,
-        deductRupees: Math.max(0, Math.round(Number(rule.amount || 0))),
+        deductRupees,
       });
     }
+
+    if (!traceEntry.appliedRules.length && traceEntry.skippedDuplicateRuleIds.length) {
+      traceEntry.skippedReason = "duplicate_rule_already_applied";
+    }
+    if (!traceEntry.appliedRules.length && traceEntry.skippedRules.length) {
+      traceEntry.skippedReason = "no_rule_applied_after_answer_value_check";
+    }
+    decisionTrace.push(traceEntry);
   }
 
   const extraIssues = observedIssueDeductions.map((issue) => ({
@@ -563,6 +664,7 @@ function computeOnsiteRequote({ lead, checklist, partnerChecks, observedIssueDed
     reQuotedPrice,
     finalAssessedPrice: reQuotedPrice,
     questionDeductions,
+    decisionTrace,
     issues: extraIssues,
     anyOtherIssues: extraIssues,
   };

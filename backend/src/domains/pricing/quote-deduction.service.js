@@ -11,6 +11,10 @@ function getAnswerValue(deviceDetails, rule) {
     return Array.isArray(groupValue) && groupValue.includes(rule.answerKey) ? rule.answerKey : undefined;
   }
 
+  if (rule.answerGroup === "mobileAge") {
+    return groupValue === undefined || groupValue === null ? undefined : String(groupValue);
+  }
+
   if (!groupValue || typeof groupValue !== "object") return undefined;
   return groupValue[rule.answerKey];
 }

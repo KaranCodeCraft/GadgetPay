@@ -378,8 +378,12 @@ export type UserSellFlowSelectedModel = {
 
 export type UserSellFlowDeviceDetails = {
   basicFunctionality?: Record<string, "yes" | "no" | "na" | undefined>;
+  warrantyAndBill?: Record<string, "yes" | "no" | "na" | undefined>;
   physicalIssues?: string[];
-  nestedPhysicalIssueAnswers?: Record<string, string>;
+  nestedPhysicalIssueAnswers?: Record<string, string | string[]>;
+  functionalProblems?: string[];
+  accessories?: string[];
+  mobileAge?: string;
   cameraAndBiometrics?: Record<string, "yes" | "no" | "na" | undefined>;
   sensorsAndConnectivity?: Record<string, "yes" | "no" | "na" | undefined>;
   batteryAndCharging?: Record<string, "yes" | "no" | "na" | undefined>;

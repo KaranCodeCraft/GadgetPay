@@ -1300,7 +1300,7 @@ function UserSellPhoneDeviceDetailsPage() {
           ? functionalProblems.filter((p) => p !== value)
           : [...functionalProblems, value];
         setFunctionalProblems(updated);
-        persistDeviceDetails(activeSlideIndex, selectedIssues, batteryAndCharging, appleBatteryHealth, nestedPhysicalIssueAnswers, updated);
+        persistDeviceDetails(activeSlideIndex, selectedIssues, batteryAndCharging, appleBatteryHealth, mobileAge, nestedPhysicalIssueAnswers, updated);
       };
       return (
         <div key="functionalProblemsDetail" className="user-issue-img-grid user-functional-problems-grid">

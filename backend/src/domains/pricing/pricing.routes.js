@@ -32,6 +32,7 @@ const answerMapSchema = z.record(answerValueSchema.optional());
 
 const deviceDetailsSchema = z.object({
   basicFunctionality: answerMapSchema.optional().default({}),
+  warrantyAndBill: answerMapSchema.optional().default({}),
   physicalIssues: z.array(z.string().trim().min(1).max(120)).optional().default([]),
   nestedPhysicalIssueAnswers: z.record(z.union([
     z.string().trim().min(1).max(160),
@@ -39,6 +40,7 @@ const deviceDetailsSchema = z.object({
   ])).optional().default({}),
   functionalProblems: z.array(z.string().trim().min(1).max(120)).optional().default([]),
   accessories: z.array(z.string().trim().min(1).max(120)).optional().default([]),
+  mobileAge: z.string().trim().min(1).max(80).optional(),
   cameraAndBiometrics: answerMapSchema.optional().default({}),
   sensorsAndConnectivity: answerMapSchema.optional().default({}),
   batteryAndCharging: answerMapSchema.optional().default({}),
