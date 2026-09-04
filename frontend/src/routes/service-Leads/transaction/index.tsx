@@ -6,6 +6,7 @@ import {
   claimPartnerLead,
   completePartnerLead,
   getPartnerLead,
+  getPartnerOnsiteDeductionCatalog,
   sendPartnerLeadCustomerOtp,
   submitPartnerOnsiteValidation,
   submitPartnerPaymentProofMetadata,
@@ -13,6 +14,7 @@ import {
   updatePartnerLeadStatus,
   verifyPartnerLeadCustomerOtp,
   type PartnerLead,
+  type PartnerOnsiteDeductionCatalog,
 } from "../../../lib/api/gadgetpe-client";
 
 export const Route = createFileRoute("/service-Leads/transaction/")({
@@ -50,6 +52,19 @@ type PartnerFieldDecision = {
   comment: string;
 };
 
+type PartnerCheckPayload = {
+  key: string;
+  label: string;
+  userValue: string;
+  partnerInput: "yes" | "no" | "na";
+  comment: string | null;
+};
+
+type RowDeductionPreview = {
+  amount: number;
+  labels: string[];
+};
+
 type ValidationPhotoSlot = {
   file: File;
   name: string;
@@ -61,14 +76,14 @@ type ValidationPhotoSlot = {
 type ObservedIssueRow = {
   id: string;
   description: string;
-  deductionPercent: number;
+  deductionAmount: number;
 };
 
 function createObservedIssueRow(): ObservedIssueRow {
   return {
     id: `issue-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     description: "",
-    deductionPercent: 1,
+    deductionAmount: 0,
   };
 }
 
@@ -117,15 +132,97 @@ function flattenDeviceDetails(value: unknown, path = ""): ValidationRow[] {
   return [{ key: path || "value", label: formatFieldLabel(path || "value"), userValue: toReadableValue(value) }];
 }
 
+function toLookupKey(value: string) {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+const ONSITE_ROW_FIELD_ALIASES: Record<string, string[]> = {
+  basicfunctionalitycanmakecalls: ["makeReceiveCalls"],
+  canmakecalls: ["makeReceiveCalls"],
+  makereceivecalls: ["makeReceiveCalls"],
+  basicfunctionalitytouchworking: ["touchScreenWorking"],
+  touchworking: ["touchScreenWorking"],
+  touchscreenworking: ["touchScreenWorking"],
+  basicfunctionalityscreenreplaced: ["screenOriginal"],
+  screenreplaced: ["screenOriginal"],
+  screenoriginal: ["screenOriginal"],
+  warrantyandbillunderwarranty: ["manufacturerWarranty"],
+  accessoriesandownershipunderwarranty: ["manufacturerWarranty"],
+  underwarranty: ["manufacturerWarranty"],
+  warrantyandbillbillinvoice: ["gstBillSameImei"],
+  accessoriesandownershipbillinvoice: ["gstBillSameImei"],
+  billinvoice: ["gstBillSameImei"],
+  accessoriesandownershiporiginalboxwithimei: ["gstBillSameImei"],
+  originalboxwithimei: ["gstBillSameImei"],
+  mobileage: ["mobileAge"],
+};
+
+function normalizeVerificationValue(value: string) {
+  const raw = value.trim().toLowerCase();
+  if (!raw || raw === "-" || raw === "n/a" || raw === "na") return "";
+  if (["yes", "y", "true", "1"].includes(raw)) return "yes";
+  if (["no", "n", "false", "0"].includes(raw)) return "no";
+  return raw;
+}
+
+function getCatalogFieldKeysForRow(row: ValidationRow, catalog: PartnerOnsiteDeductionCatalog | null) {
+  if (!catalog) return [];
+  const rowKey = toLookupKey(row.key);
+  const rowLabel = toLookupKey(row.label);
+  const rowValue = toLookupKey(row.userValue);
+  const direct = ONSITE_ROW_FIELD_ALIASES[rowKey] || ONSITE_ROW_FIELD_ALIASES[rowLabel];
+  if (direct) return direct.filter((fieldKey) => catalog.fields[fieldKey]?.rules?.length);
+
+  return Object.entries(catalog.fields)
+    .filter(([fieldKey, field]) => {
+      if (!field.rules.length) return false;
+      const normalizedFieldKey = toLookupKey(fieldKey);
+      return rowKey === normalizedFieldKey || rowLabel === normalizedFieldKey || rowValue.includes(normalizedFieldKey);
+    })
+    .map(([fieldKey]) => fieldKey);
+}
+
+function ruleMatchesValidationRow(rule: { answerGroup?: string; answerKey?: string }, row: ValidationRow) {
+  const rowKey = toLookupKey(row.key);
+  const rowLabel = toLookupKey(row.label);
+  const rowValue = toLookupKey(row.userValue);
+  const answerGroup = toLookupKey(rule.answerGroup || "");
+  const answerKey = toLookupKey(rule.answerKey || "");
+  const hasGroup = Boolean(answerGroup && (rowKey.includes(answerGroup) || rowLabel.includes(answerGroup)));
+  const hasAnswerKey = Boolean(answerKey && (rowKey.includes(answerKey) || rowLabel.includes(answerKey) || rowValue.includes(answerKey)));
+  return hasGroup && hasAnswerKey;
+}
+
+function getCatalogRulesForRow(row: ValidationRow, catalog: PartnerOnsiteDeductionCatalog | null) {
+  if (!catalog) return [];
+  const rules = [];
+  const seenRuleIds = new Set<string>();
+
+  getCatalogFieldKeysForRow(row, catalog).forEach((fieldKey) => {
+    catalog.fields[fieldKey]?.rules.forEach((rule) => {
+      if (seenRuleIds.has(rule.ruleId)) return;
+      seenRuleIds.add(rule.ruleId);
+      rules.push(rule);
+    });
+  });
+
+  catalog.rules?.forEach((rule) => {
+    if (seenRuleIds.has(rule.ruleId) || !ruleMatchesValidationRow(rule, row)) return;
+    seenRuleIds.add(rule.ruleId);
+    rules.push(rule);
+  });
+
+  return rules;
+}
+
 function ServiceLeadTransactionPage() {
   const navigate = useNavigate();
   const search = useSearch({ from: "/service-Leads/transaction/" }) as { leadId?: string };
   const [lead, setLead] = useState<PartnerLead | null>(null);
+  const [onsiteDeductionCatalog, setOnsiteDeductionCatalog] = useState<PartnerOnsiteDeductionCatalog | null>(null);
   const [callDone, setCallDone] = useState(false);
-  const [validationResult, setValidationResult] = useState<"PASS" | "FAIL" | "NEEDS_REWORK">("PASS");
+  const [hasObservedIssues, setHasObservedIssues] = useState(false);
   const [observedIssueRows, setObservedIssueRows] = useState<ObservedIssueRow[]>(() => [createObservedIssueRow()]);
-  const [validationNotes, setValidationNotes] = useState("");
-  const [completionRemarks, setCompletionRemarks] = useState("");
   const [finishing, setFinishing] = useState(false);
   const [rejecting, setRejecting] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
@@ -141,8 +238,6 @@ function ServiceLeadTransactionPage() {
   const [customerOtpDevCode, setCustomerOtpDevCode] = useState<string | null>(null);
   const [paymentFile, setPaymentFile] = useState<File | null>(null);
   const [paymentMode, setPaymentMode] = useState<"UPI" | "BANK_TRANSFER" | "CASH" | "OTHER">("UPI");
-  const [paymentTransactionRef, setPaymentTransactionRef] = useState("");
-  const [paymentNotes, setPaymentNotes] = useState("");
   const [paymentSaving, setPaymentSaving] = useState(false);
 
   const loadLead = async () => {
@@ -166,6 +261,12 @@ function ServiceLeadTransactionPage() {
     try {
       const result = await getPartnerLead(token, search.leadId);
       setLead(result.lead);
+      try {
+        const catalogResult = await getPartnerOnsiteDeductionCatalog(token, search.leadId);
+        setOnsiteDeductionCatalog(catalogResult.catalog);
+      } catch {
+        setOnsiteDeductionCatalog(null);
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Unable to load service lead.");
     }
@@ -183,26 +284,9 @@ function ServiceLeadTransactionPage() {
     setCustomerOtpDevCode(null);
     setPaymentFile(null);
     setPaymentMode("UPI");
-    setPaymentTransactionRef("");
-    setPaymentNotes("");
     setPaymentSaving(false);
+    setOnsiteDeductionCatalog(null);
   }, [search.leadId]);
-
-  const updateWorkflow = async (nextStatus: "IN_PROGRESS" | "COMPLETED" | "REJECTED") => {
-    const token = getPartnerToken();
-    if (!token) {
-      forcePartnerLoginRedirect();
-      return;
-    }
-    if (!lead) return;
-    try {
-      const result = await updatePartnerLeadStatus(token, lead.id, { status: nextStatus, reason: completionRemarks.trim() || undefined });
-      setLead(result.lead);
-      toast.success(`Lead marked ${nextStatus}.`);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Unable to update lead workflow.");
-    }
-  };
 
   useEffect(() => {
     if (!lead) return;
@@ -244,9 +328,36 @@ function ServiceLeadTransactionPage() {
   }, [lead?.deviceDetails]);
 
   const listedPrice = lead?.quote?.sellingPrice ?? lead?.selectedModel.listedPrice ?? 0;
-  const totalDeductionPercent = observedIssueRows.reduce((sum, row) => sum + row.deductionPercent, 0);
-  const totalDeductionAmount = Math.round((listedPrice * totalDeductionPercent) / 100);
-  const finalAssessedPrice = Math.max(0, listedPrice - totalDeductionAmount);
+  const activeObservedIssueRows = hasObservedIssues ? observedIssueRows : [];
+  const observedIssueDeductionAmount = activeObservedIssueRows.reduce((sum, row) => sum + Math.max(0, Math.round(row.deductionAmount || 0)), 0);
+  const rowDeductionPreview = useMemo(() => {
+    const next: Record<string, RowDeductionPreview> = {};
+    const seenRuleIds = new Set<string>();
+
+    validationRows.forEach((row) => {
+      const partner = partnerChecks[row.key] ?? { decision: "yes", comment: "" };
+      const userValue = normalizeVerificationValue(row.userValue);
+      const partnerValue = normalizeVerificationValue(partner.decision);
+      if (!userValue || !partnerValue || partnerValue === "na" || userValue === partnerValue) return;
+
+      const labels: string[] = [];
+      let amount = 0;
+      getCatalogRulesForRow(row, onsiteDeductionCatalog).forEach((rule) => {
+        if (seenRuleIds.has(rule.ruleId)) return;
+        seenRuleIds.add(rule.ruleId);
+        amount += Math.max(0, Math.round(rule.amount || 0));
+        labels.push(rule.label);
+      });
+
+      if (amount > 0) next[row.key] = { amount, labels };
+    });
+
+    return next;
+  }, [validationRows, partnerChecks, onsiteDeductionCatalog]);
+  const ruleDeductionAmount = Object.values(rowDeductionPreview).reduce((sum, row) => sum + row.amount, 0);
+  const totalDeductionAmount = ruleDeductionAmount + observedIssueDeductionAmount;
+  const reQuotedPrice = Math.max(0, listedPrice - totalDeductionAmount);
+  const displayedReQuotedPrice = onsiteDeductionCatalog ? reQuotedPrice : lead?.onsiteValidation?.revisedQuote ?? reQuotedPrice;
 
   useEffect(() => {
     if (!validationRows.length) {
@@ -338,28 +449,39 @@ function ServiceLeadTransactionPage() {
       })),
     });
 
-    const observedIssues = observedIssueRows
+    const observedIssues = activeObservedIssueRows
       .map((row) => ({
         description: row.description.trim(),
-        deductionPercent: row.deductionPercent,
+        deductionAmount: Math.max(0, Math.round(row.deductionAmount || 0)),
       }))
       .filter((row) => row.description);
+    const partnerCheckPayload: PartnerCheckPayload[] = validationRows.map((row) => {
+      const partner = partnerChecks[row.key] ?? { decision: "na", comment: "" };
+      return {
+        key: row.key,
+        label: row.label,
+        userValue: row.userValue,
+        partnerInput: partner.decision,
+        comment: partner.comment.trim() || null,
+      };
+    });
 
     checklist.__deductions = JSON.stringify({
       listedPrice,
-      totalDeductionPercent,
       totalDeductionAmount,
-      finalAssessedPrice,
+      ruleDeductionAmount,
+      observedIssueDeductionAmount,
+      reQuotedPrice,
+      finalAssessedPrice: reQuotedPrice,
       issues: observedIssues,
     });
 
     try {
       const result = await submitPartnerOnsiteValidation(token, lead.id, {
-        result: validationResult,
         checklist,
-        observedIssues: observedIssues.map((row) => `${row.description} (Deduction: ${row.deductionPercent}%)`),
-        revisedQuote: finalAssessedPrice,
-        notes: validationNotes.trim() || undefined,
+        partnerChecks: partnerCheckPayload,
+        observedIssues: observedIssues.map((row) => `${row.description} (Deduction: Rs. ${row.deductionAmount})`),
+        observedIssueDeductions: observedIssues,
         photos: uploadedPhotos.map((photo) => photo.file),
       });
       setLead(result.lead);
@@ -380,13 +502,12 @@ function ServiceLeadTransactionPage() {
     setFinishing(true);
     try {
       const result = await completePartnerLead(token, lead.id, {
-        finalAmount: lead.onsiteValidation?.revisedQuote ?? lead.paymentProof?.amountCollected ?? finalAssessedPrice,
+        finalAmount: lead.onsiteValidation?.revisedQuote ?? lead.paymentProof?.amountCollected ?? reQuotedPrice,
         handoverChecklist: {
           callDone,
           validationSaved: Boolean(lead.onsiteValidation),
           paymentProofSubmitted: Boolean(lead.paymentProof),
         },
-        remarks: completionRemarks.trim() || undefined,
       });
       setLead(result.lead);
       setShowSuccess(true);
@@ -413,7 +534,7 @@ function ServiceLeadTransactionPage() {
 
       await updatePartnerLeadStatus(token, claimedLead.id, {
         status: "REJECTED",
-        reason: completionRemarks.trim() || "Lead rejected by partner",
+        reason: "Lead rejected by partner",
       });
       toast.success("Lead rejected. Returning to partner homepage.");
       await navigate({ to: "/partner-page" });
@@ -462,7 +583,7 @@ function ServiceLeadTransactionPage() {
   const customerPhone = lead?.seller.phone || lead?.pickupSchedule?.callingPhoneNumber || "";
   const canRequestCustomerOtp = Boolean(lead && canValidate && customerPhone);
   const canSaveValidation = customerOtpVerified && canValidate && uploadedPhotoCount >= REQUIRED_VALIDATION_PHOTO_COUNT;
-  const canPay = customerOtpVerified && Boolean(lead?.onsiteValidation) && lead?.onsiteValidation?.result === "PASS";
+  const canPay = customerOtpVerified && Boolean(lead?.onsiteValidation);
   const canFinish = customerOtpVerified && Boolean(lead?.paymentProof) && Boolean(lead?.onsiteValidation) && lead?.status === "IN_PROGRESS";
 
   useEffect(() => {
@@ -556,10 +677,8 @@ function ServiceLeadTransactionPage() {
     try {
       const result = await submitPartnerPaymentProofMetadata(token, lead.id, {
         file: paymentFile,
-        amountCollected: lead.onsiteValidation?.revisedQuote ?? finalAssessedPrice,
+        amountCollected: lead.onsiteValidation?.revisedQuote ?? reQuotedPrice,
         paymentMode,
-        transactionRef: paymentTransactionRef.trim() || undefined,
-        notes: paymentNotes.trim() || undefined,
       });
       setLead(result.lead);
       setPaymentFile(null);
@@ -582,17 +701,19 @@ function ServiceLeadTransactionPage() {
         </Link>
       </div>
       <section className="partner-simple-card partner-lead-card">
-        <h1>Service Lead Transaction</h1>
+        <div className="lead-transaction-sticky-wrap">
+          <h1>Service Lead Transaction</h1>
 
-        <div className="lead-transaction-head">
-          <div>
-            <section className="lead-booking-box lead-inline-timebox">
-              <h3>Listed Pickup Time</h3>
-              <p>{lead?.pickupSchedule?.primaryDate?.slice(0, 10) || "-"} | {lead?.pickupSchedule?.primaryTime || "-"}</p>
-              <p className="lead-hint">Elapsed since pickup start: {elapsedLabel}</p>
-            </section>
+          <div className="lead-transaction-head">
+            <div>
+              <section className="lead-booking-box lead-inline-timebox">
+                <h3>Listed Pickup Time</h3>
+                <p>{lead?.pickupSchedule?.primaryDate?.slice(0, 10) || "-"} | {lead?.pickupSchedule?.primaryTime || "-"}</p>
+                <p className="lead-hint">Elapsed since pickup start: {elapsedLabel}</p>
+              </section>
+            </div>
+            <div className="lead-price-flash">Rs. {formatInr(lead?.quote?.sellingPrice ?? 0)}</div>
           </div>
-          <div className="lead-price-flash">Rs. {formatInr(lead?.quote?.sellingPrice ?? 0)}</div>
         </div>
 
         {showActivePickupAlert ? (
@@ -726,6 +847,12 @@ function ServiceLeadTransactionPage() {
                             }));
                           }}
                         />
+                        {rowDeductionPreview[row.key] ? (
+                          <span className="lead-hint lead-deduction-preview">
+                            Deduction: Rs. {formatInr(rowDeductionPreview[row.key].amount)}
+                            {rowDeductionPreview[row.key].labels.length ? ` (${rowDeductionPreview[row.key].labels.join(", ")})` : ""}
+                          </span>
+                        ) : null}
                       </td>
                     </tr>
                   );
@@ -739,54 +866,73 @@ function ServiceLeadTransactionPage() {
             <div className="lead-observed-issues-box">
               <div className="lead-photo-upload-head">
                 <strong>Observed Issues</strong>
-                <span className="lead-hint">Deduction % is strict from 1 to 5 per issue.</span>
+                <span className="lead-hint">Select Yes only when there are extra issues. Deductions are flat rupee amounts.</span>
               </div>
-              <div className="lead-observed-issue-list">
-                {observedIssueRows.map((row, index) => (
-                  <div className="lead-observed-issue-row" key={row.id}>
-                    <div className="lead-booking-calendar lead-field-stack">
-                      <label htmlFor={`observed-issue-${row.id}`}>Issue {index + 1}</label>
-                      <input
-                        id={`observed-issue-${row.id}`}
-                        type="text"
-                        value={row.description}
-                        onChange={(event) => {
-                          const description = event.target.value;
-                          setObservedIssueRows((prev) => prev.map((item) => item.id === row.id ? { ...item, description } : item));
-                        }}
-                        placeholder="Enter observed issue"
-                      />
-                    </div>
-                    <div className="lead-booking-calendar lead-field-stack lead-deduction-field">
-                      <label htmlFor={`deduction-${row.id}`}>Deduction %</label>
-                      <select
-                        id={`deduction-${row.id}`}
-                        className="lead-select"
-                        value={row.deductionPercent}
-                        onChange={(event) => {
-                          const deductionPercent = Number(event.target.value);
-                          setObservedIssueRows((prev) => prev.map((item) => item.id === row.id ? { ...item, deductionPercent } : item));
-                        }}
-                      >
-                        {[1, 2, 3, 4, 5].map((value) => <option key={value} value={value}>{value}%</option>)}
-                      </select>
-                    </div>
-                    {observedIssueRows.length > 1 ? (
-                      <button
-                        type="button"
-                        className="lead-view-btn lead-remove-issue-btn"
-                        onClick={() => setObservedIssueRows((prev) => prev.filter((item) => item.id !== row.id))}
-                      >
-                        Remove
-                      </button>
-                    ) : null}
-                  </div>
-                ))}
+              <div className="lead-radio-group lead-observed-issues-toggle" role="radiogroup" aria-label="Observed issues found">
+                <label className="lead-radio-pill">
+                  <input type="radio" name="observed-issues-found" checked={!hasObservedIssues} onChange={() => setHasObservedIssues(false)} />
+                  No
+                </label>
+                <label className="lead-radio-pill">
+                  <input type="radio" name="observed-issues-found" checked={hasObservedIssues} onChange={() => setHasObservedIssues(true)} />
+                  Yes
+                </label>
               </div>
+              {hasObservedIssues ? (
+                <div className="lead-observed-issue-list">
+                  {observedIssueRows.map((row, index) => (
+                    <div className="lead-observed-issue-row" key={row.id}>
+                      <div className="lead-booking-calendar lead-field-stack">
+                        <label htmlFor={`observed-issue-${row.id}`}>Issue {index + 1}</label>
+                        <input
+                          id={`observed-issue-${row.id}`}
+                          type="text"
+                          value={row.description}
+                          onChange={(event) => {
+                            const description = event.target.value;
+                            setObservedIssueRows((prev) => prev.map((item) => item.id === row.id ? { ...item, description } : item));
+                          }}
+                          placeholder="Enter observed issue"
+                        />
+                      </div>
+                      <div className="lead-booking-calendar lead-field-stack lead-deduction-field">
+                        <label htmlFor={`deduction-${row.id}`}>Deduction Amount</label>
+                        <input
+                          id={`deduction-${row.id}`}
+                          type="number"
+                          min="0"
+                          max={listedPrice}
+                          step="1"
+                          value={row.deductionAmount}
+                          onChange={(event) => {
+                            const deductionAmount = Math.max(0, Math.round(Number(event.target.value) || 0));
+                            setObservedIssueRows((prev) => prev.map((item) => item.id === row.id ? { ...item, deductionAmount } : item));
+                          }}
+                        />
+                      </div>
+                      {observedIssueRows.length > 1 ? (
+                        <button
+                          type="button"
+                          className="lead-view-btn lead-remove-issue-btn"
+                          onClick={() => setObservedIssueRows((prev) => prev.filter((item) => item.id !== row.id))}
+                        >
+                          Remove
+                        </button>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
               <div className="lead-decision-row">
-                <button type="button" className="lead-view-btn" onClick={() => setObservedIssueRows((prev) => [...prev, createObservedIssueRow()])}>Add More</button>
-                <span className="lead-hint">Total deduction: {totalDeductionPercent}% | Rs. {formatInr(totalDeductionAmount)}</span>
+                {hasObservedIssues ? <button type="button" className="lead-view-btn" onClick={() => setObservedIssueRows((prev) => [...prev, createObservedIssueRow()])}>Add More</button> : null}
+                <span className="lead-hint">Admin mismatch deductions: Rs. {formatInr(ruleDeductionAmount)} | Extra issue deductions: Rs. {formatInr(observedIssueDeductionAmount)}</span>
               </div>
+            </div>
+
+            <div className="lead-booking-calendar lead-field-stack">
+              <label htmlFor="re-quoted-price">Re Quoted Price</label>
+              <input id="re-quoted-price" type="number" value={displayedReQuotedPrice} readOnly />
+              <span className="lead-hint">Listed price Rs. {formatInr(listedPrice)} minus admin mismatch and extra issue deductions Rs. {formatInr(totalDeductionAmount)}.</span>
             </div>
 
             <div className="lead-photo-upload-section">
@@ -833,26 +979,6 @@ function ServiceLeadTransactionPage() {
                   Clear Uploaded Photos
                 </button>
               ) : null}
-            </div>
-
-            <div className="lead-booking-calendar lead-field-stack">
-              <label htmlFor="revised-quote">Final Assessed Price</label>
-              <input id="revised-quote" type="number" value={finalAssessedPrice} readOnly />
-              <span className="lead-hint">Listed price Rs. {formatInr(listedPrice)} minus {totalDeductionPercent}% deduction.</span>
-            </div>
-
-            <div className="lead-booking-calendar lead-field-stack">
-              <label htmlFor="validation-notes">Validation Notes</label>
-              <textarea id="validation-notes" value={validationNotes} onChange={(event) => setValidationNotes(event.target.value)} className="lead-textarea" />
-            </div>
-
-            <div className="lead-booking-calendar lead-field-stack">
-              <label htmlFor="validation-result">Validation Result</label>
-              <select id="validation-result" className="lead-select" value={validationResult} onChange={(event) => setValidationResult(event.target.value as "PASS" | "FAIL" | "NEEDS_REWORK")}> 
-                <option value="PASS">PASS</option>
-                <option value="FAIL">FAIL</option>
-                <option value="NEEDS_REWORK">NEEDS_REWORK</option>
-              </select>
             </div>
 
             <div className="lead-decision-row">
@@ -907,28 +1033,6 @@ function ServiceLeadTransactionPage() {
                 </select>
               </div>
 
-              <div className="lead-booking-calendar lead-field-stack">
-                <label htmlFor="payment-transaction-ref">Transaction Reference</label>
-                <input
-                  id="payment-transaction-ref"
-                  type="text"
-                  value={paymentTransactionRef}
-                  onChange={(event) => setPaymentTransactionRef(event.target.value)}
-                  disabled={!canPay || paymentSaving}
-                />
-              </div>
-
-              <div className="lead-booking-calendar lead-field-stack">
-                <label htmlFor="payment-notes">Payment Notes</label>
-                <textarea
-                  id="payment-notes"
-                  value={paymentNotes}
-                  onChange={(event) => setPaymentNotes(event.target.value)}
-                  className="lead-textarea"
-                  disabled={!canPay || paymentSaving}
-                />
-              </div>
-
               <div className="lead-decision-row">
                 <button
                   type="button"
@@ -942,16 +1046,9 @@ function ServiceLeadTransactionPage() {
               </div>
             </section>
 
-            <section className="lead-booking-box">
-              <h3>5. Finish</h3>
-              <div className="lead-booking-calendar lead-field-stack">
-                <label htmlFor="completion-remarks">Completion remarks</label>
-                <textarea id="completion-remarks" value={completionRemarks} onChange={(event) => setCompletionRemarks(event.target.value)} className="lead-textarea" />
-              </div>
-              <div className="lead-decision-row">
-                <button type="button" className="lead-book-btn" onClick={() => { void handleFinish(); }} disabled={!canFinish || finishing}>{finishing ? "Finishing..." : "Finish"}</button>
-              </div>
-            </section>
+            <div className="lead-finish-action">
+              <button type="button" className="lead-book-btn" onClick={() => { void handleFinish(); }} disabled={!canFinish || finishing}>{finishing ? "Finishing..." : "Finish"}</button>
+            </div>
           </>
         ) : null}
 

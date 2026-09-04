@@ -33,13 +33,26 @@ const answerMapSchema = z.record(answerValueSchema.optional());
 const deviceDetailsSchema = z.object({
   basicFunctionality: answerMapSchema.optional().default({}),
   physicalIssues: z.array(z.string().trim().min(1).max(120)).optional().default([]),
-  nestedPhysicalIssueAnswers: z.record(z.string().trim().min(1).max(160)).optional().default({}),
+  nestedPhysicalIssueAnswers: z.record(z.union([
+    z.string().trim().min(1).max(160),
+    z.array(z.string().trim().min(1).max(160)).min(1),
+  ])).optional().default({}),
   functionalProblems: z.array(z.string().trim().min(1).max(120)).optional().default([]),
   accessories: z.array(z.string().trim().min(1).max(120)).optional().default([]),
   cameraAndBiometrics: answerMapSchema.optional().default({}),
   sensorsAndConnectivity: answerMapSchema.optional().default({}),
   batteryAndCharging: answerMapSchema.optional().default({}),
   accessoriesAndOwnership: answerMapSchema.optional().default({}),
+  metadata: z.object({
+    useCase: z.literal("device-details").optional(),
+    questionnaireVersion: z.string().trim().min(1).max(80).optional(),
+    flowType: z.enum(["sell-phone", "sell-tablet"]).optional(),
+    selectedIssues: z.array(z.string().trim().min(1).max(160)).optional().default([]),
+    selectedIssueGroups: z.array(z.string().trim().min(1).max(80)).optional().default([]),
+    hasScreenDefectBranch: z.boolean().optional(),
+    hasBodyDefectBranch: z.boolean().optional(),
+    updatedAt: z.string().datetime().optional(),
+  }).optional().default({}),
 }).passthrough();
 
 const quotePreviewSchema = z.object({

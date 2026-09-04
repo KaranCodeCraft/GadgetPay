@@ -43,9 +43,11 @@ import {
   savePartnerLeadOnsiteValidation,
   savePartnerLeadPaymentProofMetadata,
   updatePartnerLeadWorkflowStatus,
+  updatePartnerLeadReschedule,
   verifyPartnerLeadUnlockIntent,
   verifyPartnerCoinRechargeRequest,
   listActivePartnerPincodes,
+  listActiveQuoteDeductionRulesForModel,
   deactivatePartnerPincodeScope,
   upsertPartnerPincodeScope,
   getServiceabilityByPincode,
@@ -62,6 +64,8 @@ import {
 import { env } from "../../config/env.js";
 
 const upload = multer({ storage: multer.memoryStorage() });
+const REQUIRED_ONSITE_VALIDATION_PHOTOS = 6;
+const LEAD_UNLOCK_TTL_MINUTES = 5;
 
 const kycMetadataSchema = z.object({
   identityProof: z.enum(["Aadhar", "Voter ID", "Driving License", "PAN Card", "Passport"]),
@@ -102,13 +106,26 @@ const workflowStatusSchema = z.object({
   reason: z.string().trim().max(240).optional().default(""),
 });
 
+const partnerCheckSchema = z.object({
+  key: z.string().trim().min(1).max(240),
+  label: z.string().trim().min(1).max(240),
+  userValue: z.string().trim().max(1000).default(""),
+  partnerInput: z.enum(["yes", "no", "na"]),
+  comment: z.string().trim().max(500).nullable().optional(),
+}).strict();
+
+const observedIssueDeductionSchema = z.object({
+  description: z.string().trim().min(1).max(200),
+  deductionAmount: z.number().min(0).max(1000000),
+}).strict();
+
 const onsiteValidationSchema = z.object({
-  result: z.enum(["PASS", "FAIL", "NEEDS_REWORK"]),
   checklist: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).default({}),
+  partnerChecks: z.array(partnerCheckSchema).max(100).default([]),
   observedIssues: z.array(z.string().trim().min(1).max(200)).max(30).default([]),
+  observedIssueDeductions: z.array(observedIssueDeductionSchema).max(30).default([]),
   revisedQuote: z.number().min(0).max(1000000).optional(),
-  notes: z.string().trim().max(1000).optional(),
-});
+}).strict();
 
 const paymentProofMetadataSchema = z.object({
   fileName: z.string().trim().min(1).max(200),
@@ -116,16 +133,20 @@ const paymentProofMetadataSchema = z.object({
   sizeBytes: z.number().int().positive().max(10 * 1024 * 1024),
   amountCollected: z.number().min(0).max(1000000),
   paymentMode: z.enum(["UPI", "BANK_TRANSFER", "CASH", "OTHER"]),
-  transactionRef: z.string().trim().max(120).optional(),
-  notes: z.string().trim().max(500).optional(),
-});
+}).strict();
 
 const completionSchema = z.object({
   completionCode: z.string().trim().max(80).optional(),
   handoverChecklist: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).default({}),
   finalAmount: z.number().min(0).max(1000000),
-  remarks: z.string().trim().max(1000).optional(),
-});
+}).strict();
+
+function rejectRemovedFields(source, fieldNames) {
+  const rejected = fieldNames.filter((fieldName) => Object.hasOwn(source || {}, fieldName));
+  if (rejected.length) {
+    throw badRequest(`Unsupported field(s): ${rejected.join(", ")}`);
+  }
+}
 
 const timelineQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(500).optional().default(100),
@@ -134,6 +155,29 @@ const timelineQuerySchema = z.object({
 const callStatusSchema = z.object({
   callStatus: z.enum(["CALLED", "NO_ANSWER", "RESCHEDULE_REQUESTED", "FOLLOW_UP_REQUIRED"]),
   note: z.string().trim().max(300).optional(),
+});
+
+const RESCHEDULE_REASONS = [
+  "Bdcs reschedule",
+  "Customer asked to reschedule",
+  "Out of town now",
+  "Reschedule for same day next slot",
+  "Waiting for new phone",
+  "Not available today",
+  "Customer not responding/reachable",
+  "Not having acessories today",
+  "Data backup issue",
+  "iCloud / country lock issue",
+  "Dead Device",
+  "Requote price not agreed",
+  "Devices not available and store is asking for time",
+];
+
+const rescheduleLeadSchema = z.object({
+  reason: z.enum(RESCHEDULE_REASONS),
+  primaryDate: z.string().datetime(),
+  primaryTime: z.string().trim().min(1).max(40).optional(),
+  comment: z.string().trim().max(500).optional().default(""),
 });
 
 const customerOtpVerifySchema = z.object({
@@ -147,6 +191,65 @@ const activePickupQuerySchema = z.object({
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function normalizeInvoiceDeductions(rawDeductions) {
+  if (!rawDeductions) return null;
+
+  let deductions = rawDeductions;
+  if (typeof rawDeductions === "string") {
+    try {
+      deductions = JSON.parse(rawDeductions);
+    } catch {
+      return null;
+    }
+  }
+
+  if (!deductions || typeof deductions !== "object") return null;
+
+  const listedPrice = Number(deductions.listedPrice) || 0;
+  if (Number.isFinite(Number(deductions.totalDeductionAmount))) {
+    const issues = Array.isArray(deductions.issues)
+      ? deductions.issues.map((issue) => ({
+          ...issue,
+          deductRupees: Math.max(0, Math.round(Number(issue?.deductRupees ?? issue?.deductionAmount ?? 0))),
+        }))
+      : [];
+    return {
+      ...deductions,
+      deductionType: "RUPEES",
+      totalDeductionAmount: Math.max(0, Math.round(Number(deductions.totalDeductionAmount))),
+      issues,
+    };
+  }
+
+  const legacyPercent = Number(deductions.totalDeductionPercent) || 0;
+  const totalDeductionAmount = Math.max(0, Math.round((listedPrice * legacyPercent) / 100));
+  const issues = Array.isArray(deductions.issues)
+    ? deductions.issues.map((issue) => ({
+        ...issue,
+        deductRupees: Math.max(0, Math.round((listedPrice * (Number(issue?.deductionPercent) || 0)) / 100)),
+      }))
+    : [];
+
+  return {
+    ...deductions,
+    deductionType: "RUPEES",
+    totalDeductionAmount,
+    issues,
+  };
+}
+
+function normalizeOnsiteChecklist(checklist) {
+  const normalizedChecklist = checklist && typeof checklist === "object" ? checklist : {};
+  const hasLegacyGstKey = Object.prototype.hasOwnProperty.call(normalizedChecklist, "gstBill");
+  const hasLegacyImeiKey = Object.prototype.hasOwnProperty.call(normalizedChecklist, "sameImei");
+
+  if (hasLegacyGstKey || hasLegacyImeiKey) {
+    throw badRequest("Use checklist.gstBillSameImei only. Legacy checklist keys gstBill and sameImei are no longer supported.");
+  }
+
+  return normalizedChecklist;
 }
 
 function assertPartnerCanAccessLead(lead, req) {
@@ -166,6 +269,303 @@ function partnerHasUnlockedLead(lead, partnerId) {
   if (!lead || !partnerId) return false;
   if (lead.partnerId === partnerId && ["ACCEPTED", "IN_PROGRESS", "COMPLETED"].includes(lead.status)) return true;
   return lead.unlockOrder?.partnerId === partnerId && ["APPROVED", "CLOSED"].includes(lead.unlockOrder.status);
+}
+
+function normalizeRuleValue(value) {
+  return value == null ? null : String(value).trim().toLowerCase();
+}
+
+function toRoundedDeductionAmount(basePrice, rule) {
+  if (rule?.deductionType === "PERCENT") {
+    const raw = (Number(basePrice) * Number(rule.deductionValue || 0)) / 100;
+    const hasMaxCap = rule.maxDeductionAmount !== null
+      && rule.maxDeductionAmount !== undefined
+      && Number.isFinite(Number(rule.maxDeductionAmount));
+    const capped = hasMaxCap ? Math.min(raw, Number(rule.maxDeductionAmount)) : raw;
+    return Math.max(0, Math.round(capped));
+  }
+
+  return Math.max(0, Math.round(Number(rule?.deductionValue || 0)));
+}
+
+const ONSITE_DEDUCTION_FIELD_CONFIG = [
+  { key: "makeReceiveCalls", triggerOn: "no", candidates: [{ answerGroup: "basicFunctionality", answerKey: "canMakeCalls", answerValues: ["no"] }] },
+  { key: "touchScreenWorking", triggerOn: "no", candidates: [{ answerGroup: "basicFunctionality", answerKey: "touchWorking", answerValues: ["no"] }] },
+  {
+    key: "screenOriginal",
+    triggerOn: "no",
+    candidates: [
+      { answerGroup: "basicFunctionality", answerKey: "screenReplaced", answerValues: ["yes"] },
+      { answerGroup: "basicFunctionality", answerKey: "originalDisplay", answerValues: ["no"] },
+    ],
+  },
+  {
+    key: "manufacturerWarranty",
+    triggerOn: "no",
+    candidates: [
+      { answerGroup: "warrantyAndBill", answerKey: "underWarranty", answerValues: ["no"] },
+      { answerGroup: "accessoriesAndOwnership", answerKey: "underWarranty", answerValues: ["no"] },
+    ],
+  },
+  {
+    key: "gstBillSameImei",
+    triggerOn: "no",
+    candidates: [
+      { answerGroup: "warrantyAndBill", answerKey: "billInvoice", answerValues: ["no"] },
+      { answerGroup: "accessoriesAndOwnership", answerKey: "billInvoice", answerValues: ["no"] },
+      { answerGroup: "accessoriesAndOwnership", answerKey: "originalBoxWithIMEI", answerValues: ["no"] },
+    ],
+  },
+  { key: "brokenScratchScreen", triggerOn: "yes", candidates: [{ answerGroup: "physicalIssues", answerKey: "Broken/scratch on screen" }] },
+  { key: "brokenScratchDeviceScreen", triggerOn: "yes", candidates: [{ answerGroup: "physicalIssues", answerKey: "Broken/scratch on screen" }] },
+  { key: "deadSpotLineDiscoloration", triggerOn: "yes", candidates: [{ answerGroup: "physicalIssues", answerKey: "Dead spot/line" }] },
+  { key: "scratchDentBody", triggerOn: "yes", candidates: [{ answerGroup: "physicalIssues", answerKey: "Scratch/Dent on device body" }] },
+  { key: "panelMissingBroken", triggerOn: "yes", candidates: [{ answerGroup: "physicalIssues", answerKey: "Device panel missing/broken" }] },
+  { key: "frontCamera", triggerOn: "yes", candidates: [{ answerGroup: "functionalProblems", answerKey: "frontCameraNotWorking" }] },
+  { key: "backCamera", triggerOn: "yes", candidates: [{ answerGroup: "functionalProblems", answerKey: "backCameraNotWorking" }] },
+  { key: "volumeButton", triggerOn: "yes", candidates: [{ answerGroup: "functionalProblems", answerKey: "volumeButtonNotWorking" }] },
+  { key: "fingerTouch", triggerOn: "yes", candidates: [{ answerGroup: "functionalProblems", answerKey: "fingerTouchNotWorking" }] },
+  { key: "wifi", triggerOn: "yes", candidates: [{ answerGroup: "functionalProblems", answerKey: "wifiNotWorking" }] },
+  { key: "speaker", triggerOn: "yes", candidates: [{ answerGroup: "functionalProblems", answerKey: "speakerFaulty" }] },
+  { key: "powerButton", triggerOn: "yes", candidates: [{ answerGroup: "functionalProblems", answerKey: "powerButtonNotWorking" }] },
+  { key: "chargingPort", triggerOn: "yes", candidates: [{ answerGroup: "functionalProblems", answerKey: "chargingPortNotWorking" }] },
+  { key: "faceSensor", triggerOn: "yes", candidates: [{ answerGroup: "functionalProblems", answerKey: "faceSensorNotWorking" }] },
+  { key: "silentButton", triggerOn: "yes", candidates: [{ answerGroup: "functionalProblems", answerKey: "silentButtonNotWorking" }] },
+  { key: "audioReceiver", triggerOn: "yes", candidates: [{ answerGroup: "functionalProblems", answerKey: "audioReceiverNotWorking" }] },
+  { key: "cameraGlass", triggerOn: "yes", candidates: [{ answerGroup: "functionalProblems", answerKey: "cameraGlassBroken" }] },
+  { key: "bluetooth", triggerOn: "yes", candidates: [{ answerGroup: "functionalProblems", answerKey: "bluetoothNotWorking" }] },
+  { key: "vibrator", triggerOn: "yes", candidates: [{ answerGroup: "functionalProblems", answerKey: "vibratorNotWorking" }] },
+  { key: "microphone", triggerOn: "yes", candidates: [{ answerGroup: "functionalProblems", answerKey: "microphoneNotWorking" }] },
+  { key: "proximitySensor", triggerOn: "yes", candidates: [{ answerGroup: "functionalProblems", answerKey: "proximitySensorNotWorking" }] },
+  { key: "batteryHealthBelow80", triggerOn: "yes", candidates: [{ answerGroup: "functionalProblems", answerKey: "batteryHealthBelow80Service" }] },
+  { key: "mobileAge", triggerOn: "yes", candidates: [{ answerGroup: "mobileAge" }] },
+];
+
+function isRuleMatchForCandidate(rule, candidate) {
+  if (!rule || !candidate) return false;
+  if (candidate.answerGroup && normalizeRuleValue(rule.answerGroup) !== normalizeRuleValue(candidate.answerGroup)) return false;
+  if (candidate.answerKey && normalizeRuleValue(rule.answerKey) !== normalizeRuleValue(candidate.answerKey)) return false;
+  if (Array.isArray(candidate.answerValues) && candidate.answerValues.length > 0) {
+    const value = normalizeRuleValue(rule.answerValue);
+    const allowed = candidate.answerValues.map((item) => normalizeRuleValue(item));
+    if (!allowed.includes(value)) return false;
+  }
+  return true;
+}
+
+function buildPartnerOnsiteDeductionCatalog(lead) {
+  const basePrice = Number(lead?.quote?.basePrice || lead?.selectedModel?.listedPrice || lead?.quote?.sellingPrice || 0);
+  const rules = listActiveQuoteDeductionRulesForModel({
+    brandSlug: lead?.selectedModel?.brandSlug,
+    modelId: lead?.selectedModel?.modelId,
+  });
+
+  const fields = {};
+  for (const fieldConfig of ONSITE_DEDUCTION_FIELD_CONFIG) {
+    const matched = [];
+    const seen = new Set();
+
+    for (const rule of rules) {
+      const isMatch = fieldConfig.candidates.some((candidate) => isRuleMatchForCandidate(rule, candidate));
+      if (!isMatch) continue;
+      if (seen.has(rule.id)) continue;
+      seen.add(rule.id);
+      matched.push({
+        ruleId: rule.id,
+        label: rule.label,
+        answerGroup: rule.answerGroup,
+        answerKey: rule.answerKey,
+        answerValue: rule.answerValue,
+        amount: toRoundedDeductionAmount(basePrice, rule),
+      });
+    }
+
+    fields[fieldConfig.key] = {
+      triggerOn: fieldConfig.triggerOn,
+      rules: matched,
+    };
+  }
+
+  return {
+    basePrice,
+    fields,
+    rules: rules.map((rule) => ({
+      ruleId: rule.id,
+      label: rule.label,
+      answerGroup: rule.answerGroup,
+      answerKey: rule.answerKey,
+      answerValue: rule.answerValue,
+      amount: toRoundedDeductionAmount(basePrice, rule),
+    })),
+  };
+}
+
+function toLookupKey(value) {
+  return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+const ONSITE_ROW_FIELD_ALIASES = new Map([
+  ["basicfunctionalitycanmakecalls", ["makeReceiveCalls"]],
+  ["canmakecalls", ["makeReceiveCalls"]],
+  ["makereceivecalls", ["makeReceiveCalls"]],
+  ["basicfunctionalitytouchworking", ["touchScreenWorking"]],
+  ["touchworking", ["touchScreenWorking"]],
+  ["touchscreenworking", ["touchScreenWorking"]],
+  ["basicfunctionalityscreenreplaced", ["screenOriginal"]],
+  ["screenreplaced", ["screenOriginal"]],
+  ["screenoriginal", ["screenOriginal"]],
+  ["warrantyandbillunderwarranty", ["manufacturerWarranty"]],
+  ["accessoriesandownershipunderwarranty", ["manufacturerWarranty"]],
+  ["underwarranty", ["manufacturerWarranty"]],
+  ["warrantyandbillbillinvoice", ["gstBillSameImei"]],
+  ["accessoriesandownershipbillinvoice", ["gstBillSameImei"]],
+  ["billinvoice", ["gstBillSameImei"]],
+  ["accessoriesandownershiporiginalboxwithimei", ["gstBillSameImei"]],
+  ["originalboxwithimei", ["gstBillSameImei"]],
+  ["mobileage", ["mobileAge"]],
+]);
+
+function normalizeVerificationValue(value) {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (!raw || raw === "-" || raw === "n/a" || raw === "na") return "";
+  if (["yes", "y", "true", "1"].includes(raw)) return "yes";
+  if (["no", "n", "false", "0"].includes(raw)) return "no";
+  return raw;
+}
+
+function parsePartnerChecksFromChecklist(checklist) {
+  return Object.entries(checklist || {})
+    .filter(([key]) => !key.startsWith("__"))
+    .flatMap(([key, value]) => {
+      if (typeof value !== "string") return [];
+      try {
+        const parsed = JSON.parse(value);
+        if (!parsed || typeof parsed !== "object") return [];
+        return [{
+          key,
+          label: String(parsed.field || key),
+          userValue: String(parsed.userInput ?? ""),
+          partnerInput: ["yes", "no", "na"].includes(String(parsed.partnerInput)) ? String(parsed.partnerInput) : "na",
+          comment: parsed.comment ? String(parsed.comment) : null,
+        }];
+      } catch {
+        return [];
+      }
+    });
+}
+
+function getCatalogFieldKeysForPartnerCheck(check) {
+  const rowKey = toLookupKey(check.key);
+  const rowLabel = toLookupKey(check.label);
+  const userValue = toLookupKey(check.userValue);
+  const direct = ONSITE_ROW_FIELD_ALIASES.get(rowKey) || ONSITE_ROW_FIELD_ALIASES.get(rowLabel);
+  if (direct) return direct;
+
+  const fieldKeys = [];
+  for (const fieldConfig of ONSITE_DEDUCTION_FIELD_CONFIG) {
+    const configKey = toLookupKey(fieldConfig.key);
+    if (rowKey === configKey || rowLabel === configKey) {
+      fieldKeys.push(fieldConfig.key);
+      continue;
+    }
+
+    const matchedCandidate = fieldConfig.candidates.some((candidate) => {
+      const group = toLookupKey(candidate.answerGroup);
+      const answerKey = toLookupKey(candidate.answerKey);
+      const hasGroup = group && (rowKey.includes(group) || rowLabel.includes(group));
+      const hasAnswerKey = answerKey && (rowKey.includes(answerKey) || rowLabel.includes(answerKey) || userValue.includes(answerKey));
+      return hasGroup && (!answerKey || hasAnswerKey);
+    });
+
+    if (matchedCandidate) fieldKeys.push(fieldConfig.key);
+  }
+
+  return [...new Set(fieldKeys)];
+}
+
+function ruleMatchesPartnerCheck(rule, check) {
+  const rowKey = toLookupKey(check.key);
+  const rowLabel = toLookupKey(check.label);
+  const rowValue = toLookupKey(check.userValue);
+  const answerGroup = toLookupKey(rule.answerGroup);
+  const answerKey = toLookupKey(rule.answerKey);
+  const hasGroup = answerGroup && (rowKey.includes(answerGroup) || rowLabel.includes(answerGroup));
+  const hasAnswerKey = answerKey && (rowKey.includes(answerKey) || rowLabel.includes(answerKey) || rowValue.includes(answerKey));
+  return Boolean(hasGroup && hasAnswerKey);
+}
+
+function getCatalogRulesForPartnerCheck(check, catalog) {
+  const rules = [];
+  const seenRuleIds = new Set();
+
+  for (const fieldKey of getCatalogFieldKeysForPartnerCheck(check)) {
+    const field = catalog.fields[fieldKey];
+    if (!field?.rules?.length) continue;
+    for (const rule of field.rules) {
+      if (seenRuleIds.has(rule.ruleId)) continue;
+      seenRuleIds.add(rule.ruleId);
+      rules.push(rule);
+    }
+  }
+
+  for (const rule of catalog.rules || []) {
+    if (seenRuleIds.has(rule.ruleId) || !ruleMatchesPartnerCheck(rule, check)) continue;
+    seenRuleIds.add(rule.ruleId);
+    rules.push(rule);
+  }
+
+  return rules;
+}
+
+function computeOnsiteRequote({ lead, checklist, partnerChecks, observedIssueDeductions }) {
+  const listedPrice = Math.max(0, Math.round(Number(lead?.quote?.sellingPrice ?? lead?.selectedModel?.listedPrice ?? 0)));
+  const catalog = buildPartnerOnsiteDeductionCatalog(lead);
+  const checks = partnerChecks.length ? partnerChecks : parsePartnerChecksFromChecklist(checklist);
+  const questionDeductions = [];
+  const seenRuleIds = new Set();
+
+  for (const check of checks) {
+    const userValue = normalizeVerificationValue(check.userValue);
+    const partnerInput = normalizeVerificationValue(check.partnerInput);
+    if (!userValue || !partnerInput || partnerInput === "na" || userValue === partnerInput) continue;
+
+    for (const rule of getCatalogRulesForPartnerCheck(check, catalog)) {
+      if (seenRuleIds.has(rule.ruleId)) continue;
+      seenRuleIds.add(rule.ruleId);
+      questionDeductions.push({
+        key: check.key,
+        field: check.label,
+        userInput: check.userValue,
+        partnerInput: check.partnerInput,
+        ruleId: rule.ruleId,
+        label: rule.label,
+        answerGroup: rule.answerGroup,
+        answerKey: rule.answerKey,
+        deductRupees: Math.max(0, Math.round(Number(rule.amount || 0))),
+      });
+    }
+  }
+
+  const extraIssues = observedIssueDeductions.map((issue) => ({
+    description: issue.description,
+    deductRupees: Math.max(0, Math.round(Number(issue.deductionAmount || 0))),
+  }));
+  const ruleDeductionAmount = questionDeductions.reduce((sum, item) => sum + item.deductRupees, 0);
+  const observedIssueDeductionAmount = extraIssues.reduce((sum, item) => sum + item.deductRupees, 0);
+  const totalDeductionAmount = Math.max(0, Math.round(ruleDeductionAmount + observedIssueDeductionAmount));
+  const reQuotedPrice = Math.max(0, listedPrice - totalDeductionAmount);
+
+  return {
+    listedPrice,
+    ruleDeductionAmount,
+    observedIssueDeductionAmount,
+    totalDeductionAmount,
+    reQuotedPrice,
+    finalAssessedPrice: reQuotedPrice,
+    questionDeductions,
+    issues: extraIssues,
+    anyOtherIssues: extraIssues,
+  };
 }
 
 function maskLeadForPartnerList(lead, partnerId) {
@@ -400,8 +800,8 @@ partnerRouter.post("/pincodes", requireAuth, requireRole("partner"), (req, res, 
 
     const existing = listActivePartnerPincodes(req.auth.sub);
     const alreadySaved = existing.some((p) => p.pincode === pincode);
-    if (!alreadySaved && existing.length >= 4) {
-      throw badRequest("Maximum of 4 working pincodes allowed.");
+    if (alreadySaved) {
+      throw conflict(`Pincode ${pincode} is already configured for this partner.`);
     }
 
     const serviceability = getServiceabilityByPincode(pincode);
@@ -446,7 +846,7 @@ partnerRouter.get("/lead-bucket", requireAuth, requireRole("partner"), (req, res
     if (query.pincodes) {
       const arr = query.pincodes.split(",").map((p) => p.trim()).filter((p) => /^\d{6}$/.test(p));
       if (arr.length === 0) throw badRequest("No valid pincodes provided in pincodes param.");
-      pincodeFilter = { pincodes: arr.slice(0, 4) };
+      pincodeFilter = { pincodes: arr };
     } else {
       pincodeFilter = { pincode: query.pincode };
     }
@@ -455,6 +855,7 @@ partnerRouter.get("/lead-bucket", requireAuth, requireRole("partner"), (req, res
       ...pincodeFilter,
       leadType: "LEAD_BUCKET",
       status: query.status,
+      partnerId: req.auth.sub,
       viewerPartnerId: req.auth.sub,
       limit: query.limit,
     });
@@ -463,6 +864,7 @@ partnerRouter.get("/lead-bucket", requireAuth, requireRole("partner"), (req, res
       ...pincodeFilter,
       leadType: "SERVICE_LEAD",
       status: query.status,
+      partnerId: req.auth.sub,
       viewerPartnerId: req.auth.sub,
       limit: query.limit,
     });
@@ -526,6 +928,21 @@ partnerRouter.get("/leads/:leadId", requireAuth, requireRole("partner"), (req, r
   }
 });
 
+partnerRouter.get("/leads/:leadId/onsite-deduction-catalog", requireAuth, requireRole("partner"), (req, res, next) => {
+  try {
+    const lead = getPartnerLeadById(req.params.leadId, { viewerPartnerId: req.auth.sub });
+    if (!lead) throw notFound("Partner lead not found");
+    if (!partnerHasUnlockedLead(lead, req.auth.sub)) {
+      throw forbidden("Pay to unlock this lead before viewing details.");
+    }
+
+    const catalog = buildPartnerOnsiteDeductionCatalog(lead);
+    res.json(success({ catalog }));
+  } catch (err) {
+    next(err);
+  }
+});
+
 partnerRouter.post("/leads/:leadId/unlock-intent", requireAuth, requireRole("partner"), (req, res, next) => {
   try {
     const existing = getPartnerLeadById(req.params.leadId, { viewerPartnerId: req.auth.sub });
@@ -537,7 +954,7 @@ partnerRouter.post("/leads/:leadId/unlock-intent", requireAuth, requireRole("par
     }
 
     const now = nowIso();
-    const expiresAt = new Date(Date.now() + 4 * 60 * 1000).toISOString();
+    const expiresAt = new Date(Date.now() + LEAD_UNLOCK_TTL_MINUTES * 60 * 1000).toISOString();
     const result = createPartnerLeadUnlockIntent({
       leadId: existing.id,
       partnerId: req.auth.sub,
@@ -548,8 +965,8 @@ partnerRouter.post("/leads/:leadId/unlock-intent", requireAuth, requireRole("par
     });
 
     if (result.result === "NOT_FOUND") throw notFound("Partner lead not found");
-    if (result.result === "LOCKED_BY_OTHER") throw conflict("This lead payment is already pending with another partner.");
-    if (result.result === "OWNED_BY_OTHER") throw conflict("This lead is already unlocked by another partner.");
+    if (result.result === "LOCKED_BY_OTHER") throw conflict("This lead is temporarily reserved by another partner. Please try again after a few minutes.");
+    if (result.result === "OWNED_BY_OTHER") throw conflict("This lead is already owned by another partner.");
     if (result.result === "INVALID_STATUS") throw badRequest(`Lead cannot be unlocked in ${existing.status} status.`);
 
     res.json(success({
@@ -584,7 +1001,10 @@ partnerRouter.post("/lead-unlock-intents/:intentId([0-9a-fA-F-]{36})/screenshot-
       now: nowIso(),
     });
     if (!intent) throw notFound("Lead unlock payment intent not found");
-    res.json(success({ intent, message: "Screenshot marked as sent. Waiting for admin approval." }));
+    if (intent.status !== "SCREENSHOT_SENT") {
+      throw badRequest(`Payment intent is ${intent.status}. Start a new unlock payment.`);
+    }
+    res.json(success({ intent, message: "Payment confirmation sent. Waiting for admin approval." }));
   } catch (err) {
     next(err);
   }
@@ -619,7 +1039,11 @@ partnerRouter.patch("/lead-unlock-intents/:intentId([0-9a-fA-F-]{36})/verify", r
 
     if (result.result === "NOT_FOUND") throw notFound("Lead unlock payment intent not found");
     if (result.result === "LEAD_NOT_FOUND") throw notFound("Partner lead not found");
-    if (result.result === "OWNED_BY_OTHER") throw conflict("This lead is already owned by another partner.");
+    if (result.result === "OWNED_BY_OTHER") {
+      const owner = result.lead?.partnerId ? getPartnerById(result.lead.partnerId) : null;
+      const ownerName = owner?.name ? ` (${owner.name})` : "";
+      throw conflict(`This lead is already owned by another partner${ownerName}.`);
+    }
     if (result.result === "ALREADY_PROCESSED") throw badRequest(`Payment intent is already ${result.intent?.status || "processed"}.`);
 
     if (result.result === "APPROVED" && result.lead) {
@@ -732,8 +1156,8 @@ partnerRouter.patch("/leads/:leadId/status", requireAuth, requireRole("partner")
     }
 
     if (input.status === "COMPLETED") {
-      if (!existing.onsiteValidation || existing.onsiteValidation.result !== "PASS") {
-        throw badRequest("Onsite validation with PASS result is required before completion.");
+      if (!existing.onsiteValidation) {
+        throw badRequest("Onsite validation is required before completion.");
       }
       if (!existing.paymentProof) {
         throw badRequest("Payment proof metadata is required before completion.");
@@ -741,7 +1165,7 @@ partnerRouter.patch("/leads/:leadId/status", requireAuth, requireRole("partner")
     }
 
     const now = nowIso();
-    const releasesLeadToBucket = (existing.status === "ACCEPTED" && input.status === "CANCELLED") || input.status === "REJECTED";
+    const releasesLeadToBucket = (["ACCEPTED", "IN_PROGRESS"].includes(existing.status) && input.status === "CANCELLED") || input.status === "REJECTED";
     const lead = releasesLeadToBucket
       ? releasePartnerLeadToBucket({ id: existing.id, partnerId: req.auth.sub, updatedAt: now })
       : updatePartnerLeadWorkflowStatus({
@@ -804,6 +1228,81 @@ partnerRouter.patch("/leads/:leadId/status", requireAuth, requireRole("partner")
     }
 
     res.json(success({ lead: finalLead }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+partnerRouter.patch("/leads/:leadId/reschedule", requireAuth, requireRole("partner"), (req, res, next) => {
+  try {
+    const input = rescheduleLeadSchema.parse(req.body);
+    const existing = getPartnerLeadById(req.params.leadId);
+    assertPartnerCanAccessLead(existing, req);
+
+    if (existing.partnerId !== req.auth.sub) {
+      throw badRequest("Claim this lead before rescheduling.");
+    }
+
+    if (!["ACCEPTED", "IN_PROGRESS"].includes(existing.status)) {
+      throw badRequest(`Lead cannot be rescheduled from ${existing.status}.`);
+    }
+
+    const now = nowIso();
+    const pickupSchedule = {
+      ...(existing.pickupSchedule || {}),
+      primaryDate: input.primaryDate,
+      primaryTime: input.primaryTime || existing.pickupSchedule?.primaryTime || "",
+      rescheduledAt: now,
+      rescheduleReason: input.reason,
+    };
+
+    const lead = updatePartnerLeadReschedule({
+      id: existing.id,
+      partnerId: req.auth.sub,
+      pickupScheduleJson: JSON.stringify(pickupSchedule),
+      updatedAt: now,
+    });
+
+    if (!lead) {
+      throw badRequest("Unable to reschedule this lead.");
+    }
+
+    const note = input.comment ? `${input.reason} — ${input.comment}` : input.reason;
+    appendPartnerLeadDispositionEvent({
+      id: crypto.randomUUID(),
+      leadId: lead.id,
+      userSellFlowId: lead.userSellFlowId,
+      partnerId: lead.partnerId,
+      fromStatus: existing.status,
+      toStatus: lead.status,
+      dispositionKey: "RESCHEDULE_REQUESTED",
+      note,
+      actorRole: "partner",
+      actorId: req.auth.sub,
+      createdAt: now,
+    });
+
+    enqueueLeadEventOutbox({
+      id: crypto.randomUUID(),
+      eventType: "lead.rescheduled",
+      leadId: lead.id,
+      payloadJson: JSON.stringify({
+        leadId: lead.id,
+        userSellFlowId: lead.userSellFlowId,
+        leadType: lead.leadType,
+        primaryDate: pickupSchedule.primaryDate,
+        primaryTime: pickupSchedule.primaryTime,
+        reason: input.reason,
+        comment: input.comment || null,
+        partnerId: lead.partnerId,
+        pincode: lead.pincode,
+        actorRole: "partner",
+        actorId: req.auth.sub,
+      }),
+      occurredAt: now,
+    });
+
+    res.json(success({ lead }));
   } catch (err) {
     next(err);
   }
@@ -941,21 +1440,24 @@ partnerRouter.get("/active-pickups", requireAuth, requireRole("partner"), (req, 
   }
 });
 
-partnerRouter.post("/leads/:leadId/onsite-validation", requireAuth, requireRole("partner"), upload.array("photos", 6), (req, res, next) => {
+partnerRouter.post("/leads/:leadId/onsite-validation", requireAuth, requireRole("partner"), upload.array("photos", REQUIRED_ONSITE_VALIDATION_PHOTOS), (req, res, next) => {
   try {
+    rejectRemovedFields(req.body, ["result", "notes"]);
     const rawChecklist = req.body.checklist;
     const rawObservedIssues = req.body.observedIssues;
+    const rawPartnerChecks = req.body.partnerChecks;
+    const rawObservedIssueDeductions = req.body.observedIssueDeductions;
     const input = onsiteValidationSchema.parse({
-      result: req.body.result,
       checklist: typeof rawChecklist === "string" ? JSON.parse(rawChecklist) : rawChecklist || {},
+      partnerChecks: typeof rawPartnerChecks === "string" ? JSON.parse(rawPartnerChecks) : rawPartnerChecks || [],
       observedIssues: typeof rawObservedIssues === "string" ? JSON.parse(rawObservedIssues) : rawObservedIssues || [],
+      observedIssueDeductions: typeof rawObservedIssueDeductions === "string" ? JSON.parse(rawObservedIssueDeductions) : rawObservedIssueDeductions || [],
       revisedQuote: req.body.revisedQuote ? Number(req.body.revisedQuote) : undefined,
-      notes: req.body.notes,
     });
+    const checklist = normalizeOnsiteChecklist(input.checklist);
     const files = Array.isArray(req.files) ? req.files : [];
-    const isMultipartUpload = req.is("multipart/form-data");
-    if (isMultipartUpload && files.length < 6) {
-      throw badRequest("Six validation photos are required.");
+    if (files.length !== REQUIRED_ONSITE_VALIDATION_PHOTOS) {
+      throw badRequest(`Exactly ${REQUIRED_ONSITE_VALIDATION_PHOTOS} validation photos are required.`);
     }
 
     files.forEach((file) => {
@@ -1014,12 +1516,24 @@ partnerRouter.post("/leads/:leadId/onsite-validation", requireAuth, requireRole(
       };
     });
 
+    const computedQuote = computeOnsiteRequote({
+      lead: existing,
+      checklist,
+      partnerChecks: input.partnerChecks,
+      observedIssueDeductions: input.observedIssueDeductions,
+    });
+
+    if (input.revisedQuote !== undefined && Math.round(input.revisedQuote) !== computedQuote.reQuotedPrice) {
+      throw badRequest("Re quoted price must match backend computed amount.");
+    }
+
+    checklist.__partnerChecks = JSON.stringify(input.partnerChecks.length ? input.partnerChecks : parsePartnerChecksFromChecklist(checklist));
+    checklist.__deductions = JSON.stringify(computedQuote);
+
     const payload = {
-      result: input.result,
-      checklist: input.checklist,
+      checklist,
       observedIssues: input.observedIssues,
-      revisedQuote: input.revisedQuote ?? null,
-      notes: input.notes || null,
+      revisedQuote: computedQuote.reQuotedPrice,
       photoAssets,
       updatedBy: req.auth.sub,
       updatedAt: now,
@@ -1041,8 +1555,8 @@ partnerRouter.post("/leads/:leadId/onsite-validation", requireAuth, requireRole(
       partnerId: existing.partnerId,
       fromStatus: existing.status,
       toStatus: existing.status,
-      dispositionKey: input.result === "PASS" ? "ONSITE_VALIDATED" : "ONSITE_FAILED",
-      note: input.notes || null,
+      dispositionKey: "ONSITE_VALIDATED",
+      note: null,
       actorRole: "partner",
       actorId: req.auth.sub,
       createdAt: now,
@@ -1058,7 +1572,7 @@ partnerRouter.post("/leads/:leadId/onsite-validation", requireAuth, requireRole(
         leadType: lead.leadType,
         fromStatus: existing.status,
         toStatus: lead.status,
-        dispositionKey: input.result === "PASS" ? "ONSITE_VALIDATED" : "ONSITE_FAILED",
+        dispositionKey: "ONSITE_VALIDATED",
         partnerId: lead.partnerId,
         pincode: lead.pincode,
         actorRole: "partner",
@@ -1075,6 +1589,7 @@ partnerRouter.post("/leads/:leadId/onsite-validation", requireAuth, requireRole(
 
 partnerRouter.post("/leads/:leadId/payment-proof/metadata", requireAuth, requireRole("partner"), upload.single("file"), (req, res, next) => {
   try {
+    rejectRemovedFields(req.body, ["transactionRef", "notes"]);
     const input = paymentProofMetadataSchema.parse(
       req.file
         ? {
@@ -1083,8 +1598,6 @@ partnerRouter.post("/leads/:leadId/payment-proof/metadata", requireAuth, require
             sizeBytes: req.file.size,
             amountCollected: Number(req.body.amountCollected),
             paymentMode: req.body.paymentMode,
-            transactionRef: req.body.transactionRef,
-            notes: req.body.notes,
           }
         : {
             ...req.body,
@@ -1150,8 +1663,6 @@ partnerRouter.post("/leads/:leadId/payment-proof/metadata", requireAuth, require
       sizeBytes: input.sizeBytes,
       amountCollected: input.amountCollected,
       paymentMode: input.paymentMode,
-      transactionRef: input.transactionRef || null,
-      notes: input.notes || null,
       storageProvider: media ? "LOCAL_DISK" : "LOCAL_PLACEHOLDER",
       storageKey,
       mediaAssetId: media?.id || null,
@@ -1175,7 +1686,7 @@ partnerRouter.post("/leads/:leadId/payment-proof/metadata", requireAuth, require
       fromStatus: existing.status,
       toStatus: existing.status,
       dispositionKey: "PAYMENT_PROOF_SUBMITTED",
-      note: input.transactionRef || null,
+      note: null,
       actorRole: "partner",
       actorId: req.auth.sub,
       createdAt: now,
@@ -1222,6 +1733,7 @@ partnerRouter.post("/leads/:leadId/payment-proof/metadata", requireAuth, require
 
 partnerRouter.post("/leads/:leadId/completion", requireAuth, requireRole("partner"), (req, res, next) => {
   try {
+    rejectRemovedFields(req.body, ["remarks"]);
     const input = completionSchema.parse(req.body);
     const existing = getPartnerLeadById(req.params.leadId);
     assertPartnerCanAccessLead(existing, req);
@@ -1234,16 +1746,22 @@ partnerRouter.post("/leads/:leadId/completion", requireAuth, requireRole("partne
       throw badRequest("Lead must be IN_PROGRESS before completion.");
     }
 
-    if (!existing.onsiteValidation || existing.onsiteValidation.result !== "PASS") {
-      throw badRequest("Onsite validation with PASS result is required before completion.");
+    if (!existing.onsiteValidation) {
+      throw badRequest("Onsite validation is required before completion.");
     }
 
     if (!existing.paymentProof) {
       throw badRequest("Payment proof metadata is required before completion.");
     }
 
+    const expectedFinalAmount = Number(existing.onsiteValidation?.revisedQuote);
+    if (Number.isFinite(expectedFinalAmount) && Math.round(input.finalAmount) !== Math.round(expectedFinalAmount)) {
+      throw badRequest("Final amount must match the backend computed re quoted price.");
+    }
+
     const now = nowIso();
     const partner = getPartnerById(req.auth.sub);
+    const finalAmount = Number.isFinite(expectedFinalAmount) ? Math.round(expectedFinalAmount) : input.finalAmount;
     const invoice = {
       id: `invoice-${existing.id}`,
       leadId: existing.id,
@@ -1251,12 +1769,11 @@ partnerRouter.post("/leads/:leadId/completion", requireAuth, requireRole("partne
       status: "DEAL_CLOSED",
       modelName: existing.selectedModel?.modelName || null,
       listedPrice: existing.quote?.sellingPrice ?? existing.selectedModel?.listedPrice ?? 0,
-      finalAmount: input.finalAmount,
-      deductions: existing.onsiteValidation?.checklist?.__deductions ? JSON.parse(existing.onsiteValidation.checklist.__deductions) : null,
+      finalAmount,
+      deductions: normalizeInvoiceDeductions(existing.onsiteValidation?.checklist?.__deductions),
       payment: existing.paymentProof ? {
         amountCollected: existing.paymentProof.amountCollected,
         paymentMode: existing.paymentProof.paymentMode,
-        transactionRef: existing.paymentProof.transactionRef || null,
         submittedAt: existing.paymentProof.submittedAt,
       } : null,
       partner: {
@@ -1269,8 +1786,7 @@ partnerRouter.post("/leads/:leadId/completion", requireAuth, requireRole("partne
     const completionPayload = {
       completionCode: input.completionCode || null,
       handoverChecklist: input.handoverChecklist,
-      finalAmount: input.finalAmount,
-      remarks: input.remarks || null,
+      finalAmount,
       invoice,
       completedBy: req.auth.sub,
       completedAt: now,
@@ -1301,7 +1817,7 @@ partnerRouter.post("/leads/:leadId/completion", requireAuth, requireRole("partne
       fromStatus: existing.status,
       toStatus: "COMPLETED",
       dispositionKey: "COMPLETED",
-      note: input.remarks || null,
+      note: null,
       actorRole: "partner",
       actorId: req.auth.sub,
       createdAt: now,

@@ -47,7 +47,7 @@ function getLeadUnlockPrice(lead: PartnerLead) {
 }
 
 function isUnlockApproved(lead: PartnerLead, currentPartnerId: string) {
-  if (lead.partnerId === currentPartnerId && ["ACCEPTED", "IN_PROGRESS", "COMPLETED"].includes(lead.status)) return true;
+  if (lead.partnerId === currentPartnerId && ["CLAIMED", "ACCEPTED", "IN_PROGRESS", "COMPLETED"].includes(lead.status)) return true;
   return lead.unlockOrder?.partnerId === currentPartnerId && ["APPROVED", "CLOSED"].includes(lead.unlockOrder.status);
 }
 
@@ -224,8 +224,9 @@ function LeadBucketContent() {
           ☰
         </Link>
         <Link to="/partner-page" className="partner-subpage-logo" aria-label="Go to partner dashboard">
-          <img src="/logo.png" alt="GadgetPe" />
+          GadgetPe
         </Link>
+        <img src="/logo.png" alt="" className="gadgetpe-corner-logo partner-subpage-corner-logo" aria-hidden="true" />
       </div>
       <section className="partner-simple-card partner-lead-card lead-bucket-card">
         <h1>Lead Bucket</h1>
@@ -261,12 +262,13 @@ function LeadBucketContent() {
                 pageRows.map((row, index) => {
                   const isUnlocked = isUnlockApproved(row, currentPartnerId);
                   const isPending = isUnlockPending(row, currentPartnerId);
+                  const pendingStatus = isPending ? row.unlockOrder?.status : null;
                   const isLocked = !isUnlocked;
                   const unlockPrice = getLeadUnlockPrice(row);
                   const isUnlocking = unlockingLeadId === row.id;
                   const isCancelling = cancellingLeadId === row.id;
                   const canCancel = isUnlocked && row.status === "ACCEPTED" && currentPartnerId && row.partnerId === currentPartnerId;
-                  const canUnlock = row.status === "AVAILABLE" || (row.status === "CLAIMED" && row.partnerId === currentPartnerId);
+                  const canUnlock = !["CANCELLED", "REJECTED", "COMPLETED"].includes(row.status);
 
                   return (
                     <tr key={`${row.id}-${index}`}>
@@ -282,8 +284,17 @@ function LeadBucketContent() {
                       <td data-label="Actions" className="lead-bucket-action-cell">
                         <div className="lead-decision-row lead-bucket-action-row" style={{ marginTop: 0 }}>
                           {isPending ? (
-                            <button type="button" className="lead-pending-btn lead-bucket-pending-btn" disabled>
-                              Admin approval pending
+                            <button
+                              type="button"
+                              className="lead-pending-btn lead-bucket-pending-btn"
+                              onClick={() => {
+                                if (pendingStatus === "PENDING_PAYMENT" && row.unlockOrder?.id) {
+                                  void navigate({ to: "/Lead-bucket/Unlock-payment", search: { intentId: row.unlockOrder.id, leadId: row.id } });
+                                }
+                              }}
+                              disabled={pendingStatus !== "PENDING_PAYMENT" || !row.unlockOrder?.id}
+                            >
+                              {pendingStatus === "PENDING_PAYMENT" ? "Continue Payment" : "Admin approval pending"}
                             </button>
                           ) : isLocked ? (
                             <>

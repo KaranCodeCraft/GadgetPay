@@ -14,7 +14,8 @@ export const Route = createFileRoute("/Lead-bucket/Unlock-payment")({
 
 const PARTNER_TOKEN_KEY = "gadgetpe_partner_access_token";
 const LEGACY_PARTNER_TOKEN_KEY = "gadgetpe_access_token";
-const QR_DISPLAY_MS = 4 * 60 * 1000;
+const QR_DISPLAY_MS = 5 * 60 * 1000;
+const QR_DISPLAY_MINUTES = 5;
 
 function getPartnerToken() {
   return localStorage.getItem(PARTNER_TOKEN_KEY) || localStorage.getItem(LEGACY_PARTNER_TOKEN_KEY);
@@ -36,21 +37,24 @@ function LeadUnlockPaymentPage() {
   const [qrVisibleUntil, setQrVisibleUntil] = useState(() => Date.now() + QR_DISPLAY_MS);
   const [waitingForAdmin, setWaitingForAdmin] = useState(false);
   const [expiredNotified, setExpiredNotified] = useState(false);
+  const [rejectedNotified, setRejectedNotified] = useState(false);
 
   const intentId = search.intentId || "";
   const leadId = search.leadId || "";
   const isBackendExpired = intent?.status === "EXPIRED";
-  const isExpired = isBackendExpired || remainingMs <= 0;
+  const isAwaitingAdmin = intent?.status === "SCREENSHOT_SENT";
+  const isExpired = !isAwaitingAdmin && (isBackendExpired || remainingMs <= 0);
   const isApproved = intent?.status === "APPROVED" || intent?.status === "CLOSED";
+  const isTerminal = isApproved || intent?.status === "REJECTED" || intent?.status === "EXPIRED";
 
   const statusText = useMemo(() => {
     if (!intent) return "Preparing payment intent";
     if (intent.status === "APPROVED" || intent.status === "CLOSED") return "Payment approved";
     if (intent.status === "REJECTED") return "Payment rejected";
     if (intent.status === "EXPIRED") return "Payment expired. Try again";
-    if (isExpired) return "QR expired";
     if (waitingForAdmin || intent.status === "SCREENSHOT_SENT") return "Waiting for admin approval";
-    return "Complete payment and confirm for admin approval";
+    if (isExpired) return "Payment window expired. Try again";
+    return "Complete payment and confirm for admin approval (screenshot optional)";
   }, [intent, isExpired, waitingForAdmin]);
 
   const loadIntent = async (options: { redirectOnApprove?: boolean } = {}) => {
@@ -114,12 +118,12 @@ function LeadUnlockPaymentPage() {
   }, [qrVisibleUntil]);
 
   useEffect(() => {
-    if (!intentId || isApproved) return;
+    if (!intentId || isTerminal) return;
     const poller = window.setInterval(() => {
       void loadIntent({ redirectOnApprove: true });
     }, 5000);
     return () => window.clearInterval(poller);
-  }, [intentId, isApproved]);
+  }, [intentId, isTerminal]);
 
   useEffect(() => {
     if (intent?.status === "EXPIRED" && !expiredNotified) {
@@ -132,30 +136,41 @@ function LeadUnlockPaymentPage() {
     }
   }, [intent?.status, expiredNotified]);
 
+  useEffect(() => {
+    if (intent?.status === "REJECTED" && !rejectedNotified) {
+      toast.error("Payment rejected. Please try again.");
+      setRejectedNotified(true);
+      return;
+    }
+    if (intent?.status && intent.status !== "REJECTED") {
+      setRejectedNotified(false);
+    }
+  }, [intent?.status, rejectedNotified]);
+
   const handleConfirmPayment = async () => {
     const token = getPartnerToken();
     if (!token || !intentId) return;
 
     activateRoleSession("partner");
 
-    setWaitingForAdmin(true);
+    if (isExpired) {
+      toast.error("Payment window expired. Please unlock this lead again.");
+      return;
+    }
+
     setLoading(true);
     try {
       const result = await markLeadUnlockScreenshotSent(token, intentId);
       setIntent(result.intent);
-      toast.success("Payment confirmation sent. Waiting for admin approval.");
+      setWaitingForAdmin(true);
+      toast.success("Payment confirmation sent. Screenshot is optional. Waiting for admin approval.");
       await navigate({ to: "/Lead-bucket" });
     } catch (err) {
+      setWaitingForAdmin(false);
       toast.error(err instanceof Error ? err.message : "Unable to confirm payment.");
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleReshowQr = () => {
-    const nextVisibleUntil = Date.now() + QR_DISPLAY_MS;
-    setQrVisibleUntil(nextVisibleUntil);
-    setRemainingMs(QR_DISPLAY_MS);
   };
 
   return (
@@ -180,10 +195,10 @@ function LeadUnlockPaymentPage() {
           </div>
 
           <h2 style={{ marginTop: 16 }}>{formatRemaining(remainingMs)}</h2>
-          <p className="lead-hint">QR will be masked after 4 minutes.</p>
+          <p className="lead-hint">Payment window closes after {QR_DISPLAY_MINUTES} minutes.</p>
 
           <div className="lead-decision-row" style={{ justifyContent: "center" }}>
-            {isBackendExpired ? (
+            {isExpired || intent?.status === "REJECTED" ? (
               <button
                 type="button"
                 className="lead-book-btn"
@@ -192,15 +207,11 @@ function LeadUnlockPaymentPage() {
                 }}
                 disabled={loading || isApproved}
               >
-                Payment Expired. Try Again
-              </button>
-            ) : isExpired ? (
-              <button type="button" className="lead-book-btn" onClick={handleReshowQr} disabled={isApproved || intent?.status === "REJECTED"}>
-                Re-show QR
+                Try Again
               </button>
             ) : null}
-            <button type="button" className="lead-book-btn" onClick={handleConfirmPayment} disabled={loading || isApproved || intent?.status === "REJECTED" || isBackendExpired}>
-              {loading ? "Confirming..." : "Confirm Payment"}
+            <button type="button" className="lead-book-btn" onClick={handleConfirmPayment} disabled={loading || isApproved || intent?.status === "REJECTED" || isBackendExpired || isExpired || isAwaitingAdmin}>
+              {loading ? "Confirming..." : "Confirm Payment (Screenshot Optional)"}
             </button>
           </div>
 

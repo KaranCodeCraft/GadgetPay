@@ -10,6 +10,7 @@ import {
   type UserSellFlow,
   type UserSellFlowLeadStatus,
 } from "../lib/api/gadgetpe-client";
+import { getAvailableTimeSlotsForDate, getDateKeyInTimeZone, parsePickupTimeSlotBoundary, PICKUP_TIME_SLOTS } from "../lib/pickup-slots";
 
 export const Route = createFileRoute("/user/active-orders")({
   component: UserActiveOrdersPage,
@@ -18,32 +19,11 @@ export const Route = createFileRoute("/user/active-orders")({
 const USER_TOKEN_KEY = "gadgetpe_user_access_token";
 const USER_REFRESH_KEY = "gadgetpe_user_refresh_token";
 
-const TIME_SLOTS = [
-  "8:00 AM - 10:00 AM",
-  "10:00 AM - 12:00 PM",
-  "12:00 PM - 2:00 PM",
-  "2:00 PM - 4:00 PM",
-  "4:00 PM - 6:00 PM",
-];
-
-function getSlotStartHourAndMinute(primaryTime: string) {
-  const firstWindow = primaryTime.split("-")[0]?.trim() || primaryTime.trim();
-  const match = firstWindow.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
-  if (!match) return null;
-
-  const hourRaw = Number(match[1]);
-  const minute = Number(match[2]);
-  const meridiem = match[3].toUpperCase();
-  const hour = (hourRaw % 12) + (meridiem === "PM" ? 12 : 0);
-
-  return { hour, minute };
-}
-
 function canModify(primaryDate: string, primaryTime: string): boolean {
   const pickupDate = new Date(primaryDate);
   if (Number.isNaN(pickupDate.getTime())) return false;
 
-  const slotStart = getSlotStartHourAndMinute(primaryTime);
+  const slotStart = parsePickupTimeSlotBoundary(primaryTime, "start");
   if (slotStart) {
     pickupDate.setHours(slotStart.hour, slotStart.minute, 0, 0);
   }
@@ -65,6 +45,52 @@ type RescheduleForm = {
   alternateDate: string;
   alternateTime: string;
 };
+
+function getNextDateInputValue(dateInput: string) {
+  const date = new Date(`${dateInput}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date.toISOString().split("T")[0];
+}
+
+function sanitizeRescheduleForm(form: RescheduleForm): RescheduleForm {
+  const alternateDate = form.alternateDate < form.primaryDate ? form.primaryDate : form.alternateDate;
+  const primarySlots = getAvailableTimeSlotsForDate(form.primaryDate);
+  const primaryTime = primarySlots.includes(form.primaryTime) ? form.primaryTime : (primarySlots[0] ?? "");
+  const alternateSlots = getAvailableTimeSlotsForDate(alternateDate);
+  const alternateTime = alternateSlots.includes(form.alternateTime) ? form.alternateTime : (alternateSlots[0] ?? "");
+
+  return {
+    ...form,
+    primaryDate: form.primaryDate,
+    primaryTime,
+    alternateDate,
+    alternateTime,
+  };
+}
+
+function buildDefaultRescheduleForm(todayStr: string): RescheduleForm {
+  const todaySlots = getAvailableTimeSlotsForDate(todayStr);
+  const primaryDate = todaySlots.length > 0 ? todayStr : getNextDateInputValue(todayStr);
+  const primarySlots = getAvailableTimeSlotsForDate(primaryDate);
+  const primaryTime = primarySlots[0] ?? "";
+
+  let alternateDate = primaryDate;
+  let alternateSlots = getAvailableTimeSlotsForDate(alternateDate);
+  let alternateTime = alternateSlots.find((slot) => slot !== primaryTime) ?? "";
+
+  if (!alternateTime) {
+    alternateDate = getNextDateInputValue(primaryDate);
+    alternateSlots = getAvailableTimeSlotsForDate(alternateDate);
+    alternateTime = alternateSlots[0] ?? "";
+  }
+
+  return {
+    primaryDate,
+    primaryTime,
+    alternateDate,
+    alternateTime,
+  };
+}
 
 function UserActiveOrdersPage() {
   const [flows, setFlows] = useState<UserSellFlow[]>([]);
@@ -146,13 +172,17 @@ function UserActiveOrdersPage() {
   };
 
   const updateForm = (flowId: string, key: keyof RescheduleForm, value: string) => {
-    setRescheduleForm((prev) => ({
-      ...prev,
-      [flowId]: { ...prev[flowId], [key]: value } as RescheduleForm,
-    }));
+    setRescheduleForm((prev) => {
+      const current = prev[flowId] ?? buildDefaultRescheduleForm(todayStr);
+      const next = sanitizeRescheduleForm({ ...current, [key]: value } as RescheduleForm);
+      return {
+        ...prev,
+        [flowId]: next,
+      };
+    });
   };
 
-  const todayStr = new Date().toISOString().split("T")[0];
+  const todayStr = getDateKeyInTimeZone(new Date());
 
   return (
     <main className="user-seller-page">
@@ -184,7 +214,7 @@ function UserActiveOrdersPage() {
           <div style={{ textAlign: "center", padding: "48px 0", color: "#7a92a8" }}>
             <PackageCheck size={48} color="#d0dce8" style={{ marginBottom: 12 }} />
             <p style={{ margin: 0, fontWeight: 500 }}>No active orders</p>
-            <p style={{ fontSize: 13, marginTop: 6 }}>Your scheduled pickups will appear here.</p>
+            <p style={{ fontSize: 13, marginTop: 6 }}>Your scheduled pickups will appear here. Expired pickups move to Closed Orders.</p>
             <Link to="/user/sell-phone" style={{ display: "inline-block", marginTop: 16, color: "#16a387", fontWeight: 600, textDecoration: "none" }}>
               Sell a Device →
             </Link>
@@ -275,7 +305,7 @@ function UserActiveOrdersPage() {
                     onClick={() => setRescheduleForm((prev) =>
                       prev[flow.id]
                         ? (({ [flow.id]: _removed, ...rest }) => rest)(prev)
-                        : { ...prev, [flow.id]: { primaryDate: todayStr, primaryTime: TIME_SLOTS[1], alternateDate: todayStr, alternateTime: TIME_SLOTS[2] } }
+                        : { ...prev, [flow.id]: buildDefaultRescheduleForm(todayStr) }
                     )}
                   >
                     <RotateCcw size={14} />
@@ -321,6 +351,10 @@ function UserActiveOrdersPage() {
                 {isRescheduling && (
                   <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
                     <p style={{ margin: 0, fontWeight: 600, fontSize: 14, color: "#0f1f30" }}>Reschedule Pickup</p>
+                    {(() => {
+                      const primarySlots = getAvailableTimeSlotsForDate(rescheduleForm[flow.id]?.primaryDate ?? todayStr);
+                      const alternateSlots = getAvailableTimeSlotsForDate(rescheduleForm[flow.id]?.alternateDate ?? todayStr);
+                      return (
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                       <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 13 }}>
                         Primary Date
@@ -339,7 +373,8 @@ function UserActiveOrdersPage() {
                           onChange={(e) => updateForm(flow.id, "primaryTime", e.target.value)}
                           style={{ padding: "7px 10px", borderRadius: 7, border: "1.5px solid #e2e8f0", fontSize: 13, background: "#fff" }}
                         >
-                          {TIME_SLOTS.map((s) => <option key={s} value={s}>{s}</option>)}
+                          {primarySlots.length === 0 ? <option value="">No slots left for today</option> : null}
+                          {primarySlots.map((s) => <option key={s} value={s}>{s}</option>)}
                         </select>
                       </label>
                       <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 13 }}>
@@ -359,10 +394,13 @@ function UserActiveOrdersPage() {
                           onChange={(e) => updateForm(flow.id, "alternateTime", e.target.value)}
                           style={{ padding: "7px 10px", borderRadius: 7, border: "1.5px solid #e2e8f0", fontSize: 13, background: "#fff" }}
                         >
-                          {TIME_SLOTS.map((s) => <option key={s} value={s}>{s}</option>)}
+                          {alternateSlots.length === 0 ? <option value="">No slots left for today</option> : null}
+                          {alternateSlots.map((s) => <option key={s} value={s}>{s}</option>)}
                         </select>
                       </label>
                     </div>
+                      );
+                    })()}
                     <div style={{ display: "flex", gap: 8 }}>
                       <button
                         type="button"

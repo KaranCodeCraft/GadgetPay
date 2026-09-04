@@ -1,11 +1,17 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { getUserMe, listUserSellFlows } from "../lib/api/gadgetpe-client";
-import { ArrowLeft, Phone, User, Calendar, ShoppingBag, BadgeCheck } from "lucide-react";
+import { toast } from "sonner";
+import { ApiClientError, deleteUserAccount, ensureRoleAccessToken, getUserMe, listUserSellFlows, updateUserProfile } from "../lib/api/gadgetpe-client";
+import { clearRoleSession } from "../lib/auth/role-session";
+import { AlertTriangle, ArrowLeft, BadgeCheck, Calendar, Loader2, Menu, Pencil, Phone, Save, ShoppingBag, Trash2, User, X } from "lucide-react";
 
 const USER_TOKEN_KEY = "gadgetpe_user_access_token";
+const USER_REFRESH_KEY = "gadgetpe_user_refresh_token";
 const USER_NAME_KEY  = "gadgetpe_user_name";
 const USER_ID_KEY    = "gadgetpe_user_id";
+const USER_SCOPE_KEY = "gadgetpe_user_scope";
+const SELLING_HISTORY_STORAGE_KEY = "gadgetpe_user_selling_history";
+const USER_POST_LOGIN_SELL_MODAL_FLAG_KEY = "gadgetpe_user_post_login_sell_modal";
 
 function formatInr(v: number) {
   return new Intl.NumberFormat("en-IN").format(v);
@@ -21,14 +27,22 @@ export const Route = createFileRoute("/user/profile")({
 });
 
 function UserProfilePage() {
+  const navigate = useNavigate();
   // Synchronous init from localStorage — never shows loading state
   const [name, setName] = useState(() =>
     typeof window !== "undefined" ? (window.localStorage.getItem(USER_NAME_KEY) || "User") : "User"
   );
+  const [draftName, setDraftName] = useState(name);
+  const [editingName, setEditingName] = useState(false);
+  const [savingName, setSavingName] = useState(false);
   const [phone, setPhone] = useState<string | null>(null);
   const [createdAt, setCreatedAt] = useState<string | undefined>();
   const [salesCount, setSalesCount] = useState(0);
   const [totalValue, setTotalValue] = useState(0);
+  const [hamburgerOpen, setHamburgerOpen] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [deletingAccount, setDeletingAccount] = useState(false);
 
   useEffect(() => {
     const token = window.localStorage.getItem(USER_TOKEN_KEY);
@@ -41,7 +55,9 @@ function UserProfilePage() {
     ]).then(([meResult, flowsResult]) => {
       if (meResult.status === "fulfilled") {
         const u = meResult.value.user;
-        setName(u.name || name);
+        const fetchedName = u.name || name;
+        setName(fetchedName);
+        setDraftName(fetchedName);
         setPhone((u as unknown as Record<string, string>).phone || null);
         setCreatedAt((u as unknown as Record<string, string>).createdAt);
       }
@@ -55,14 +71,109 @@ function UserProfilePage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const handleSaveName = async () => {
+    const token = window.localStorage.getItem(USER_TOKEN_KEY);
+    if (!token) {
+      toast.error("Please login again to update your profile.");
+      return;
+    }
+
+    const nextName = draftName.trim();
+    if (nextName.length < 2) {
+      toast.error("Full name must be at least 2 characters.");
+      return;
+    }
+
+    setSavingName(true);
+    try {
+      const result = await updateUserProfile(token, { name: nextName });
+      setName(result.user.name);
+      setDraftName(result.user.name);
+      window.localStorage.setItem(USER_NAME_KEY, result.user.name);
+      setEditingName(false);
+      toast.success("Profile name updated.");
+    } catch (err) {
+      toast.error(err instanceof ApiClientError || err instanceof Error ? err.message : "Failed to update profile name.");
+    } finally {
+      setSavingName(false);
+    }
+  };
+
+  const clearLocalUserAccountData = () => {
+    clearRoleSession("user");
+    [
+      USER_TOKEN_KEY,
+      USER_REFRESH_KEY,
+      USER_NAME_KEY,
+      USER_ID_KEY,
+      USER_SCOPE_KEY,
+      SELLING_HISTORY_STORAGE_KEY,
+      USER_POST_LOGIN_SELL_MODAL_FLAG_KEY,
+    ].forEach((key) => window.localStorage.removeItem(key));
+  };
+
+  const handleDeleteAccount = async () => {
+    if (deleteConfirmText.trim() !== "DELETE") {
+      toast.error("Type DELETE to confirm account deletion.");
+      return;
+    }
+
+    const token = window.localStorage.getItem(USER_TOKEN_KEY) || await ensureRoleAccessToken("user");
+    if (!token) {
+      toast.error("Please login again to delete your account.");
+      return;
+    }
+
+    setDeletingAccount(true);
+    try {
+      await deleteUserAccount(token);
+      clearLocalUserAccountData();
+      toast.success("Your account has been deleted.");
+      void navigate({ to: "/user" });
+    } catch (err) {
+      toast.error(err instanceof ApiClientError || err instanceof Error ? err.message : "Failed to delete account.");
+    } finally {
+      setDeletingAccount(false);
+    }
+  };
+
   return (
     <main className="user-seller-page">
       <section className="user-dashboard-shell user-profile-shell">
-        {/* Back */}
-        <Link to="/user" className="user-profile-back">
-          <ArrowLeft size={16} />
-          <span>Back</span>
-        </Link>
+        <div className="user-profile-topbar">
+          <Link to="/user" className="user-profile-back">
+            <ArrowLeft size={16} />
+            <span>Back</span>
+          </Link>
+
+          <div className="user-profile-menu-wrap">
+            <button
+              type="button"
+              className="gp-hamburger user-profile-menu-button"
+              aria-label="Profile menu"
+              aria-expanded={hamburgerOpen}
+              onClick={() => setHamburgerOpen((prev) => !prev)}
+            >
+              <Menu size={20} color="#3d4a5c" />
+            </button>
+            {hamburgerOpen && (
+              <nav className="gp-hamburger-menu user-profile-menu" aria-label="Profile actions">
+                <button
+                  type="button"
+                  className="gp-hamburger-item gp-hm-delete"
+                  onClick={() => {
+                    setHamburgerOpen(false);
+                    setDeleteConfirmText("");
+                    setConfirmingDelete(true);
+                  }}
+                >
+                  <Trash2 size={16} />
+                  <span>Delete Account</span>
+                </button>
+              </nav>
+            )}
+          </div>
+        </div>
 
         {/* Avatar + name card */}
         <div className="user-profile-hero">
@@ -96,9 +207,39 @@ function UserProfilePage() {
 
           <div className="user-profile-detail-row">
             <User size={16} strokeWidth={1.5} />
-            <div>
-              <span className="user-profile-detail-label">Full Name</span>
-              <span className="user-profile-detail-value">{name}</span>
+            <div className="user-profile-editable-detail">
+              <div className="user-profile-editable-copy">
+                <span className="user-profile-detail-label">Full Name</span>
+                {editingName ? (
+                  <input
+                    className="user-profile-name-input"
+                    value={draftName}
+                    maxLength={80}
+                    onChange={(event) => setDraftName(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") void handleSaveName();
+                      if (event.key === "Escape") { setDraftName(name); setEditingName(false); }
+                    }}
+                    autoFocus
+                  />
+                ) : (
+                  <span className="user-profile-detail-value">{name}</span>
+                )}
+              </div>
+              {editingName ? (
+                <div className="user-profile-edit-actions">
+                  <button type="button" className="user-profile-icon-button" disabled={savingName} onClick={() => void handleSaveName()} aria-label="Save full name">
+                    <Save size={14} />
+                  </button>
+                  <button type="button" className="user-profile-icon-button" disabled={savingName} onClick={() => { setDraftName(name); setEditingName(false); }} aria-label="Cancel editing full name">
+                    <X size={14} />
+                  </button>
+                </div>
+              ) : (
+                <button type="button" className="user-profile-icon-button" onClick={() => setEditingName(true)} aria-label="Edit full name">
+                  <Pencil size={14} />
+                </button>
+              )}
             </div>
           </div>
 
@@ -132,6 +273,49 @@ function UserProfilePage() {
         </div>
         */}
       </section>
+
+      {confirmingDelete && (
+        <div className="user-auth-overlay" role="presentation">
+          <div className="user-auth-card user-delete-account-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-account-title">
+            <div className="user-delete-account-icon"><AlertTriangle size={22} /></div>
+            <h2 id="delete-account-title">Delete account</h2>
+            <p>
+              This permanently deletes your seller account, profile details, saved sessions, sale flows, pickup leads, and related account records.
+            </p>
+            <label>
+              Type DELETE to confirm
+              <input
+                value={deleteConfirmText}
+                onChange={(event) => setDeleteConfirmText(event.target.value)}
+                autoComplete="off"
+                disabled={deletingAccount}
+              />
+            </label>
+            <div className="user-delete-account-actions">
+              <button
+                type="button"
+                className="user-auth-cancel"
+                disabled={deletingAccount}
+                onClick={() => {
+                  setConfirmingDelete(false);
+                  setDeleteConfirmText("");
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="user-delete-account-confirm"
+                disabled={deletingAccount || deleteConfirmText.trim() !== "DELETE"}
+                onClick={() => void handleDeleteAccount()}
+              >
+                {deletingAccount ? <Loader2 size={16} className="user-delete-account-spinner" /> : <Trash2 size={16} />}
+                <span>{deletingAccount ? "Deleting..." : "Delete Account"}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

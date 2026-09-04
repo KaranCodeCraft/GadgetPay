@@ -91,6 +91,59 @@ paths:
       responses:
         '200':
           description: Partner context
+  /user/me:
+    get:
+      summary: Get authenticated user profile
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: User profile
+        '404':
+          description: User account not found
+    patch:
+      summary: Update authenticated user profile
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  minLength: 2
+                  maxLength: 80
+      responses:
+        '200':
+          description: User profile updated
+        '404':
+          description: User account not found
+    delete:
+      summary: Permanently delete authenticated user account and related user data
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirm]
+              properties:
+                confirm:
+                  type: string
+                  enum: [DELETE]
+      responses:
+        '200':
+          description: Account deleted
+        '400':
+          description: Confirmation text missing or invalid
+        '404':
+          description: User account not found
   /partner/kyc/metadata:
     post:
       summary: Store partner KYC file metadata and create pending verification record

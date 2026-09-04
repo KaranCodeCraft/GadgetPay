@@ -8,6 +8,7 @@ export const Route = createFileRoute("/user/closed-orders")({
 });
 
 const USER_TOKEN_KEY = "gadgetpe_user_access_token";
+const AUTO_EXPIRED_PICKUP_REASONS = new Set(["AUTO_EXPIRED_PICKUP_SLOT", "AUTO_EXPIRED_ALL_SLOTS"]);
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
@@ -17,7 +18,13 @@ function formatInr(n: number) {
   return n.toLocaleString("en-IN");
 }
 
-type EnrichedFlow = UserSellFlow & { leadStatus?: string; amountCollected?: number; paymentMode?: string };
+type FlowSnapshot = { cancellationReason?: string | null };
+type EnrichedFlow = UserSellFlow & { leadStatus?: "COMPLETED" | "CANCELLED" | "EXPIRED"; amountCollected?: number; paymentMode?: string };
+
+function isAutoExpiredFlow(flow: UserSellFlow) {
+  const snapshot = flow.flowJson && typeof flow.flowJson === "object" ? flow.flowJson as FlowSnapshot : null;
+  return AUTO_EXPIRED_PICKUP_REASONS.has(String(snapshot?.cancellationReason || ""));
+}
 
 function UserClosedOrdersPage() {
   const [flows, setFlows] = useState<EnrichedFlow[]>([]);
@@ -54,7 +61,7 @@ function UserClosedOrdersPage() {
 
         const allClosed: EnrichedFlow[] = [
           ...completedFlows,
-          ...cancelled.map((f) => ({ ...f, leadStatus: "CANCELLED" })),
+          ...cancelled.map((f) => ({ ...f, leadStatus: isAutoExpiredFlow(f) ? "EXPIRED" : "CANCELLED" } as EnrichedFlow)),
         ].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 
         setFlows(allClosed);
@@ -96,14 +103,19 @@ function UserClosedOrdersPage() {
           <div style={{ textAlign: "center", padding: "48px 0", color: "#7a92a8" }}>
             <History size={48} color="#d0dce8" style={{ marginBottom: 12 }} />
             <p style={{ margin: 0, fontWeight: 500 }}>No closed orders yet</p>
-            <p style={{ fontSize: 13, marginTop: 6 }}>Completed and cancelled pickups will appear here.</p>
+            <p style={{ fontSize: 13, marginTop: 6 }}>Completed, cancelled and expired pickups will appear here.</p>
           </div>
         )}
 
         <div style={{ display: "flex", flexDirection: "column", gap: 14, marginTop: 8 }}>
           {flows.map((flow) => {
             const isCompleted = flow.leadStatus === "COMPLETED";
+            const isExpired = flow.leadStatus === "EXPIRED";
             const ps = flow.pickupSchedule;
+            const badgeBackground = isCompleted ? "#f0fdf4" : isExpired ? "#fff7ed" : "#fff5f5";
+            const badgeColor = isCompleted ? "#16a34a" : isExpired ? "#d97706" : "#dc2626";
+            const badgeBorder = isCompleted ? "#bbf7d0" : isExpired ? "#fed7aa" : "#fecaca";
+            const badgeLabel = isCompleted ? "Completed" : isExpired ? "Expired" : "Cancelled";
 
             return (
               <div
@@ -126,12 +138,12 @@ function UserClosedOrdersPage() {
                     display: "inline-flex", alignItems: "center", gap: 5,
                     fontSize: 12, fontWeight: 600, padding: "3px 10px",
                     borderRadius: 999,
-                    background: isCompleted ? "#f0fdf4" : "#fff5f5",
-                    color: isCompleted ? "#16a34a" : "#dc2626",
-                    border: `1px solid ${isCompleted ? "#bbf7d0" : "#fecaca"}`,
+                    background: badgeBackground,
+                    color: badgeColor,
+                    border: `1px solid ${badgeBorder}`,
                   }}>
                     {isCompleted ? <CheckCircle size={12} /> : <Clock size={12} />}
-                    {isCompleted ? "Completed" : "Cancelled"}
+                    {badgeLabel}
                   </span>
                 </div>
 
@@ -144,6 +156,13 @@ function UserClosedOrdersPage() {
                   <div style={{ background: "#f0fdf4", borderRadius: 7, padding: "8px 12px", fontSize: 13 }}>
                     <strong style={{ color: "#16a34a" }}>Payment Received: </strong>
                     <span style={{ color: "#526171" }}>₹{formatInr(flow.amountCollected)} via {flow.paymentMode}</span>
+                  </div>
+                )}
+
+                {isExpired && (
+                  <div style={{ background: "#fff7ed", borderRadius: 7, padding: "8px 12px", fontSize: 13 }}>
+                    <strong style={{ color: "#d97706" }}>Pickup expired: </strong>
+                    <span style={{ color: "#526171" }}>No partner accepted this lead before both preferred and alternate pickup windows ended.</span>
                   </div>
                 )}
               </div>

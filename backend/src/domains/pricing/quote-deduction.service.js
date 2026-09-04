@@ -19,6 +19,11 @@ function ruleMatches(deviceDetails, rule) {
   const answerValue = getAnswerValue(deviceDetails, rule);
   if (answerValue === undefined || answerValue === null) return false;
 
+  if (Array.isArray(answerValue)) {
+    if (!rule.answerValue) return answerValue.length > 0;
+    return answerValue.some((value) => String(value) === String(rule.answerValue));
+  }
+
   if (rule.answerGroup === "physicalIssues" && !rule.answerValue) return true;
   if (!rule.answerValue) return true;
   return String(answerValue) === String(rule.answerValue);

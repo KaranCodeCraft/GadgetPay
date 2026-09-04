@@ -44,6 +44,11 @@ const PARTNER_SESSION_KEYS = [
   "gadgetpe_partner_scope",
 ];
 
+const ADMIN_SESSION_KEYS = [
+  "gadgetpe_admin_access_token",
+  "gadgetpe_admin_name",
+];
+
 type RefreshAccessTokenResponse = {
   accessToken: string;
 };
@@ -85,6 +90,17 @@ function clearPartnerSessionAndRedirect() {
   if (window.location.pathname !== "/partner") {
     window.location.assign("/partner");
   }
+}
+
+function clearAdminSessionAndRedirect() {
+  if (typeof window === "undefined") return;
+
+  ADMIN_SESSION_KEYS.forEach((key) => window.localStorage.removeItem(key));
+  if (window.localStorage.getItem("gadgetpe_active_role") === "admin") {
+    window.localStorage.removeItem("gadgetpe_active_role");
+  }
+
+  window.dispatchEvent(new Event("gadgetpe-admin-session-expired"));
 }
 
 type ApiEnvelope<T> = {
@@ -331,6 +347,8 @@ export type CatalogSeriesGroup = {
   models: CatalogModelEntry[];
 };
 
+export type CatalogDeviceType = "MOBILE" | "TABLET" | "IPAD";
+
 export type ListedPriceLookupResponse = {
   found: boolean;
   listedPrice: number | null;
@@ -366,13 +384,27 @@ export type UserSellFlowDeviceDetails = {
   sensorsAndConnectivity?: Record<string, "yes" | "no" | "na" | undefined>;
   batteryAndCharging?: Record<string, "yes" | "no" | "na" | undefined>;
   accessoriesAndOwnership?: Record<string, "yes" | "no" | "na" | undefined>;
+  metadata?: {
+    useCase?: "device-details";
+    questionnaireVersion?: string;
+    flowType?: UserSellFlowType;
+    selectedIssues?: string[];
+    selectedIssueGroups?: string[];
+    hasScreenDefectBranch?: boolean;
+    hasBodyDefectBranch?: boolean;
+    updatedAt?: string;
+  };
   [key: string]: unknown;
 };
 
 export type QuoteDeductionAnswerGroup =
   | "basicFunctionality"
+  | "warrantyAndBill"
   | "physicalIssues"
   | "nestedPhysicalIssueAnswers"
+  | "functionalProblems"
+  | "accessories"
+  | "mobileAge"
   | "cameraAndBiometrics"
   | "sensorsAndConnectivity"
   | "batteryAndCharging"
@@ -455,11 +487,12 @@ export type UserSellFlowLeadStatus = {
     id: string;
     status: PartnerLeadStatus;
     completedAt: string | null;
+    cancelledAt: string | null;
+    rejectionReason: string | null;
     completionEvent: unknown;
     paymentProof: {
       amountCollected: number;
       paymentMode: "UPI" | "BANK_TRANSFER" | "CASH" | "OTHER";
-      transactionRef: string | null;
       submittedAt: string;
       mediaUrl: string | null;
     } | null;
@@ -535,6 +568,39 @@ export type ServiceabilityUploadResponse = {
 
 export type PartnerLeadStatus = "AVAILABLE" | "CLAIMED" | "ACCEPTED" | "IN_PROGRESS" | "COMPLETED" | "REJECTED" | "CANCELLED";
 
+export type PartnerOnsiteDeductionRuleLine = {
+  ruleId: string;
+  label: string;
+  answerGroup?: string;
+  answerKey?: string;
+  answerValue?: string | null;
+  amount: number;
+};
+
+export type PartnerOnsiteDeductionField = {
+  triggerOn: "yes" | "no";
+  rules: PartnerOnsiteDeductionRuleLine[];
+};
+
+export type PartnerOnsiteDeductionCatalog = {
+  basePrice: number;
+  fields: Record<string, PartnerOnsiteDeductionField>;
+  rules?: PartnerOnsiteDeductionRuleLine[];
+};
+
+export type PartnerOnsiteValidationCheck = {
+  key: string;
+  label: string;
+  userValue: string;
+  partnerInput: "yes" | "no" | "na";
+  comment?: string | null;
+};
+
+export type PartnerObservedIssueDeduction = {
+  description: string;
+  deductionAmount: number;
+};
+
 export type PartnerLead = {
   id: string;
   userSellFlowId: string;
@@ -574,11 +640,9 @@ export type PartnerLead = {
     actorId: string;
   }>;
   onsiteValidation: {
-    result: "PASS" | "FAIL" | "NEEDS_REWORK";
     checklist: Record<string, string | number | boolean | null>;
     observedIssues: string[];
     revisedQuote: number | null;
-    notes: string | null;
     updatedBy: string;
     updatedAt: string;
   } | null;
@@ -591,8 +655,6 @@ export type PartnerLead = {
     sizeBytes: number;
     amountCollected: number;
     paymentMode: "UPI" | "BANK_TRANSFER" | "CASH" | "OTHER";
-    transactionRef: string | null;
-    notes: string | null;
     storageProvider: string;
     storageKey: string;
     mediaAssetId?: string | null;
@@ -604,11 +666,11 @@ export type PartnerLead = {
     completionCode: string | null;
     handoverChecklist: Record<string, string | number | boolean | null>;
     finalAmount: number;
-    remarks: string | null;
     completedBy: string;
     completedAt: string;
   } | null;
   completionEventAt: string | null;
+  unlockOrder?: PartnerLeadUnlockOrder | null;
 };
 
 export type PartnerLeadUnlockOrder = {
@@ -749,6 +811,10 @@ async function parseResponse<T>(response: Response): Promise<T> {
     clearPartnerSessionAndRedirect();
   }
 
+  if (response.status === 401 && activeRole === "admin") {
+    clearAdminSessionAndRedirect();
+  }
+
   const json = (await response.json().catch(() => null)) as ApiEnvelope<T> | null;
 
   if (!response.ok || !json?.success) {
@@ -871,7 +937,7 @@ export type LeadUnlockIntent = {
   leadId: string;
   partnerId: string;
   unlockPrice: number;
-  status: "PENDING" | "SCREENSHOT_SENT" | "APPROVED" | "REJECTED" | "EXPIRED";
+  status: "PENDING_PAYMENT" | "SCREENSHOT_SENT" | "APPROVED" | "REJECTED" | "EXPIRED" | "CLOSED";
   createdAt: string;
   expiresAt: string;
   screenshotSentAt?: string;
@@ -880,10 +946,30 @@ export type LeadUnlockIntent = {
   adminNote?: string;
 };
 
+export type AdminLeadUnlockIntentRow = {
+  id: string;
+  leadId: string;
+  partnerId: string;
+  userSellFlowId: string;
+  unlockPrice: number;
+  paymentMethod: string;
+  status: "PENDING_PAYMENT" | "SCREENSHOT_SENT" | "APPROVED" | "REJECTED" | "EXPIRED" | "CLOSED";
+  screenshotStatus: "NOT_SENT" | "SENT";
+  adminNote: string | null;
+  approvedBy: string | null;
+  approvedAt: string | null;
+  rejectedAt: string | null;
+  metadata: unknown;
+  createdAt: string;
+  expiresAt: string;
+  closedAt: string | null;
+  lead?: PartnerLead | null;
+};
+
 export async function createLeadUnlockIntent(
   token: string,
   leadId: string
-): Promise<{ lead: PartnerLead; intent: LeadUnlockIntent; unlockPrice: number; paymentQrUrl: string; expiresAt: string }> {
+): Promise<{ lead: PartnerLead; intent: PartnerLeadUnlockOrder; unlockPrice: number; paymentQrUrl: string; expiresAt: string }> {
   const response = await fetch(`${API_BASE}/partner/leads/${leadId}/unlock-intent`, {
     method: "POST",
     headers: {
@@ -897,7 +983,7 @@ export async function createLeadUnlockIntent(
 export async function listAdminLeadUnlockIntents(
   token: string,
   params?: { status?: string; partnerId?: string; limit?: number }
-): Promise<{ rows: LeadUnlockIntent[]; count: number }> {
+): Promise<{ rows: AdminLeadUnlockIntentRow[]; count: number }> {
   const searchParams = new URLSearchParams();
   if (params?.status) searchParams.set("status", params.status);
   if (params?.partnerId) searchParams.set("partnerId", params.partnerId);
@@ -912,16 +998,15 @@ export async function listAdminLeadUnlockIntents(
 export async function verifyAdminLeadUnlockIntent(
   token: string,
   intentId: string,
-  action: "approve" | "reject",
-  note?: string
-): Promise<{ intent: LeadUnlockIntent; lead?: PartnerLead }> {
-  const response = await fetch(`${API_BASE}/partner/lead-unlock-intents/${intentId}/verify`, {
+  input: { action: "APPROVE" | "REJECT"; note?: string },
+): Promise<{ intent: AdminLeadUnlockIntentRow; lead?: PartnerLead }> {
+  const response = await fetch(`${API_BASE}/partner/lead-unlock-intents/${encodeURIComponent(intentId)}/verify`, {
     method: "PATCH",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({ action, note }),
+    body: JSON.stringify(input),
   });
   return parseResponse(response);
 }
@@ -959,6 +1044,32 @@ export async function getUserMe(token: string): Promise<{ user: UserAuthResponse
   });
 
   return parseResponse<{ user: UserAuthResponse["user"] }>(response);
+}
+
+export async function updateUserProfile(token: string, input: { name: string }): Promise<{ user: UserAuthResponse["user"] }> {
+  const response = await fetch(`${API_BASE}/user/me`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(input),
+  });
+
+  return parseResponse<{ user: UserAuthResponse["user"] }>(response);
+}
+
+export async function deleteUserAccount(token: string): Promise<{ deleted: true }> {
+  const response = await fetch(`${API_BASE}/user/me`, {
+    method: "DELETE",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ confirm: "DELETE" }),
+  });
+
+  return parseResponse<{ deleted: true }>(response);
 }
 
 export async function createUserSellFlow(
@@ -1033,13 +1144,15 @@ export async function saveUserPickupSchedule(token: string, flowId: string, pick
   return parseResponse<{ flow: UserSellFlow }>(response);
 }
 
-export async function getCatalogBrands(): Promise<{ brands: string[] }> {
-  const response = await fetch(`${API_BASE}/pricing/catalog/brands`);
+export async function getCatalogBrands(deviceType: CatalogDeviceType): Promise<{ brands: string[] }> {
+  const params = new URLSearchParams({ deviceType });
+  const response = await fetch(`${API_BASE}/pricing/catalog/brands?${params.toString()}`);
   return parseResponse<{ brands: string[] }>(response);
 }
 
-export async function getCatalogModels(brand: string): Promise<{ brand: string; series: CatalogSeriesGroup[] }> {
-  const response = await fetch(`${API_BASE}/pricing/catalog/models?brand=${encodeURIComponent(brand)}`);
+export async function getCatalogModels(brand: string, deviceType: CatalogDeviceType): Promise<{ brand: string; series: CatalogSeriesGroup[] }> {
+  const params = new URLSearchParams({ brand, deviceType });
+  const response = await fetch(`${API_BASE}/pricing/catalog/models?${params.toString()}`);
   return parseResponse<{ brand: string; series: CatalogSeriesGroup[] }>(response);
 }
 
@@ -1118,7 +1231,40 @@ export type UserSellFlowInvoice = {
   createdAt: string;
 };
 
-export async function getUserSellFlowInvoice(token: string, flowId: string): Promise<{ invoice: UserSellFlowInvoice }> {
+export type UserDealInvoice = {
+  id: string;
+  leadId: string;
+  userSellFlowId?: string;
+  status: string;
+  modelName: string | null;
+  listedPrice: number;
+  finalAmount: number;
+  deductions?: {
+    deductionType?: string;
+    totalDeductionAmount?: number;
+    totalDeductionPercent?: number;
+    issues?: Array<{ description: string; deductRupees?: number; deductionAmount?: number; deductionPercent?: number }>;
+  } | null;
+  payment?: {
+    amountCollected: number;
+    paymentMode: string;
+    submittedAt?: string;
+  } | null;
+  partner: { id: string; name: string; phone?: string | null };
+  completedAt: string;
+  company?: { name: string; website: string };
+  purchaser?: {
+    name: string;
+    addressLine?: string | null;
+    landmark?: string | null;
+    city?: string | null;
+    pincode?: string | null;
+  };
+  serviceNumber?: string;
+  orderCreatedAt?: string | null;
+};
+
+export async function getUserSellFlowInvoice(token: string, flowId: string): Promise<{ invoice: UserDealInvoice }> {
   const response = await fetch(`${API_BASE}/user/sell-flows/${encodeURIComponent(flowId)}/invoice`, {
     headers: {
       Authorization: `Bearer ${token}`,
@@ -1127,7 +1273,7 @@ export async function getUserSellFlowInvoice(token: string, flowId: string): Pro
   return parseResponse(response);
 }
 
-export async function sendPartnerLeadCustomerOtp(token: string, leadId: string): Promise<{ message: string; otpTtlSeconds?: number }> {
+export async function sendPartnerLeadCustomerOtp(token: string, leadId: string): Promise<{ message: string; phone: string; otpTtlSeconds?: number; resendAfterSeconds?: number; devOtp?: string }> {
   const response = await fetch(`${API_BASE}/partner/leads/${encodeURIComponent(leadId)}/customer-otp/send`, {
     method: "POST",
     headers: {
@@ -1265,6 +1411,16 @@ export async function getPartnerLead(token: string, leadId: string): Promise<{ l
   return parseResponse<{ lead: PartnerLead }>(response);
 }
 
+export async function getPartnerOnsiteDeductionCatalog(token: string, leadId: string): Promise<{ catalog: PartnerOnsiteDeductionCatalog }> {
+  const response = await fetch(`${API_BASE}/partner/leads/${encodeURIComponent(leadId)}/onsite-deduction-catalog`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  return parseResponse<{ catalog: PartnerOnsiteDeductionCatalog }>(response);
+}
+
 export async function getLeadUnlockIntent(
   token: string,
   intentId: string,
@@ -1340,6 +1496,23 @@ export async function updatePartnerLeadCallStatus(
   return parseResponse<{ lead: PartnerLead }>(response);
 }
 
+export async function reschedulePartnerLead(
+  token: string,
+  leadId: string,
+  input: { reason: string; primaryDate: string; primaryTime?: string; comment?: string },
+): Promise<{ lead: PartnerLead }> {
+  const response = await fetch(`${API_BASE}/partner/leads/${encodeURIComponent(leadId)}/reschedule`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(input),
+  });
+
+  return parseResponse<{ lead: PartnerLead }>(response);
+}
+
 export async function listPartnerActivePickups(
   token: string,
   filters: { pincode?: string; limit?: number } = {},
@@ -1375,20 +1548,20 @@ export async function submitPartnerOnsiteValidation(
   token: string,
   leadId: string,
   input: {
-    result: "PASS" | "FAIL" | "NEEDS_REWORK";
     checklist: Record<string, string | number | boolean | null>;
+    partnerChecks?: PartnerOnsiteValidationCheck[];
     observedIssues?: string[];
+    observedIssueDeductions?: PartnerObservedIssueDeduction[];
     revisedQuote?: number;
-    notes?: string;
     photos: File[];
   },
 ): Promise<{ lead: PartnerLead }> {
   const formData = new FormData();
-  formData.append("result", input.result);
   formData.append("checklist", JSON.stringify(input.checklist));
+  formData.append("partnerChecks", JSON.stringify(input.partnerChecks || []));
   formData.append("observedIssues", JSON.stringify(input.observedIssues || []));
+  formData.append("observedIssueDeductions", JSON.stringify(input.observedIssueDeductions || []));
   if (typeof input.revisedQuote === "number") formData.append("revisedQuote", String(input.revisedQuote));
-  if (input.notes) formData.append("notes", input.notes);
   input.photos.forEach((photo) => formData.append("photos", photo));
 
   const response = await fetch(`${API_BASE}/partner/leads/${encodeURIComponent(leadId)}/onsite-validation`, {
@@ -1409,8 +1582,6 @@ export async function submitPartnerPaymentProofMetadata(
     file: File;
     amountCollected: number;
     paymentMode: "UPI" | "BANK_TRANSFER" | "CASH" | "OTHER";
-    transactionRef?: string;
-    notes?: string;
   },
 ): Promise<{
   lead: PartnerLead;
@@ -1426,8 +1597,6 @@ export async function submitPartnerPaymentProofMetadata(
   formData.append("file", input.file);
   formData.append("amountCollected", String(input.amountCollected));
   formData.append("paymentMode", input.paymentMode);
-  if (input.transactionRef) formData.append("transactionRef", input.transactionRef);
-  if (input.notes) formData.append("notes", input.notes);
 
   const response = await fetch(`${API_BASE}/partner/leads/${encodeURIComponent(leadId)}/payment-proof/metadata`, {
     method: "POST",
@@ -1456,7 +1625,6 @@ export async function completePartnerLead(
     completionCode?: string;
     handoverChecklist?: Record<string, string | number | boolean | null>;
     finalAmount: number;
-    remarks?: string;
   },
 ): Promise<{ lead: PartnerLead }> {
   const response = await fetch(`${API_BASE}/partner/leads/${encodeURIComponent(leadId)}/completion`, {

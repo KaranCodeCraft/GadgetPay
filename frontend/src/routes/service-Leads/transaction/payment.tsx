@@ -15,8 +15,6 @@ function ServiceLeadPaymentPage() {
   const [paymentFile, setPaymentFile] = useState<File | null>(null);
   const [amountCollected, setAmountCollected] = useState("");
   const [paymentMode, setPaymentMode] = useState<"UPI" | "BANK_TRANSFER" | "CASH" | "OTHER">("UPI");
-  const [transactionRef, setTransactionRef] = useState("");
-  const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [paymentProofUrl, setPaymentProofUrl] = useState<string | null>(null);
 
@@ -62,8 +60,6 @@ function ServiceLeadPaymentPage() {
         file: paymentFile,
         amountCollected: Number(amountCollected),
         paymentMode,
-        transactionRef: transactionRef.trim() || undefined,
-        notes: notes.trim() || undefined,
       });
       setPaymentProofUrl(result.lead.paymentProof?.mediaUrl || null);
       setPaymentDone(true);
@@ -109,16 +105,6 @@ function ServiceLeadPaymentPage() {
               <option value="CASH">CASH</option>
               <option value="OTHER">OTHER</option>
             </select>
-          </div>
-
-          <div className="lead-booking-calendar lead-field-stack">
-            <label htmlFor="payment-ref">Transaction reference</label>
-            <input id="payment-ref" type="text" value={transactionRef} onChange={(event) => setTransactionRef(event.target.value)} />
-          </div>
-
-          <div className="lead-booking-calendar lead-field-stack">
-            <label htmlFor="payment-notes">Notes</label>
-            <textarea id="payment-notes" value={notes} onChange={(event) => setNotes(event.target.value)} className="lead-textarea" />
           </div>
 
           <button type="button" className="lead-book-btn" onClick={() => { void handleSubmit(); }} disabled={saving || !paymentFile}>{saving ? "Submitting..." : "Submit Payment Proof"}</button>

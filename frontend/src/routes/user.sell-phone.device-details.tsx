@@ -1,7 +1,37 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { ArrowRight } from "lucide-react";
+import {
+  ArrowRight,
+  BatteryCharging,
+  BellOff,
+  Box,
+  Camera,
+  CircleAlert,
+  CircuitBoard,
+  Droplets,
+  Fingerprint,
+  Gauge,
+  Globe,
+  Grip,
+  Headphones,
+  Keyboard,
+  Lightbulb,
+  MessageCircleWarning,
+  MinusCircle,
+  Monitor,
+  Network,
+  Phone,
+  ScanSearch,
+  Shield,
+  Smartphone,
+  Speaker,
+  SquareDashed,
+  TriangleAlert,
+  Usb,
+  Volume2,
+  Wifi,
+} from "lucide-react";
 
 const DEVICE_DETAILS_STORAGE_KEY = "gadgetpe_user_sell_phone_device_details";
 const DEVICE_MODEL_STORAGE_KEY = "gadgetpe_user_sell_phone_selected_model";
@@ -12,6 +42,20 @@ type AnswerMap = Record<string, AnswerValue | undefined>;
 type AppleBatteryHealth = "above95" | "above85" | "at80";
 type MobileAgeOption = "below3Months" | "months3To6" | "months6To11" | "above11Months";
 type QuestionGroupKey = "basicFunctionality" | "warrantyAndBill" | "batteryAndCharging" | "accessoriesAndOwnership";
+
+type DefectChoiceOption = {
+  value: string;
+  label: string;
+  badge?: string;
+  icon?: JSX.Element;
+};
+
+type DefectSection = {
+  key: string;
+  title: string;
+  prompt: string;
+  options: DefectChoiceOption[];
+};
 
 type QuestionnaireQuestion = {
   key: string;
@@ -24,7 +68,8 @@ type SlideItem =
   | { kind: "question"; group: QuestionGroupKey; question: QuestionnaireQuestion }
   | { kind: "issue"; issue: string }
   | { kind: "appleBatteryHealth" }
-  // | { kind: "devicePanelDetail" }
+  | { kind: "screenDefectDetail" }
+  | { kind: "bodyDefectDetail" }
   | { kind: "functionalProblemsDetail" }
   | { kind: "mobileAge" }
   | { kind: "accessoriesDetail" };
@@ -37,49 +82,59 @@ const issueOptions = [
 ] as const;
 
 const issueIcons: Record<string, JSX.Element> = {
-  "Broken/scratch on device screen": (
-    <svg viewBox="0 0 80 110" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      <rect x="18" y="4" width="44" height="102" rx="7" stroke="#1a2733" strokeWidth="2"/>
-      <rect x="28" y="9" width="24" height="3" rx="1.5" stroke="#1a2733" strokeWidth="1.5"/>
-      <rect x="22" y="17" width="36" height="76" rx="2" stroke="#d0d8e0" strokeWidth="1" fill="#f8fafc"/>
-      <line x1="29" y1="22" x2="48" y2="70" stroke="#20bf97" strokeWidth="2.5" strokeLinecap="round"/>
-      <line x1="38" y1="20" x2="58" y2="68" stroke="#20bf97" strokeWidth="1.5" strokeLinecap="round"/>
-      <line x1="24" y1="38" x2="36" y2="58" stroke="#20bf97" strokeWidth="1.5" strokeLinecap="round"/>
-    </svg>
-  ),
-  "Dead Spot/Visible line and Discoloration on screen": (
-    <svg viewBox="0 0 80 110" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      <rect x="18" y="4" width="44" height="102" rx="7" stroke="#1a2733" strokeWidth="2"/>
-      <rect x="28" y="9" width="24" height="3" rx="1.5" stroke="#1a2733" strokeWidth="1.5"/>
-      <rect x="22" y="17" width="36" height="76" rx="2" stroke="#d0d8e0" strokeWidth="1" fill="#f8fafc"/>
-      <rect x="36" y="17" width="8" height="76" rx="1" fill="#20bf97" opacity="0.3"/>
-      <line x1="40" y1="17" x2="40" y2="93" stroke="#20bf97" strokeWidth="2" strokeLinecap="round"/>
-      <circle cx="40" cy="45" r="4" fill="#20bf97" opacity="0.5"/>
-      <circle cx="40" cy="62" r="3" fill="#20bf97" opacity="0.4"/>
-    </svg>
-  ),
-  "Scratch/Dent on device body": (
-    <svg viewBox="0 0 80 110" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      <rect x="18" y="4" width="44" height="102" rx="7" stroke="#1a2733" strokeWidth="2"/>
-      <rect x="28" y="9" width="24" height="3" rx="1.5" stroke="#1a2733" strokeWidth="1.5"/>
-      <rect x="22" y="17" width="36" height="76" rx="2" stroke="#d0d8e0" strokeWidth="1" fill="#f8fafc"/>
-      <path d="M18 38 Q11 44 18 50" stroke="#20bf97" strokeWidth="2.5" strokeLinecap="round"/>
-      <path d="M62 55 Q69 61 62 67" stroke="#20bf97" strokeWidth="2.5" strokeLinecap="round"/>
-      <path d="M30 100 Q34 106 40 104" stroke="#20bf97" strokeWidth="2" strokeLinecap="round"/>
-    </svg>
-  ),
-  "Device panel missing/broken": (
-    <svg viewBox="0 0 80 110" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      <path d="M25 4 L56 4 Q62 4 62 10 L62 102 Q62 106 58 106 L22 106 Q18 106 18 102 L18 10 Q18 4 25 4Z" stroke="#1a2733" strokeWidth="2"/>
-      <rect x="28" y="9" width="24" height="3" rx="1.5" stroke="#1a2733" strokeWidth="1.5"/>
-      <rect x="22" y="17" width="36" height="76" rx="2" stroke="#d0d8e0" strokeWidth="1" fill="#f8fafc"/>
-      <path d="M49 4 L62 4 L62 18 L49 4Z" fill="#f0faf7" stroke="#20bf97" strokeWidth="2" strokeLinejoin="round"/>
-      <path d="M49 4 L55 12" stroke="#20bf97" strokeWidth="2" strokeLinecap="round"/>
-      <circle cx="58" cy="20" r="5" fill="none" stroke="#20bf97" strokeWidth="1.5"/>
-      <line x1="56" y1="18" x2="60" y2="22" stroke="#20bf97" strokeWidth="1.5" strokeLinecap="round"/>
-    </svg>
-  ),
+  "Broken/scratch on device screen": <Monitor className="h-10 w-10 text-emerald-600" strokeWidth={1.8} />,
+  "Dead Spot/Visible line and Discoloration on screen": <ScanSearch className="h-10 w-10 text-emerald-600" strokeWidth={1.8} />,
+  "Scratch/Dent on device body": <Grip className="h-10 w-10 text-emerald-600" strokeWidth={1.8} />,
+  "Device panel missing/broken": <CircuitBoard className="h-10 w-10 text-emerald-600" strokeWidth={1.8} />,
 };
+
+const SCREEN_ISSUE_LABELS = new Set(issueOptions.slice(0, 2));
+const BODY_ISSUE_LABELS = new Set(issueOptions.slice(2));
+
+const screenDeadSpotOptions: DefectChoiceOption[] = [
+  { value: "largeHeavyVisibleSpots", label: "Large/ heavy visible spots on screen", badge: "1", icon: <CircleAlert className="h-8 w-8 text-emerald-600" /> },
+  { value: "threeOrMoreMinorSpots", label: "3 or more minor spots on screen", badge: "2", icon: <MessageCircleWarning className="h-8 w-8 text-emerald-600" /> },
+  { value: "oneToTwoMinorSpots", label: "1-2 minor spots on screen", badge: "3", icon: <MinusCircle className="h-8 w-8 text-emerald-600" /> },
+  { value: "noSpots", label: "No spots on screen", badge: "4", icon: <Shield className="h-8 w-8 text-emerald-600" /> },
+];
+
+const screenLineOptions: DefectChoiceOption[] = [
+  { value: "visibleLines", label: "Visible line(s) on display", badge: "1", icon: <ScanSearch className="h-8 w-8 text-emerald-600" /> },
+  { value: "fadedEdges", label: "Display faded along edges", badge: "2", icon: <TriangleAlert className="h-8 w-8 text-emerald-600" /> },
+  { value: "noLines", label: "No line(s) on Display", badge: "3", icon: <Shield className="h-8 w-8 text-emerald-600" /> },
+];
+
+const screenDiscolorationOptions: DefectChoiceOption[] = [
+  { value: "majorDiscoloration", label: "Major Discoloration", badge: "1", icon: <Droplets className="h-8 w-8 text-emerald-600" /> },
+  { value: "minorDiscoloration", label: "Minor Discoloration", badge: "2", icon: <Lightbulb className="h-8 w-8 text-emerald-600" /> },
+  { value: "noDiscoloration", label: "No Discoloration", badge: "3", icon: <Shield className="h-8 w-8 text-emerald-600" /> },
+];
+
+const screenCrackOptions: DefectChoiceOption[] = [
+  { value: "chippedOrCrackedOutsideDisplay", label: "Chipped/cracked outside display area", badge: "1", icon: <TriangleAlert className="h-8 w-8 text-emerald-600" /> },
+  { value: "moreThanTwoScratches", label: "More than 2 scratches on screen", badge: "2", icon: <ScanSearch className="h-8 w-8 text-emerald-600" /> },
+  { value: "oneToTwoScratches", label: "1-2 scratches on screen", badge: "3", icon: <SquareDashed className="h-8 w-8 text-emerald-600" /> },
+  { value: "noCracksOrScratches", label: "No cracks or scratches on screen", badge: "4", icon: <Shield className="h-8 w-8 text-emerald-600" /> },
+];
+
+const bodyScratchOptions: DefectChoiceOption[] = [
+  { value: "moreThanTwoBodyScratches", label: "More than 2 scratches", badge: "1", icon: <ScanSearch className="h-8 w-8 text-emerald-600" /> },
+  { value: "oneToTwoBodyScratches", label: "1-2 scratches", badge: "2", icon: <Phone className="h-8 w-8 text-emerald-600" /> },
+  { value: "noBodyScratches", label: "No scratches", badge: "3", icon: <Shield className="h-8 w-8 text-emerald-600" /> },
+];
+
+const bodyDentOptions: DefectChoiceOption[] = [
+  { value: "majorOrMoreThanTwoDents", label: "Major dent(s) or more than 2", badge: "1", icon: <TriangleAlert className="h-8 w-8 text-emerald-600" /> },
+  { value: "oneToTwoMinorDents", label: "1-2 minor dents", badge: "2", icon: <MessageCircleWarning className="h-8 w-8 text-emerald-600" /> },
+  { value: "noDents", label: "No dents", badge: "3", icon: <Shield className="h-8 w-8 text-emerald-600" /> },
+];
+
+const screenSections: DefectSection[] = [
+  { key: "screenDeadPixels", title: "1. Dead Pixels/Spots on Screen", prompt: "Check your device's screen for visible spots", options: screenDeadSpotOptions },
+  { key: "screenVisibleLines", title: "2. Visible Lines on Screen", prompt: "Check your device's screen for visible lines", options: screenLineOptions },
+  { key: "screenDiscoloration", title: "3. Discoloration on Screen", prompt: "Check your device's screen for discoloration", options: screenDiscolorationOptions },
+  { key: "screenCracks", title: "4. Screen cracked/ glass broken", prompt: "Check your screen glass and display area", options: screenCrackOptions },
+];
 
 const panelConditionOptions: BodyDefectOption[] = [
   {
@@ -169,6 +224,13 @@ const deviceBentOptions: BodyDefectOption[] = [
       </svg>
     ),
   },
+];
+
+const bodySections: DefectSection[] = [
+  { key: "bodyScratches", title: "1. Scratches on device Body", prompt: "Check for scratches on device body", options: bodyScratchOptions },
+  { key: "bodyDents", title: "2. Dents on device Body", prompt: "Check for dents on device body", options: bodyDentOptions },
+  { key: "bodyPanelCondition", title: "3. Device Side/Back Panel Condition", prompt: "Check your device's side & back panels", options: panelConditionOptions },
+  { key: "bodyBentCondition", title: "4. Device Bent/Screen loose", prompt: "Check if your device is bent or display screen is loose", options: deviceBentOptions },
 ];
 
 type AccessoryOption = { value: string; label: string; svg: JSX.Element };
@@ -551,6 +613,16 @@ type StoredDetails = {
   mobileAge?: MobileAgeOption;
   functionalProblems?: string[];
   accessories?: string[];
+  metadata?: {
+    useCase?: "device-details";
+    questionnaireVersion?: string;
+    flowType?: "sell-phone";
+    selectedIssues?: string[];
+    selectedIssueGroups?: string[];
+    hasScreenDefectBranch?: boolean;
+    hasBodyDefectBranch?: boolean;
+    updatedAt?: string;
+  };
   updatedAt?: string;
 };
 
@@ -601,13 +673,28 @@ function toLegacyBoolean(value: AnswerValue | undefined) {
 }
 
 function cleanNestedAnswers(selectedIssues: string[], nestedAnswers: Record<string, string>) {
-  const cleaned = selectedIssues.reduce<Record<string, string>>((cleanedAnswers, issue) => {
+  const cleaned: Record<string, string> = {};
+  for (const issue of selectedIssues) {
     const answer = nestedAnswers[issue];
-    if (answer) cleanedAnswers[issue] = answer;
-    return cleanedAnswers;
-  }, {});
-  if (nestedAnswers["panelCondition"]) cleaned["panelCondition"] = nestedAnswers["panelCondition"];
-  if (nestedAnswers["deviceBent"]) cleaned["deviceBent"] = nestedAnswers["deviceBent"];
+    if (answer) cleaned[issue] = answer;
+  }
+
+  if (hasScreenIssueSelection(selectedIssues)) {
+    for (const section of screenSections) {
+      const answer = nestedAnswers[section.key];
+      if (answer) cleaned[section.key] = answer;
+    }
+  }
+
+  if (hasBodyIssueSelection(selectedIssues)) {
+    for (const section of bodySections) {
+      const answer = nestedAnswers[section.key];
+      if (answer) cleaned[section.key] = answer;
+    }
+  }
+
+  if (nestedAnswers.panelCondition) cleaned.panelCondition = nestedAnswers.panelCondition;
+  if (nestedAnswers.deviceBent) cleaned.deviceBent = nestedAnswers.deviceBent;
   return cleaned;
 }
 
@@ -635,16 +722,49 @@ function getAccessoryOptions(isApple: boolean) {
   return accessoryOptions.filter((option) => option.value !== "originalCharger");
 }
 
-function buildSlideItems(): SlideItem[] {
-  return [
+function hasScreenIssueSelection(selectedIssues: string[]) {
+  return selectedIssues.some((issue) => SCREEN_ISSUE_LABELS.has(issue));
+}
+
+function hasBodyIssueSelection(selectedIssues: string[]) {
+  return selectedIssues.some((issue) => BODY_ISSUE_LABELS.has(issue));
+}
+
+function buildDeviceDetailsMetadata({ selectedIssues, flowType, updatedAt }: { selectedIssues: string[]; flowType: "sell-phone"; updatedAt: string; }) {
+  const selectedIssueGroups = [
+    hasScreenIssueSelection(selectedIssues) ? "screen" : null,
+    hasBodyIssueSelection(selectedIssues) ? "body" : null,
+  ].filter((group): group is string => Boolean(group));
+
+  return {
+    useCase: "device-details" as const,
+    questionnaireVersion: "sell-phone-device-details-v2",
+    flowType,
+    selectedIssues,
+    selectedIssueGroups,
+    hasScreenDefectBranch: hasScreenIssueSelection(selectedIssues),
+    hasBodyDefectBranch: hasBodyIssueSelection(selectedIssues),
+    updatedAt,
+  };
+}
+
+function buildSlideItems(selectedIssues: string[] = []): SlideItem[] {
+  const items: SlideItem[] = [
     ...basicFunctionalityQuestions.map((question) => ({ kind: "question" as const, group: "basicFunctionality" as const, question })),
     ...warrantyAndBillQuestions.map((question) => ({ kind: "question" as const, group: "warrantyAndBill" as const, question })),
     ...issueOptions.map((issue) => ({ kind: "issue" as const, issue })),
-    // { kind: "devicePanelDetail" as const },
-    { kind: "functionalProblemsDetail" as const },
-    { kind: "mobileAge" as const },
-    { kind: "accessoriesDetail" as const },
   ];
+
+  if (hasScreenIssueSelection(selectedIssues)) {
+    items.push({ kind: "screenDefectDetail" as const });
+  }
+
+  if (hasBodyIssueSelection(selectedIssues)) {
+    items.push({ kind: "bodyDefectDetail" as const });
+  }
+
+  items.push({ kind: "functionalProblemsDetail" as const }, { kind: "mobileAge" as const }, { kind: "accessoriesDetail" as const });
+  return items;
 }
 
 /** Build slides so each group lands on its own slide(s) — issues always isolated. */
@@ -678,9 +798,12 @@ function chunkSlideItems(items: SlideItem[]): SlideItem[][] {
 }
 
 function getSlideTitle(slide: SlideItem[]) {
-  // if (slide.some((item) => item.kind === "devicePanelDetail")) {
-  //   return "Device Side/Back Panel & Bent Condition";
-  // }
+  if (slide.some((item) => item.kind === "screenDefectDetail")) {
+    return "Tell us more about your device screen defects?";
+  }
+  if (slide.some((item) => item.kind === "bodyDefectDetail")) {
+    return "Tell us more about your device's body defects?";
+  }
   if (slide.some((item) => item.kind === "functionalProblemsDetail")) {
     return "Functional or Physical Problems";
   }
@@ -703,9 +826,12 @@ function getSlideTitle(slide: SlideItem[]) {
 }
 
 function getSlideDescription(slide: SlideItem[]) {
-  // if (slide.some((item) => item.kind === "devicePanelDetail")) {
-  //   return "Check your device's panel condition and physical alignment.";
-  // }
+  if (slide.some((item) => item.kind === "screenDefectDetail")) {
+    return "Because you selected screen defect. Choose the most accurate screen condition below.";
+  }
+  if (slide.some((item) => item.kind === "bodyDefectDetail")) {
+    return "Because you selected device's body defect. Choose the matching body condition below.";
+  }
   if (slide.some((item) => item.kind === "functionalProblemsDetail")) {
     return "Please choose appropriate condition to get accurate quote:";
   }
@@ -776,6 +902,74 @@ function AppleBatteryHealthGroup({ value, onChange }: { value?: AppleBatteryHeal
   );
 }
 
+function renderDefectSection({
+  section,
+  activeSlideIndex,
+  nestedAnswers,
+  setNestedAnswers,
+  selectedIssues,
+  batteryAndCharging,
+  appleBatteryHealth,
+  mobileAge,
+  functionalProblems,
+  accessories,
+  persistDeviceDetails,
+}: {
+  section: DefectSection;
+  activeSlideIndex: number;
+  nestedAnswers: Record<string, string>;
+  setNestedAnswers: (next: Record<string, string>) => void;
+  selectedIssues: string[];
+  batteryAndCharging: AnswerMap;
+  appleBatteryHealth?: AppleBatteryHealth;
+  mobileAge?: MobileAgeOption;
+  functionalProblems: string[];
+  accessories: string[];
+  persistDeviceDetails: (
+    slideIndex?: number,
+    issues?: string[],
+    nextBatteryAnswers?: AnswerMap,
+    nextAppleBatteryHealth?: AppleBatteryHealth | undefined,
+    nextMobileAge?: MobileAgeOption | undefined,
+    nextNestedAnswers?: Record<string, string>,
+    nextFunctionalProblems?: string[],
+    nextAccessories?: string[],
+  ) => StoredDetails | null;
+}) {
+  return (
+    <div key={section.key} className="user-body-defect-section">
+      <div className="user-body-defect-section-header">
+        <h3>{section.title}</h3>
+        <p>{section.prompt}</p>
+      </div>
+      <div className="user-issue-img-grid">
+        {section.options.map((opt) => {
+          const selected = nestedAnswers[section.key] === opt.value;
+          return (
+            <button
+              key={opt.value}
+              type="button"
+              className={`user-issue-img-tile${selected ? " selected" : ""}`}
+              onClick={() => {
+                const updated = { ...nestedAnswers, [section.key]: opt.value };
+                setNestedAnswers(updated);
+                persistDeviceDetails(activeSlideIndex, selectedIssues, batteryAndCharging, appleBatteryHealth, mobileAge, updated, functionalProblems, accessories);
+              }}
+              aria-pressed={selected}
+            >
+              <div className="user-issue-img-wrap">
+                {opt.icon ?? <span className="user-issue-img-fallback">{opt.badge ?? ""}</span>}
+              </div>
+              <span className="user-issue-img-label">{opt.label}</span>
+              {selected && <span className="user-issue-img-check">✓</span>}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export const Route = createFileRoute("/user/sell-phone/device-details")({
   component: UserSellPhoneDeviceDetailsPage,
 });
@@ -801,7 +995,7 @@ function UserSellPhoneDeviceDetailsPage() {
     const selectedModel = getStoredSelectedModel();
     const isAppleModel = isAppleDevice(selectedModel);
     const restoredIssues = details?.physicalIssues ?? details?.selectedIssues ?? [];
-    const initialSlides = chunkSlideItems(buildSlideItems());
+    const initialSlides = chunkSlideItems(buildSlideItems(details?.physicalIssues ?? details?.selectedIssues ?? []));
     const restoredSlide = details?.questionnaireSlide ?? (typeof details?.detailStep === "number" ? details.detailStep - 1 : 0);
 
     setStoredDetails(details);
@@ -821,7 +1015,7 @@ function UserSellPhoneDeviceDetailsPage() {
   }, []);
 
   const isApple = isAppleDevice(storedSelectedModel);
-  const slides = chunkSlideItems(buildSlideItems());
+  const slides = chunkSlideItems(buildSlideItems(selectedIssues));
   const functionalProblemOptionsForDevice = getFunctionalProblemOptions(isApple);
   const accessoryOptionsForDevice = getAccessoryOptions(isApple);
 
@@ -847,6 +1041,7 @@ function UserSellPhoneDeviceDetailsPage() {
     if (typeof window === "undefined") return null;
 
     const cleanIssueAnswers = cleanNestedAnswers(issues, nextNestedAnswers);
+    const updatedAt = new Date().toISOString();
     const details = {
       canMakeCalls: toLegacyBoolean(basicFunctionality.canMakeCalls),
       touchWorking: toLegacyBoolean(basicFunctionality.touchWorking),
@@ -866,7 +1061,8 @@ function UserSellPhoneDeviceDetailsPage() {
       mobileAge: nextMobileAge,
       functionalProblems: nextFunctionalProblems,
       accessories: nextAccessories,
-      updatedAt: new Date().toISOString(),
+      metadata: buildDeviceDetailsMetadata({ selectedIssues: issues, flowType: "sell-phone", updatedAt }),
+      updatedAt,
     } satisfies StoredDetails;
 
     window.localStorage.setItem(DEVICE_DETAILS_STORAGE_KEY, JSON.stringify(details));
@@ -957,7 +1153,8 @@ function UserSellPhoneDeviceDetailsPage() {
 
   const isSlideComplete = activeSlide.every((item) => {
     if (item.kind === "issue") return true;
-    // if (item.kind === "devicePanelDetail") return Boolean(nestedPhysicalIssueAnswers["panelCondition"] && nestedPhysicalIssueAnswers["deviceBent"]);
+    if (item.kind === "screenDefectDetail") return screenSections.every((section) => Boolean(nestedPhysicalIssueAnswers[section.key]));
+    if (item.kind === "bodyDefectDetail") return bodySections.every((section) => Boolean(nestedPhysicalIssueAnswers[section.key]));
     if (item.kind === "functionalProblemsDetail") return true;
     if (item.kind === "mobileAge") return Boolean(mobileAge);
     if (item.kind === "accessoriesDetail") return true;
@@ -969,6 +1166,8 @@ function UserSellPhoneDeviceDetailsPage() {
   const answeredCount = progressItems.filter((item) => {
     if (item.kind === "appleBatteryHealth") return Boolean(appleBatteryHealth);
     if (item.kind === "mobileAge") return Boolean(mobileAge);
+    if (item.kind === "screenDefectDetail") return screenSections.every((section) => Boolean(nestedPhysicalIssueAnswers[section.key]));
+    if (item.kind === "bodyDefectDetail") return bodySections.every((section) => Boolean(nestedPhysicalIssueAnswers[section.key]));
     return Boolean(answerMaps[item.group][item.question.key]);
   }).length;
   const totalRequiredCount = progressItems.length;
@@ -995,6 +1194,50 @@ function UserSellPhoneDeviceDetailsPage() {
 
     if (item.kind === "appleBatteryHealth") {
       return <AppleBatteryHealthGroup key="appleBatteryHealth" value={appleBatteryHealth} onChange={updateAppleBatteryHealth} />;
+    }
+
+    if (item.kind === "screenDefectDetail") {
+      return (
+        <div key="screenDefectDetail" className="user-body-defect-detail">
+          {screenSections.map((section) =>
+            renderDefectSection({
+              section,
+              activeSlideIndex,
+              nestedAnswers: nestedPhysicalIssueAnswers,
+              setNestedAnswers: setNestedPhysicalIssueAnswers,
+              selectedIssues,
+              batteryAndCharging,
+              appleBatteryHealth,
+              mobileAge,
+              functionalProblems,
+              accessories,
+              persistDeviceDetails,
+            }),
+          )}
+        </div>
+      );
+    }
+
+    if (item.kind === "bodyDefectDetail") {
+      return (
+        <div key="bodyDefectDetail" className="user-body-defect-detail">
+          {bodySections.map((section) =>
+            renderDefectSection({
+              section,
+              activeSlideIndex,
+              nestedAnswers: nestedPhysicalIssueAnswers,
+              setNestedAnswers: setNestedPhysicalIssueAnswers,
+              selectedIssues,
+              batteryAndCharging,
+              appleBatteryHealth,
+              mobileAge,
+              functionalProblems,
+              accessories,
+              persistDeviceDetails,
+            }),
+          )}
+        </div>
+      );
     }
 
     /* devicePanelDetail slide commented out

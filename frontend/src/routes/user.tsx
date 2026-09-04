@@ -1,10 +1,11 @@
 import { createFileRoute, Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
-import { Coins, Flame, History, IndianRupee, Instagram, ListChecks, Mail, MapPin, Menu, PackageCheck, PhoneCall, Search, ShieldCheck, Smartphone, Truck, UserRound } from "lucide-react";
+import { Coins, Flame, History, IndianRupee, Instagram, ListChecks, Mail, MapPin, Menu, PackageCheck, PhoneCall, Search, ShieldCheck, Smartphone, Tablet, TabletSmartphone, Truck, UserRound } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import { clearRoleSession, getActiveRole } from "../lib/auth/role-session";
 import { ApiClientError, ensureRoleAccessToken, getPincodeAvailability, logoutSession } from "../lib/api/gadgetpe-client";
 import { getBrandLogoUrl } from "../lib/brand-logos";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 export const Route = createFileRoute("/user")({
   component: UserPage,
@@ -144,6 +145,27 @@ const sellerActions = [
   { title: "Payments", description: "Review payouts, pending settlements, and UPI status.", icon: IndianRupee, to: "/user/payments" as const },
 ];
 
+const sellFlowOptions = [
+  {
+    title: "Sell Phones",
+    description: "Pick your smartphone model and get an instant quote.",
+    icon: Smartphone,
+    to: "/user/sell-phone" as const,
+  },
+  {
+    title: "Sell iPads",
+    description: "Start your iPad flow in the tablet category.",
+    icon: Tablet,
+    to: "/user/sell-tablet" as const,
+  },
+  {
+    title: "Sell Tablets",
+    description: "Sell Android and other tablets with the same flow.",
+    icon: TabletSmartphone,
+    to: "/user/sell-tablet" as const,
+  },
+];
+
 type SellingHistoryItem = {
   id?: string;
   selectedModel?: {
@@ -201,7 +223,7 @@ function UserFooter() {
     <footer className="gp-user-footer">
       <div className="gp-wrap gp-user-footer-grid">
         <div className="gp-user-footer-brand">
-          <div className="gp-user-footer-logo"><img src="/logo.png" alt="GadgetPe" style={{ height: "40px", width: "auto" }} /></div>
+          <div className="gp-user-footer-logo"><img src="/logo-dark.png" alt="GadgetPe" style={{ height: "40px", width: "auto" }} /></div>
           <h3>Turn Your Device Into Money</h3>
           <p>GadgetPe is a modern device marketplace that makes selling your old smartphones, iPads, and tablets simple, secure, and rewarding.</p>
           <div className="gp-user-footer-social" aria-label="Contact shortcuts">
@@ -249,6 +271,7 @@ function UserPage() {
   const [blockedByRole, setBlockedByRole] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [showSellModal, setShowSellModal] = useState(false);
+  const [showSellTypeModal, setShowSellTypeModal] = useState(false);
   const [showPincodeModal, setShowPincodeModal] = useState(false);
   const [hamburgerOpen, setHamburgerOpen] = useState(false);
   const [sellingHistory, setSellingHistory] = useState<SellingHistoryItem[]>([]);
@@ -490,6 +513,11 @@ function UserPage() {
     } finally {
       setIsCheckingPincode(false);
     }
+  };
+
+  const handleSellFlowSelection = (to: "/user/sell-phone" | "/user/sell-tablet") => {
+    setShowSellTypeModal(false);
+    void navigate({ to });
   };
 
   useEffect(() => {
@@ -816,7 +844,7 @@ function UserPage() {
               type="button"
               className="hero-main-cta cta-green"
               onClick={() => {
-                void navigate({ to: "/user/sell-phone" });
+                setShowSellTypeModal(true);
               }}
             >
               Sell Your Device Now
@@ -1049,6 +1077,46 @@ function UserPage() {
           </section>
         </div>
       )}
+
+      <Dialog open={showSellTypeModal} onOpenChange={setShowSellTypeModal}>
+        <DialogContent className="max-w-2xl border-slate-200 bg-white text-slate-900 shadow-2xl">
+          <DialogHeader>
+            <DialogTitle>Choose Your Device Category</DialogTitle>
+            <DialogDescription>
+              Select what you want to sell to continue to the right flow.
+            </DialogDescription>
+          </DialogHeader>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginTop: 8 }}>
+            {sellFlowOptions.map((option) => {
+              const Icon = option.icon;
+              return (
+                <button
+                  key={option.title}
+                  type="button"
+                  onClick={() => handleSellFlowSelection(option.to)}
+                  style={{
+                    textAlign: "left",
+                    borderRadius: 14,
+                    border: "1px solid #d8e2ee",
+                    background: "linear-gradient(180deg, #ffffff 0%, #f7fbff 100%)",
+                    padding: "14px 12px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 8,
+                    cursor: "pointer",
+                  }}
+                >
+                  <span style={{ width: 34, height: 34, borderRadius: 10, display: "inline-flex", alignItems: "center", justifyContent: "center", background: "#e8f7f0", color: "#1a8b6f" }}>
+                    <Icon size={18} />
+                  </span>
+                  <span style={{ fontWeight: 700, color: "#102132", fontSize: 14 }}>{option.title}</span>
+                  <span style={{ color: "#5f7285", fontSize: 12, lineHeight: 1.35 }}>{option.description}</span>
+                </button>
+              );
+            })}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {isLoggedIn && showPincodeModal && (
         <div className="user-auth-overlay" role="dialog" aria-modal="true">

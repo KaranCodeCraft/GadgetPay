@@ -13,7 +13,10 @@
     "build:frontend": "cd ../frontend && npm install && npm run build && cd ../backend && node scripts/copy-frontend.mjs",
     "build:full": "npm run check && npm run build:frontend",
     "test": "node --test test/**/*.test.mjs",
+    "repair:auto-expired:dry": "node scripts/repair-auto-expired-by-alt-slot.mjs --dry-run",
+    "repair:auto-expired:apply": "node scripts/repair-auto-expired-by-alt-slot.mjs --apply",
     "seed:partner-leads": "node scripts/seed-partner-leads.mjs",
+    "repair:lead-ownership": "node scripts/repair-lead-ownership.mjs",
     "backfill:admin-metrics": "node scripts/backfill-admin-metrics.mjs"
   },
   "dependencies": {

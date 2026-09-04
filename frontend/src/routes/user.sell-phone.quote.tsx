@@ -29,6 +29,7 @@ import {
   type UserSellFlowSelectedModel,
 } from "../lib/api/gadgetpe-client";
 import { activateRoleSession } from "../lib/auth/role-session";
+import { getAvailableTimeSlotsForDate, isTimeSlotAvailableForDate, PICKUP_TIME_SLOTS } from "../lib/pickup-slots";
 
 const DEVICE_MODEL_STORAGE_KEY = "gadgetpe_user_sell_phone_selected_model";
 const DEVICE_DETAILS_STORAGE_KEY = "gadgetpe_user_sell_phone_device_details";
@@ -43,15 +44,6 @@ const USER_NAME_KEY = "gadgetpe_user_name";
 const USER_ID_KEY = "gadgetpe_user_id";
 const USER_SCOPE_KEY = "gadgetpe_user_scope";
 const isDevOtpBypassEnabled = import.meta.env.DEV;
-
-const timeSlots = [
-  "11:00 AM - 12:00 PM",
-  "1:00 PM - 2:00 PM",
-  "2:00 PM - 3:00 PM",
-  "3:00 PM - 4:00 PM",
-  "4:00 PM - 5:00 PM",
-  "5:00 PM - 6:00 PM",
-];
 
 type SelectedModel = {
   brandSlug?: string;
@@ -259,19 +251,61 @@ function UserSellPhoneQuotePage() {
   useEffect(() => {
     const storedModel = getStoredSelectedModel();
     setSelectedModel(storedModel);
-    setQuote(null);
+
+    if (storedModel) {
+      const fallbackQuote: UserSellFlowQuote = {
+        basePrice: storedModel.listedPrice ?? 0,
+        sellingPrice: storedModel.listedPrice ?? 0,
+        totalDeduction: 0,
+        currency: "INR",
+        priceSource: "LOCAL_LISTED_PRICE",
+        validUntil: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+        deductions: [],
+      };
+
+      setQuote(getStoredJson<UserSellFlowQuote>(QUOTE_STORAGE_KEY, fallbackQuote));
+      void loadBackendQuotePreview(storedModel);
+    } else {
+      setQuote(null);
+    }
+
     setIsHydrated(true);
   }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+    const storedToken = window.localStorage.getItem(USER_TOKEN_KEY);
+    const storedUserId = window.localStorage.getItem(USER_ID_KEY) || "";
     const storedName = window.localStorage.getItem(USER_NAME_KEY) || "";
     const storedPhone = window.localStorage.getItem("gadgetpe_user_phone") || "";
     const storedScope = getStoredJson<{ pincode?: string } | null>(USER_SCOPE_KEY, null);
+    if (storedToken && storedUserId) {
+      setVerifiedToken(storedToken);
+      setVerifiedUser({ id: storedUserId, name: storedName });
+      setIsPhoneVerified(true);
+      if (storedPhone) setCallingPhoneNumber(storedPhone);
+    }
     if (storedName) setSellerName(storedName);
     if (storedPhone) setQuoteAccessPhone(storedPhone);
-    if (storedScope?.pincode) setPincode(storedScope.pincode);
+    if (storedScope?.pincode) {
+      setPincode(storedScope.pincode);
+      setValidatedPincode(storedScope.pincode);
+    }
   }, []);
+
+  useEffect(() => {
+    if (primaryTime && !isTimeSlotAvailableForDate(primaryDate, primaryTime)) {
+      setPrimaryTime("");
+      setAlternateDate(undefined);
+      setAlternateTime("");
+    }
+  }, [primaryDate, primaryTime]);
+
+  useEffect(() => {
+    if (alternateTime && !isTimeSlotAvailableForDate(alternateDate, alternateTime)) {
+      setAlternateTime("");
+    }
+  }, [alternateDate, alternateTime]);
 
   const isPrimarySlotComplete = Boolean(primaryDate && primaryTime);
   const isScheduleComplete = Boolean(primaryDate && primaryTime && alternateDate && alternateTime);
@@ -282,6 +316,8 @@ function UserSellPhoneQuotePage() {
     /^\d{6}$/.test(pincode.trim()),
   );
   const confirmedPickupText = `${formatPickupDate(primaryDate)} at ${primaryTime}`;
+  const primaryAvailableTimeSlots = getAvailableTimeSlotsForDate(primaryDate);
+  const alternateAvailableTimeSlots = getAvailableTimeSlotsForDate(alternateDate);
 
   const handleValidatePincode = async (rawPincode?: string) => {
     const trimmedPincode = (rawPincode ?? pincode).trim();
@@ -791,12 +827,13 @@ function UserSellPhoneQuotePage() {
                     <h3>Preferred pickup</h3>
                     <Calendar mode="single" selected={primaryDate} onSelect={setPrimaryDate} disabled={{ before: getToday() }} className="user-pickup-calendar" />
                     <div className="user-time-slot-grid">
-                      {timeSlots.map((slot) => (
+                      {primaryAvailableTimeSlots.map((slot) => (
                         <button key={slot} type="button" className={`user-time-slot${primaryTime === slot ? " selected" : ""}`} onClick={() => setPrimaryTime(slot)}>
                           {slot}
                         </button>
                       ))}
                     </div>
+                    {primaryDate && primaryAvailableTimeSlots.length === 0 ? <p className="user-quote-muted">No pickup slots are left for today. Choose another date.</p> : null}
                   </section>
                 ) : (
                   <section className="user-pickup-summary">
@@ -821,12 +858,13 @@ function UserSellPhoneQuotePage() {
                     <h3>Alternate pickup</h3>
                     <Calendar mode="single" selected={alternateDate} onSelect={setAlternateDate} disabled={{ before: getToday() }} className="user-pickup-calendar" />
                     <div className="user-time-slot-grid">
-                      {timeSlots.map((slot) => (
+                      {alternateAvailableTimeSlots.map((slot) => (
                         <button key={slot} type="button" className={`user-time-slot${alternateTime === slot ? " selected" : ""}`} onClick={() => setAlternateTime(slot)}>
                           {slot}
                         </button>
                       ))}
                     </div>
+                    {alternateDate && alternateAvailableTimeSlots.length === 0 ? <p className="user-quote-muted">No alternate pickup slots are left for today. Choose another date.</p> : null}
                   </section>
                 ) : null}
               </div>

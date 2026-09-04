@@ -104,8 +104,6 @@ function WorkingPincodesPage() {
     }
   };
 
-  const atLimit = pincodes.length >= 4;
-
   return (
     <main className="partner-simple-page working-pincodes-page">
       <div className="partner-subpage-topbar">
@@ -119,7 +117,7 @@ function WorkingPincodesPage() {
 
       <section className="partner-simple-card working-pincodes-card">
         <h1>Working Pincodes</h1>
-        <p className="working-pincodes-subtitle">{pincodes.length} / 4 pincodes configured</p>
+        <p className="working-pincodes-subtitle">{pincodes.length} pincodes configured</p>
 
         {loading ? (
           <p className="working-pincodes-loading">Loading...</p>
@@ -165,21 +163,20 @@ function WorkingPincodesPage() {
               setAddError(null);
             }}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !atLimit && !adding) void handleAdd();
+              if (e.key === "Enter" && !adding) void handleAdd();
             }}
-            disabled={atLimit || adding}
+            disabled={adding}
             className="working-pincodes-input"
           />
           <button
             type="button"
             className="working-pincodes-add-btn"
             onClick={() => void handleAdd()}
-            disabled={atLimit || adding}
+            disabled={adding}
           >
             {adding ? "Adding..." : "Add Pincode"}
           </button>
         </div>
-        {atLimit && <p className="working-pincodes-limit-msg">Maximum 4 pincodes reached. Remove one to add another.</p>}
         {addError ? <p className="working-pincodes-error">{addError}</p> : null}
 
         <Link to="/Lead-bucket" className="partner-simple-link working-pincodes-bucket-link">

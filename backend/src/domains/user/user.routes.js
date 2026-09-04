@@ -2,26 +2,47 @@ import crypto from "crypto";
 import { Router } from "express";
 import { z } from "zod";
 import {
-  autoAssignLeadByPincodeRoundRobin,
   appendPartnerLeadDispositionEvent,
   cancelUserSellFlow,
   createUserSellFlow,
   enqueueLeadEventOutbox,
+  deleteUserAccount,
+  expireUserSellFlow,
   getUserById,
   getPartnerLeadByFlowId,
   getUserSellFlowById,
   listUserSellFlows,
   markPartnerLeadCancelledForFlow,
+  markPartnerLeadExpiredForFlow,
+  updateUserProfile,
   updateUserSellFlow,
   upsertPartnerLeadFromUserFlow,
 } from "../../db/repository.js";
 import { badRequest, notFound } from "../../shared/http/errors.js";
 import { success } from "../../shared/http/response.js";
 import { requireAuth, requireRole } from "../../shared/middleware/auth.js";
+import { deleteMediaFile } from "../../shared/store/local-media.js";
 import { calculateUserQuote } from "../pricing/quote-deduction.service.js";
 import { getPincodeDetails } from "../serviceability/serviceability.service.js";
+import {
+  AUTO_EXPIRED_PICKUP_REASON,
+  getPickupExpiryDecision,
+  hasSameDayPickupSlotPassed,
+  parsePickupSlotBoundary,
+  PICKUP_CUTOFF_TIME_ZONE,
+} from "./pickup-expiry.js";
 
 const flowStatuses = ["DRAFT", "QUESTIONNAIRE_COMPLETED", "QUOTE_READY", "PICKUP_SCHEDULED", "CANCELLED"];
+const PICKUP_SLOT_OPTIONS = [
+  "10:00 AM - 11:00 AM",
+  "11:00 AM - 12:00 PM",
+  "12:00 PM - 1:00 PM",
+  "1:00 PM - 2:00 PM",
+  "2:00 PM - 3:00 PM",
+  "3:00 PM - 4:00 PM",
+  "4:00 PM - 5:00 PM",
+  "5:00 PM - 6:00 PM",
+];
 
 const selectedModelSchema = z.object({
   brandSlug: z.string().trim().min(1).max(80),
@@ -44,6 +65,16 @@ const deviceDetailsSchema = z.object({
   sensorsAndConnectivity: answerMapSchema.optional().default({}),
   batteryAndCharging: answerMapSchema.optional().default({}),
   accessoriesAndOwnership: answerMapSchema.optional().default({}),
+  metadata: z.object({
+    useCase: z.literal("device-details").optional(),
+    questionnaireVersion: z.string().trim().min(1).max(80).optional(),
+    flowType: z.enum(["sell-phone", "sell-tablet"]).optional(),
+    selectedIssues: z.array(z.string().trim().min(1).max(160)).optional().default([]),
+    selectedIssueGroups: z.array(z.string().trim().min(1).max(80)).optional().default([]),
+    hasScreenDefectBranch: z.boolean().optional(),
+    hasBodyDefectBranch: z.boolean().optional(),
+    updatedAt: z.string().datetime().optional(),
+  }).optional().default({}),
 }).passthrough();
 
 const pickupScheduleSchema = z.object({
@@ -80,6 +111,14 @@ const rescheduleBodySchema = z.object({
   alternateTime: z.string().trim().min(3).max(40),
 });
 
+const updateUserProfileSchema = z.object({
+  name: z.string().trim().min(2).max(80),
+});
+
+const deleteUserAccountSchema = z.object({
+  confirm: z.literal("DELETE"),
+});
+
 const listQuerySchema = z.object({
   status: z.enum(flowStatuses).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional().default(25),
@@ -88,17 +127,52 @@ const listQuerySchema = z.object({
 export const userRouter = Router();
 
 userRouter.use(requireAuth, requireRole("user"));
+userRouter.use((req, _res, next) => {
+  try {
+    const user = getUserById(req.auth.sub);
+    if (!user) throw notFound("User not found");
+    req.userAccount = user;
+    next();
+  } catch (err) {
+    next(err);
+  }
+});
 
 function nowIso() {
   return new Date().toISOString();
 }
 
+function validatePickupScheduleTiming({ primaryDate, primaryTime, alternateDate, alternateTime }) {
+  if (!PICKUP_SLOT_OPTIONS.includes(primaryTime) || !PICKUP_SLOT_OPTIONS.includes(alternateTime)) {
+    throw badRequest("Invalid pickup slot selected. Please choose a valid time window.", {
+      allowedSlots: PICKUP_SLOT_OPTIONS,
+    });
+  }
+
+  const now = new Date();
+  if (hasSameDayPickupSlotPassed(primaryDate, primaryTime, now)) {
+    throw badRequest("Selected preferred pickup slot has already passed for today. Please choose a later slot.", {
+      field: "primaryTime",
+      timeZone: PICKUP_CUTOFF_TIME_ZONE,
+    });
+  }
+
+  if (hasSameDayPickupSlotPassed(alternateDate, alternateTime, now)) {
+    throw badRequest("Selected alternate pickup slot has already passed for today. Please choose a later slot.", {
+      field: "alternateTime",
+      timeZone: PICKUP_CUTOFF_TIME_ZONE,
+    });
+  }
+
+  const alternateDateValue = new Date(alternateDate);
+  const primaryDateValue = new Date(primaryDate);
+  if (alternateDateValue.getTime() < primaryDateValue.getTime()) {
+    throw badRequest("Alternate pickup date must be on or after preferred pickup date.");
+  }
+}
+
 function getUser(req) {
-  return getUserById(req.auth.sub) || {
-    id: req.auth.sub,
-    phone: req.auth.phone || null,
-    name: "User",
-  };
+  return req.userAccount;
 }
 
 function buildFlowJson({
@@ -135,6 +209,75 @@ function buildFlowJson({
 
 function getFlowPincode(flow, pickupSchedule = null) {
   return pickupSchedule?.pincode || flow.flowJson?.servicePincode || flow.pickupSchedule?.pincode || null;
+}
+
+function maybeAutoExpireScheduledFlow(flow) {
+  if (!flow || flow.status !== "PICKUP_SCHEDULED") return flow;
+  const lead = getPartnerLeadByFlowId(flow.id);
+  if (!lead || lead.leadType !== "SERVICE_LEAD" || !["AVAILABLE", "CLAIMED"].includes(lead.status)) return flow;
+
+  const pickupSchedule = flow.pickupSchedule || lead.pickupSchedule;
+  const expiryDecision = getPickupExpiryDecision(pickupSchedule);
+  if (!expiryDecision || Date.now() <= expiryDecision.expiresAt.getTime()) return flow;
+
+  const expiryReason = expiryDecision.reason;
+  const expiryNote = expiryDecision.usesAlternateSlot
+    ? "Pickup expired before partner accepted the lead in both preferred and alternate pickup windows"
+    : "Pickup slot expired before partner accepted the lead";
+
+  const updatedAt = nowIso();
+  const expiredLead = markPartnerLeadExpiredForFlow({
+    userSellFlowId: flow.id,
+    updatedAt,
+    reason: expiryReason,
+  });
+  if (!expiredLead) return flow;
+
+  appendPartnerLeadDispositionEvent({
+    id: crypto.randomUUID(),
+    leadId: expiredLead.id,
+    userSellFlowId: expiredLead.userSellFlowId,
+    partnerId: lead.partnerId || null,
+    fromStatus: lead.status,
+    toStatus: "CANCELLED",
+    dispositionKey: expiryReason,
+    note: expiryNote,
+    actorRole: "system",
+    actorId: "auto-expiry",
+    createdAt: updatedAt,
+  });
+
+  enqueueLeadEventOutbox({
+    id: crypto.randomUUID(),
+    eventType: "lead.expired",
+    leadId: expiredLead.id,
+    payloadJson: JSON.stringify({
+      leadId: expiredLead.id,
+      userSellFlowId: expiredLead.userSellFlowId,
+      leadType: expiredLead.leadType,
+      fromStatus: lead.status,
+      toStatus: "CANCELLED",
+      dispositionKey: expiryReason,
+      partnerId: lead.partnerId || null,
+      pincode: expiredLead.pincode,
+      actorRole: "system",
+      actorId: "auto-expiry",
+      expiryEndsAt: expiryDecision.expiresAt.toISOString(),
+      usedAlternateSlot: expiryDecision.usesAlternateSlot,
+    }),
+    occurredAt: updatedAt,
+  });
+
+  return expireUserSellFlow({
+    id: flow.id,
+    userId: flow.userId,
+    updatedAt,
+    reason: expiryReason,
+  }) || flow;
+}
+
+function expireScheduledFlowsForUser(userId) {
+  listUserSellFlows({ userId, status: "PICKUP_SCHEDULED", limit: 100 }).forEach(maybeAutoExpireScheduledFlow);
 }
 
 function syncPartnerLead({ flow, user, leadType, pincode, status = "AVAILABLE", updatedAt }) {
@@ -212,6 +355,38 @@ userRouter.get("/me", (req, res) => {
   res.json(success({ user: getUser(req) }));
 });
 
+userRouter.patch("/me", (req, res, next) => {
+  try {
+    const input = updateUserProfileSchema.parse(req.body);
+    const user = updateUserProfile({ id: req.auth.sub, name: input.name, updatedAt: nowIso() });
+    if (!user) throw notFound("User not found");
+    res.json(success({ user }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+userRouter.delete("/me", (req, res, next) => {
+  try {
+    deleteUserAccountSchema.parse(req.body || {});
+    const result = deleteUserAccount(req.auth.sub);
+    if (!result) throw notFound("User not found");
+
+    const mediaErrors = [];
+    result.mediaRelativePaths.forEach((relativePath) => {
+      try {
+        deleteMediaFile(relativePath);
+      } catch (error) {
+        mediaErrors.push({ relativePath, message: error instanceof Error ? error.message : "Failed to delete media file" });
+      }
+    });
+
+    res.json(success({ deleted: true, deletedCounts: result.deleted, mediaFileErrors: mediaErrors }));
+  } catch (err) {
+    next(err);
+  }
+});
+
 userRouter.post("/sell-flows", (req, res, next) => {
   try {
     const input = createSellFlowSchema.parse(req.body);
@@ -249,7 +424,10 @@ userRouter.post("/sell-flows", (req, res, next) => {
 userRouter.get("/sell-flows", (req, res, next) => {
   try {
     const query = listQuerySchema.parse(req.query);
-    const rows = listUserSellFlows({ userId: req.auth.sub, status: query.status, limit: query.limit });
+    expireScheduledFlowsForUser(req.auth.sub);
+    const rows = listUserSellFlows({ userId: req.auth.sub, status: query.status, limit: query.limit })
+      .map(maybeAutoExpireScheduledFlow)
+      .filter((flow) => !query.status || flow.status === query.status);
     res.json(success({ rows, count: rows.length }));
   } catch (err) {
     next(err);
@@ -258,7 +436,7 @@ userRouter.get("/sell-flows", (req, res, next) => {
 
 userRouter.get("/sell-flows/:flowId", (req, res, next) => {
   try {
-    res.json(success({ flow: requireFlow(req) }));
+    res.json(success({ flow: maybeAutoExpireScheduledFlow(requireFlow(req)) }));
   } catch (err) {
     next(err);
   }
@@ -356,6 +534,7 @@ userRouter.post("/sell-flows/:flowId/quote", (req, res, next) => {
 userRouter.patch("/sell-flows/:flowId/pickup-schedule", async (req, res, next) => {
   try {
     const input = pickupScheduleBodySchema.parse(req.body);
+    validatePickupScheduleTiming(input.pickupSchedule);
     const existing = requireFlow(req);
     if (existing.status === "CANCELLED") throw badRequest("Cancelled sell flow cannot be scheduled");
     if (existing.status !== "QUOTE_READY") {
@@ -423,50 +602,6 @@ userRouter.patch("/sell-flows/:flowId/pickup-schedule", async (req, res, next) =
       updatedAt,
     });
 
-    if (serviceLead?.id && !serviceLead.partnerId) {
-      const autoAssignment = autoAssignLeadByPincodeRoundRobin({
-        leadId: serviceLead.id,
-        adminId: "system-auto-allocator",
-        note: "Automatic round-robin assignment by pincode",
-        createdAt: updatedAt,
-      });
-
-      if (autoAssignment.result === "UPDATED" && autoAssignment.lead) {
-        appendPartnerLeadDispositionEvent({
-          id: crypto.randomUUID(),
-          leadId: autoAssignment.lead.id,
-          userSellFlowId: autoAssignment.lead.userSellFlowId,
-          partnerId: autoAssignment.lead.partnerId,
-          fromStatus: autoAssignment.previousStatus || null,
-          toStatus: autoAssignment.lead.status,
-          dispositionKey: "ASSIGNED_AUTO",
-          note: "Automatic round-robin assignment by pincode",
-          actorRole: "system",
-          actorId: "system-auto-allocator",
-          createdAt: updatedAt,
-        });
-
-        enqueueLeadEventOutbox({
-          id: crypto.randomUUID(),
-          eventType: "lead.assigned.auto",
-          leadId: autoAssignment.lead.id,
-          payloadJson: JSON.stringify({
-            leadId: autoAssignment.lead.id,
-            userSellFlowId: autoAssignment.lead.userSellFlowId,
-            leadType: autoAssignment.lead.leadType,
-            fromStatus: autoAssignment.previousStatus || null,
-            toStatus: autoAssignment.lead.status,
-            partnerId: autoAssignment.lead.partnerId,
-            pincode: autoAssignment.lead.pincode,
-            actorRole: "system",
-            actorId: "system-auto-allocator",
-            note: "Automatic round-robin assignment by pincode",
-          }),
-          occurredAt: updatedAt,
-        });
-      }
-    }
-
     res.json(success({ flow }));
   } catch (err) {
     next(err);
@@ -477,6 +612,7 @@ userRouter.patch("/sell-flows/:flowId/pickup-schedule", async (req, res, next) =
 userRouter.patch("/sell-flows/:flowId/reschedule", async (req, res, next) => {
   try {
     const input = rescheduleBodySchema.parse(req.body);
+    validatePickupScheduleTiming(input);
     const existing = requireFlow(req);
     if (existing.status === "CANCELLED") throw badRequest("Cancelled sell flow cannot be rescheduled");
     if (existing.status !== "PICKUP_SCHEDULED") throw badRequest("Only PICKUP_SCHEDULED flows can be rescheduled", { currentStatus: existing.status });
@@ -552,89 +688,10 @@ userRouter.patch("/sell-flows/:flowId/reschedule", async (req, res, next) => {
   }
 });
 
-// User reschedule: update pickup dates/times only, preserve address, sync partner lead + disposition event
-userRouter.patch("/sell-flows/:flowId/reschedule", async (req, res, next) => {
-  try {
-    const input = rescheduleBodySchema.parse(req.body);
-    const existing = requireFlow(req);
-    if (existing.status === "CANCELLED") throw badRequest("Cancelled sell flow cannot be rescheduled");
-    if (existing.status !== "PICKUP_SCHEDULED") throw badRequest("Only scheduled pickups can be rescheduled", { currentStatus: existing.status });
-    if (!existing.pickupSchedule) throw badRequest("No existing pickup schedule found");
-    const existingLead = getPartnerLeadByFlowId(existing.id);
-    if (existingLead && ["COMPLETED", "CANCELLED"].includes(existingLead.status)) {
-      throw badRequest("Pickup is already " + existingLead.status.toLowerCase() + " and cannot be rescheduled");
-    }
-    const updatedAt = nowIso();
-    const user = getUser(req);
-    const pickupSchedule = {
-      ...existing.pickupSchedule,
-      primaryDate: input.primaryDate,
-      primaryTime: input.primaryTime,
-      alternateDate: input.alternateDate,
-      alternateTime: input.alternateTime,
-      updatedAt,
-    };
-    const flowJson = buildFlowJson({
-      id: existing.id, flowType: existing.flowType, user,
-      selectedModel: existing.selectedModel, deviceDetails: existing.deviceDetails,
-      pickupSchedule, quote: existing.quote,
-      servicePincode: getFlowPincode(existing),
-      status: "PICKUP_SCHEDULED", createdAt: existing.createdAt, updatedAt,
-    });
-    const flow = updateUserSellFlow({
-      id: existing.id, userId: req.auth.sub, status: "PICKUP_SCHEDULED",
-      pickupScheduleJson: JSON.stringify(pickupSchedule),
-      quoteJson: null, flowJson: JSON.stringify(flowJson), updatedAt,
-    });
-    const pincode = getFlowPincode(flow) || existingLead?.pincode;
-    if (pincode) {
-      upsertPartnerLeadFromUserFlow({
-        id: `lead-${flow.id}`, userSellFlowId: flow.id, userId: flow.userId,
-        leadType: existingLead?.leadType || "SERVICE_LEAD",
-        status: existingLead?.status || "AVAILABLE",
-        pincode, city: pickupSchedule.city || existingLead?.city || null,
-        sellerName: pickupSchedule.sellerName || user.name,
-        sellerPhone: pickupSchedule.callingPhoneNumber || user.phone || null,
-        addressLine: pickupSchedule.addressLine || null,
-        landmark: pickupSchedule.landmark || null,
-        selectedModelJson: JSON.stringify(flow.selectedModel),
-        deviceDetailsJson: flow.deviceDetails ? JSON.stringify(flow.deviceDetails) : null,
-        quoteJson: flow.quote ? JSON.stringify(flow.quote) : null,
-        pickupScheduleJson: JSON.stringify(pickupSchedule),
-        flowSnapshotJson: JSON.stringify(flowJson),
-        createdAt: flow.createdAt, updatedAt,
-      });
-      if (existingLead?.id) {
-        appendPartnerLeadDispositionEvent({
-          id: crypto.randomUUID(), leadId: existingLead.id,
-          userSellFlowId: flow.id, partnerId: existingLead.partnerId || null,
-          fromStatus: existingLead.status, toStatus: existingLead.status,
-          dispositionKey: "RESCHEDULE_REQUESTED",
-          note: `Pickup rescheduled by user to ${input.primaryDate.split("T")[0]} ${input.primaryTime}`,
-          actorRole: "user", actorId: req.auth.sub, createdAt: updatedAt,
-        });
-        enqueueLeadEventOutbox({
-          id: crypto.randomUUID(), eventType: "lead.rescheduled", leadId: existingLead.id,
-          payloadJson: JSON.stringify({
-            leadId: existingLead.id, userSellFlowId: flow.id,
-            primaryDate: input.primaryDate, primaryTime: input.primaryTime,
-            alternateDate: input.alternateDate, alternateTime: input.alternateTime,
-            partnerId: existingLead.partnerId || null, actorRole: "user", actorId: req.auth.sub,
-          }),
-          occurredAt: updatedAt,
-        });
-      }
-    }
-    res.json(success({ flow, rescheduled: true }));
-  } catch (err) {
-    next(err);
-  }
-});
-
 // User-facing: get partner lead pickup/payment status for invoice display
 userRouter.get("/sell-flows/:flowId/lead-status", (req, res, next) => {
   try {
-    const flow = requireFlow(req);
+    const flow = maybeAutoExpireScheduledFlow(requireFlow(req));
     const lead = getPartnerLeadByFlowId(flow.id);
     if (!lead) return res.json(success({ found: false, lead: null }));
     res.json(success({
@@ -643,11 +700,12 @@ userRouter.get("/sell-flows/:flowId/lead-status", (req, res, next) => {
         id: lead.id,
         status: lead.status,
         completedAt: lead.completedAt || null,
+        cancelledAt: lead.cancelledAt || null,
+        rejectionReason: lead.rejectionReason || null,
         completionEvent: lead.completionEvent || null,
         paymentProof: lead.paymentProof ? {
           amountCollected: lead.paymentProof.amountCollected,
           paymentMode: lead.paymentProof.paymentMode,
-          transactionRef: lead.paymentProof.transactionRef || null,
           submittedAt: lead.paymentProof.submittedAt,
           mediaUrl: lead.paymentProof.mediaUrl || null,
         } : null,
@@ -662,13 +720,31 @@ userRouter.get("/sell-flows/:flowId/lead-status", (req, res, next) => {
 
 userRouter.get("/sell-flows/:flowId/invoice", (req, res, next) => {
   try {
+    z.string().trim().min(1).parse(req.params.flowId);
     const flow = requireFlow(req);
     const lead = getPartnerLeadByFlowId(flow.id);
     if (!lead || lead.status !== "COMPLETED" || !lead.completionEvent?.invoice) {
       throw notFound("Invoice not found");
     }
 
-    res.json(success({ invoice: lead.completionEvent.invoice }));
+    const user = getUserById(flow.userId) || null;
+    const seller = lead.seller || {};
+    const pickup = flow.pickupSchedule || lead.pickupSchedule || {};
+    const invoice = {
+      ...lead.completionEvent.invoice,
+      company: { name: "GadgetPe", website: "www.gadgetpe.com" },
+      purchaser: {
+        name: user?.name || seller.name || pickup.sellerName || "Customer",
+        addressLine: seller.addressLine || pickup.addressLine || null,
+        landmark: seller.landmark || pickup.landmark || null,
+        city: seller.city || pickup.city || null,
+        pincode: seller.pincode || pickup.pincode || flow.servicePincode || null,
+      },
+      serviceNumber: lead.id,
+      orderCreatedAt: flow.createdAt || null,
+    };
+
+    res.json(success({ invoice }));
   } catch (err) {
     next(err);
   }

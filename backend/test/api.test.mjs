@@ -18,6 +18,7 @@ process.env.ADMIN_DEV_KEY = "admin-dev-key";
 process.env.OTP_PROVIDER = "DEV";
 
 const { app } = await import("../src/app.js");
+const { getPartnerLeadByFlowId, getUserByPhone, listUserSellFlows } = await import("../src/db/repository.js");
 
 async function createPartnerSession(phone = "9000000001") {
   await request(app)
@@ -47,6 +48,63 @@ async function createUserSession(phone = "8000000001") {
   return verify.body.data;
 }
 
+async function createScheduledSellFlow({ userPhone, modelId, modelName, sellerName, pincode = "560001", primaryDate = "2026-07-26T00:00:00.000Z", primaryTime = "5:00 PM - 6:00 PM" }) {
+  const userSession = await createUserSession(userPhone);
+
+  const create = await request(app)
+    .post("/api/v1/user/sell-flows")
+    .set("Authorization", `Bearer ${userSession.accessToken}`)
+    .send({
+      servicePincode: pincode,
+      selectedModel: {
+        brandSlug: "asus",
+        modelId,
+        modelName,
+        listedPrice: 7020,
+      },
+    })
+    .expect(200);
+
+  const flowId = create.body.data.flow.id;
+
+  await request(app)
+    .patch(`/api/v1/user/sell-flows/${flowId}/device-details`)
+    .set("Authorization", `Bearer ${userSession.accessToken}`)
+    .send({
+      deviceDetails: {
+        basicFunctionality: { canMakeCalls: "yes", touchWorking: "yes" },
+        physicalIssues: [],
+      },
+    })
+    .expect(200);
+
+  await request(app)
+    .post(`/api/v1/user/sell-flows/${flowId}/quote`)
+    .set("Authorization", `Bearer ${userSession.accessToken}`)
+    .expect(200);
+
+  await request(app)
+    .patch(`/api/v1/user/sell-flows/${flowId}/pickup-schedule`)
+    .set("Authorization", `Bearer ${userSession.accessToken}`)
+    .send({
+      pickupSchedule: {
+        pincode,
+        primaryDate,
+        primaryTime,
+        alternateDate: "2026-07-27T00:00:00.000Z",
+        alternateTime: "1:00 PM - 2:00 PM",
+        sellerName,
+        callingPhoneNumber: userPhone,
+        addressLine: `House ${userPhone.slice(-2)}, Test Street`,
+        landmark: "Near Test Park",
+        city: "Bengaluru",
+      },
+    })
+    .expect(200);
+
+  return flowId;
+}
+
 async function createAdminToken() {
   const login = await request(app)
     .post("/api/v1/auth/admin/dev-login")
@@ -54,6 +112,31 @@ async function createAdminToken() {
     .expect(200);
 
   return login.body.data.accessToken;
+}
+
+async function withMockedNow(isoString, fn) {
+  const RealDate = Date;
+
+  class MockDate extends RealDate {
+    constructor(...args) {
+      if (args.length === 0) {
+        super(isoString);
+      } else {
+        super(...args);
+      }
+    }
+
+    static now() {
+      return new RealDate(isoString).getTime();
+    }
+  }
+
+  global.Date = MockDate;
+  try {
+    return await fn();
+  } finally {
+    global.Date = RealDate;
+  }
 }
 
 async function approvePartnerWalletRecharge({ partnerToken, adminToken, txnRef, amount = 500 }) {
@@ -136,6 +219,108 @@ test("user OTP login only requires name for new users", async () => {
   assert.equal(secondVerify.body.data.user.name, "Original User");
 });
 
+test("user can update profile full name", async () => {
+  const session = await createUserSession("8000000203");
+
+  const updated = await request(app)
+    .patch("/api/v1/user/me")
+    .set("Authorization", `Bearer ${session.accessToken}`)
+    .send({ name: "Updated User Name" })
+    .expect(200);
+
+  assert.equal(updated.body.data.user.name, "Updated User Name");
+
+  const me = await request(app)
+    .get("/api/v1/user/me")
+    .set("Authorization", `Bearer ${session.accessToken}`)
+    .expect(200);
+
+  assert.equal(me.body.data.user.name, "Updated User Name");
+});
+
+test("user can permanently delete account data", async () => {
+  const userPhone = "8000000199";
+  const session = await createUserSession(userPhone);
+
+  const create = await request(app)
+    .post("/api/v1/user/sell-flows")
+    .set("Authorization", `Bearer ${session.accessToken}`)
+    .send({
+      servicePincode: "560001",
+      selectedModel: {
+        brandSlug: "apple",
+        modelId: "iphone-13",
+        modelName: "iPhone 13",
+        listedPrice: 29000,
+      },
+    })
+    .expect(200);
+
+  const flowId = create.body.data.flow.id;
+
+  await request(app)
+    .patch(`/api/v1/user/sell-flows/${flowId}/device-details`)
+    .set("Authorization", `Bearer ${session.accessToken}`)
+    .send({
+      deviceDetails: {
+        basicFunctionality: { canMakeCalls: "yes", touchWorking: "yes" },
+        physicalIssues: [],
+      },
+    })
+    .expect(200);
+
+  await request(app)
+    .post(`/api/v1/user/sell-flows/${flowId}/quote`)
+    .set("Authorization", `Bearer ${session.accessToken}`)
+    .expect(200);
+
+  await request(app)
+    .patch(`/api/v1/user/sell-flows/${flowId}/pickup-schedule`)
+    .set("Authorization", `Bearer ${session.accessToken}`)
+    .send({
+      pickupSchedule: {
+        pincode: "560001",
+        primaryDate: "2026-07-26T00:00:00.000Z",
+        primaryTime: "5:00 PM - 6:00 PM",
+        alternateDate: "2026-07-27T00:00:00.000Z",
+        alternateTime: "1:00 PM - 2:00 PM",
+        sellerName: "Delete Me",
+        callingPhoneNumber: userPhone,
+        addressLine: "House 99, Delete Street",
+        landmark: "Near Delete Park",
+        city: "Bengaluru",
+      },
+    })
+    .expect(200);
+
+  await request(app)
+    .delete("/api/v1/user/me")
+    .set("Authorization", `Bearer ${session.accessToken}`)
+    .send({ confirm: "DELETE" })
+    .expect(200)
+    .expect((res) => {
+      assert.equal(res.body.data.deleted, true);
+      assert.equal(res.body.data.deletedCounts.users, 1);
+      assert.equal(res.body.data.deletedCounts.userSellFlows, 1);
+      assert.equal(res.body.data.deletedCounts.partnerLeads, 1);
+      assert.equal(res.body.data.deletedCounts.refreshTokens, 1);
+    });
+
+  assert.equal(getUserByPhone(userPhone), null);
+  assert.deepEqual(listUserSellFlows({ userId: session.user.id }), []);
+  assert.equal(getPartnerLeadByFlowId(flowId), null);
+
+  await request(app)
+    .get("/api/v1/user/me")
+    .set("Authorization", `Bearer ${session.accessToken}`)
+    .expect(404);
+
+  await request(app)
+    .post("/api/v1/auth/refresh")
+    .send({ refreshToken: session.refreshToken })
+    .expect(401);
+});
+
 test("user sell flow API creates quote schedule and lists history", async () => {
   const session = await createUserSession("8000000100");
 
@@ -172,7 +357,7 @@ test("user sell flow API creates quote schedule and lists history", async () => 
       deviceDetails: {
         basicFunctionality: { canMakeCalls: "yes", touchWorking: "yes" },
         physicalIssues: ["Any Dead spots"],
-        nestedPhysicalIssueAnswers: { "Any Dead spots": "Top" },
+        nestedPhysicalIssueAnswers: { "Any Dead spots": ["Top"] },
         cameraAndBiometrics: { frontCamera: "yes" },
         sensorsAndConnectivity: { proximitySensor: "yes" },
         batteryAndCharging: { charging: "yes" },
@@ -200,9 +385,9 @@ test("user sell flow API creates quote schedule and lists history", async () => 
       pickupSchedule: {
         pincode: "560001",
         primaryDate: "2026-07-15T00:00:00.000Z",
-        primaryTime: "10:00 AM - 12:00 PM",
+        primaryTime: "10:00 AM - 11:00 AM",
         alternateDate: "2026-07-16T00:00:00.000Z",
-        alternateTime: "2:00 PM - 4:00 PM",
+        alternateTime: "2:00 PM - 3:00 PM",
         sellerName: "Test User",
         callingPhoneNumber: "8000000100",
         addressLine: "House 1, Test Street",
@@ -230,6 +415,108 @@ test("user sell flow API creates quote schedule and lists history", async () => 
     .expect(200);
 
   assert.equal(fetched.body.data.flow.id, flowId);
+});
+
+test("user scheduled pickup does not auto-expire when only primary slot has ended", async () => {
+  const userPhone = "8000000460";
+  const flowId = await withMockedNow("2026-07-14T05:00:00.000Z", () => createScheduledSellFlow({
+    userPhone,
+    modelId: "auto-expiry-phone",
+    modelName: "Auto Expiry Phone",
+    sellerName: "Expiry User",
+    primaryDate: "2026-07-15T00:00:00.000Z",
+    primaryTime: "10:00 AM - 11:00 AM",
+  }));
+  const session = await createUserSession(userPhone);
+
+  await withMockedNow("2026-07-15T05:31:00.000Z", async () => {
+    const active = await request(app)
+      .get("/api/v1/user/sell-flows?status=PICKUP_SCHEDULED")
+      .set("Authorization", `Bearer ${session.accessToken}`)
+      .expect(200);
+
+    assert.equal(active.body.data.count, 1);
+    assert.equal(active.body.data.rows[0].id, flowId);
+
+    const closed = await request(app)
+      .get("/api/v1/user/sell-flows?status=CANCELLED")
+      .set("Authorization", `Bearer ${session.accessToken}`)
+      .expect(200);
+
+    assert.equal(closed.body.data.count, 0);
+  });
+});
+
+test("user scheduled pickup auto-expires after alternate slot also ends", async () => {
+  const userPhone = "8000000462";
+  const flowId = await withMockedNow("2026-07-14T05:00:00.000Z", () => createScheduledSellFlow({
+    userPhone,
+    modelId: "auto-expiry-phone-both-slots",
+    modelName: "Auto Expiry Phone Both Slots",
+    sellerName: "Expiry User 2",
+    primaryDate: "2026-07-15T00:00:00.000Z",
+    primaryTime: "10:00 AM - 11:00 AM",
+  }));
+  const session = await createUserSession(userPhone);
+
+  await withMockedNow("2026-07-27T08:31:00.000Z", async () => {
+    const closed = await request(app)
+      .get("/api/v1/user/sell-flows?status=CANCELLED")
+      .set("Authorization", `Bearer ${session.accessToken}`)
+      .expect(200);
+
+    assert.equal(closed.body.data.count, 1);
+    assert.equal(closed.body.data.rows[0].id, flowId);
+    assert.equal(closed.body.data.rows[0].flowJson.cancellationReason, "AUTO_EXPIRED_ALL_SLOTS");
+
+    const active = await request(app)
+      .get("/api/v1/user/sell-flows?status=PICKUP_SCHEDULED")
+      .set("Authorization", `Bearer ${session.accessToken}`)
+      .expect(200);
+
+    assert.equal(active.body.data.count, 0);
+
+    const leadStatus = await request(app)
+      .get(`/api/v1/user/sell-flows/${flowId}/lead-status`)
+      .set("Authorization", `Bearer ${session.accessToken}`)
+      .expect(200);
+
+    assert.equal(leadStatus.body.data.found, true);
+    assert.equal(leadStatus.body.data.lead.status, "CANCELLED");
+    assert.equal(leadStatus.body.data.lead.rejectionReason, "AUTO_EXPIRED_ALL_SLOTS");
+    assert.equal(typeof leadStatus.body.data.lead.cancelledAt, "string");
+  });
+});
+
+test("user scheduled pickup does not auto-expire early for IST date serialized as previous-day UTC", async () => {
+  const userPhone = "8000000461";
+  const flowId = await withMockedNow("2026-07-15T04:00:00.000Z", () => createScheduledSellFlow({
+    userPhone,
+    modelId: "auto-expiry-ist-serialize",
+    modelName: "Auto Expiry IST Serialize",
+    sellerName: "Expiry IST User",
+    // 2026-07-15T18:30:00.000Z equals 2026-07-16 00:00 IST (typical browser Date.toISOString for selected IST date)
+    primaryDate: "2026-07-15T18:30:00.000Z",
+    primaryTime: "10:00 AM - 11:00 AM",
+  }));
+  const session = await createUserSession(userPhone);
+
+  await withMockedNow("2026-07-15T20:00:00.000Z", async () => {
+    const active = await request(app)
+      .get("/api/v1/user/sell-flows?status=PICKUP_SCHEDULED")
+      .set("Authorization", `Bearer ${session.accessToken}`)
+      .expect(200);
+
+    assert.equal(active.body.data.count, 1);
+    assert.equal(active.body.data.rows[0].id, flowId);
+
+    const closed = await request(app)
+      .get("/api/v1/user/sell-flows?status=CANCELLED")
+      .set("Authorization", `Bearer ${session.accessToken}`)
+      .expect(200);
+
+    assert.equal(closed.body.data.count, 0);
+  });
 });
 
 test("partner token cannot access user sell flow APIs", async () => {
@@ -326,6 +613,42 @@ test("admin quote deduction rules drive user quotes and schedule snapshots", asy
   assert.equal(publicPreview.body.data.quote.sellingPrice, 44000);
   assert.equal(publicPreview.body.data.quote.deductions.length, 2);
 
+  const nestedRule = await request(app)
+    .post("/api/v1/admin/pricing/deductions")
+    .set("Authorization", `Bearer ${adminToken}`)
+    .send({
+      answerGroup: "nestedPhysicalIssueAnswers",
+      answerKey: "screenPhysical",
+      answerValue: "cracked",
+      label: "Screen cracked / glass broken",
+      deductionType: "RUPEES",
+      deductionValue: 2000,
+      priority: 30,
+    })
+    .expect(200);
+
+  assert.equal(nestedRule.body.data.rule.answerGroup, "nestedPhysicalIssueAnswers");
+
+  const nestedPreview = await request(app)
+    .post("/api/v1/pricing/quote-preview")
+    .send({
+      selectedModel: {
+        brandSlug: "samsung",
+        modelId: "galaxy-s24",
+        modelName: "Galaxy S24",
+        listedPrice: 40000,
+      },
+      deviceDetails: {
+        physicalIssues: ["Broken/scratch on device screen"],
+        nestedPhysicalIssueAnswers: { screenPhysical: ["cracked", "oneToTwoScratches"] },
+      },
+    })
+    .expect(200);
+
+  assert.equal(nestedPreview.body.data.quote.deductions.length, 1);
+  assert.equal(nestedPreview.body.data.quote.totalDeduction, 2000);
+  assert.equal(nestedPreview.body.data.quote.sellingPrice, 38000);
+
   const createFlow = await request(app)
     .post("/api/v1/user/sell-flows")
     .set("Authorization", `Bearer ${userSession.accessToken}`)
@@ -367,10 +690,10 @@ test("admin quote deduction rules drive user quotes and schedule snapshots", asy
     .send({
       pickupSchedule: {
         pincode: "560001",
-        primaryDate: "2026-07-15T00:00:00.000Z",
-        primaryTime: "10:00 AM - 12:00 PM",
-        alternateDate: "2026-07-16T00:00:00.000Z",
-        alternateTime: "2:00 PM - 4:00 PM",
+        primaryDate: "2027-07-15T00:00:00.000Z",
+        primaryTime: "10:00 AM - 11:00 AM",
+        alternateDate: "2027-07-16T00:00:00.000Z",
+        alternateTime: "2:00 PM - 3:00 PM",
         sellerName: "Test User",
         callingPhoneNumber: "8000000103",
         addressLine: "House 3, Test Street",
@@ -535,9 +858,9 @@ test("partner unlock payment gates lead details until admin approval", async () 
       pickupSchedule: {
         pincode: "560001",
         primaryDate: "2026-07-26T00:00:00.000Z",
-        primaryTime: "5:00 PM - 6:00 PM",
+        primaryTime: "10:00 AM - 11:00 AM",
         alternateDate: "2026-07-27T00:00:00.000Z",
-        alternateTime: "1:00 PM - 2:00 PM",
+        alternateTime: "2:00 PM - 3:00 PM",
         sellerName: "Masked Seller",
         callingPhoneNumber: "8000000116",
         addressLine: "House 16, Test Street",
@@ -560,7 +883,7 @@ test("partner unlock payment gates lead details until admin approval", async () 
   assert.equal(lockedLead.quote.sellingPrice, 7020);
   assert.equal(lockedLead.seller.name, null);
   assert.equal(lockedLead.seller.phone, null);
-  assert.equal(lockedLead.pickupSchedule.primaryTime, "5:00 PM - 6:00 PM");
+  assert.equal(lockedLead.pickupSchedule.primaryTime, "10:00 AM - 11:00 AM");
   assert.equal(lockedLead.pickupSchedule.alternateTime, null);
 
   await request(app)
@@ -602,7 +925,222 @@ test("partner unlock payment gates lead details until admin approval", async () 
 
   assert.equal(detail.body.data.lead.seller.name, "Masked Seller");
   assert.equal(detail.body.data.lead.seller.phone, "8000000116");
-  assert.equal(detail.body.data.lead.status, "ACCEPTED");
+  assert.equal(detail.body.data.lead.status, "CLAIMED");
+  assert.equal(detail.body.data.lead.partnerId, "partner-9000000116");
+});
+
+test("partner cannot create unlock intent for lead claimed by another partner", async () => {
+  const ownerPartnerSession = await createPartnerSession("9000000126");
+  const otherPartnerSession = await createPartnerSession("9000000127");
+  const flowId = await createScheduledSellFlow({
+    userPhone: "8000000126",
+    modelId: "claimed-by-other",
+    modelName: "Claimed By Other",
+    sellerName: "Claimed Seller",
+  });
+
+  const bucket = await request(app)
+    .get("/api/v1/partner/lead-bucket?pincode=560001")
+    .set("Authorization", `Bearer ${ownerPartnerSession.accessToken}`)
+    .expect(200);
+
+  const lead = bucket.body.data.rows.find((row) => row.userSellFlowId === flowId);
+  assert.equal(Boolean(lead), true);
+
+  await request(app)
+    .post(`/api/v1/partner/leads/${lead.id}/claim`)
+    .set("Authorization", `Bearer ${ownerPartnerSession.accessToken}`)
+    .expect(200);
+
+  const otherPartnerBucket = await request(app)
+    .get("/api/v1/partner/lead-bucket?pincode=560001")
+    .set("Authorization", `Bearer ${otherPartnerSession.accessToken}`)
+    .expect(200);
+
+  assert.equal(otherPartnerBucket.body.data.rows.some((row) => row.id === lead.id), false);
+
+  const response = await request(app)
+    .post(`/api/v1/partner/leads/${lead.id}/unlock-intent`)
+    .set("Authorization", `Bearer ${otherPartnerSession.accessToken}`)
+    .expect(409);
+
+  assert.equal(response.body.error.code, "CONFLICT");
+  assert.equal(response.body.error.message, "This lead is already owned by another partner.");
+});
+
+test("partner unlocks multiple same-slot leads and another partner can unlock the same lead", async () => {
+  const partnerSession = await createPartnerSession("9000000117");
+  const otherPartnerSession = await createPartnerSession("9000000118");
+  const adminToken = await createAdminToken();
+
+  const firstFlowId = await createScheduledSellFlow({
+    userPhone: "8000000117",
+    modelId: "same-slot-one",
+    modelName: "Same Slot One",
+    sellerName: "Same Slot Seller One",
+  });
+  const secondFlowId = await createScheduledSellFlow({
+    userPhone: "8000000118",
+    modelId: "same-slot-two",
+    modelName: "Same Slot Two",
+    sellerName: "Same Slot Seller Two",
+  });
+
+  const bucket = await request(app)
+    .get("/api/v1/partner/lead-bucket?pincode=560001")
+    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
+    .expect(200);
+
+  const firstLead = bucket.body.data.rows.find((row) => row.userSellFlowId === firstFlowId);
+  const secondLead = bucket.body.data.rows.find((row) => row.userSellFlowId === secondFlowId);
+  assert.equal(Boolean(firstLead), true);
+  assert.equal(Boolean(secondLead), true);
+  assert.equal(firstLead.pickupSchedule.primaryTime, secondLead.pickupSchedule.primaryTime);
+
+  const firstIntent = await request(app)
+    .post(`/api/v1/partner/leads/${firstLead.id}/unlock-intent`)
+    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
+    .expect(200);
+  const secondIntent = await request(app)
+    .post(`/api/v1/partner/leads/${secondLead.id}/unlock-intent`)
+    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
+    .expect(200);
+
+  assert.notEqual(firstIntent.body.data.intent.id, secondIntent.body.data.intent.id);
+
+  const lockedForOtherPartner = await request(app)
+    .post(`/api/v1/partner/leads/${firstLead.id}/unlock-intent`)
+    .set("Authorization", `Bearer ${otherPartnerSession.accessToken}`)
+    .expect(409);
+
+  assert.equal(lockedForOtherPartner.body.error.message, "This lead is temporarily reserved by another partner. Please try again after a few minutes.");
+
+  for (const intent of [firstIntent.body.data.intent, secondIntent.body.data.intent]) {
+    await request(app)
+      .post(`/api/v1/partner/lead-unlock-intents/${intent.id}/screenshot-sent`)
+      .set("Authorization", `Bearer ${partnerSession.accessToken}`)
+      .expect(200);
+
+    await request(app)
+      .patch(`/api/v1/partner/lead-unlock-intents/${intent.id}/verify`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ action: "APPROVE", note: "Approved same-slot unlock" })
+      .expect(200);
+  }
+
+  const firstDetail = await request(app)
+    .get(`/api/v1/partner/leads/${firstLead.id}`)
+    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
+    .expect(200);
+  const secondDetail = await request(app)
+    .get(`/api/v1/partner/leads/${secondLead.id}`)
+    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
+    .expect(200);
+
+  assert.equal(firstDetail.body.data.lead.seller.phone, "8000000117");
+  assert.equal(secondDetail.body.data.lead.seller.phone, "8000000118");
+  assert.equal(firstDetail.body.data.lead.status, "CLAIMED");
+  assert.equal(secondDetail.body.data.lead.status, "CLAIMED");
+
+  const otherPartnerIntent = await request(app)
+    .post(`/api/v1/partner/leads/${firstLead.id}/unlock-intent`)
+    .set("Authorization", `Bearer ${otherPartnerSession.accessToken}`)
+    .expect(409);
+
+  assert.equal(otherPartnerIntent.body.error.message, "This lead is already owned by another partner.");
+});
+
+test("expired unlock reservation releases lead for retry", async () => {
+  const partnerSession = await createPartnerSession("9000000130");
+  const otherPartnerSession = await createPartnerSession("9000000131");
+  const flowId = await createScheduledSellFlow({
+    userPhone: "8000000130",
+    modelId: "reservation-expiry",
+    modelName: "Reservation Expiry",
+    sellerName: "Reservation Seller",
+  });
+
+  const bucket = await request(app)
+    .get("/api/v1/partner/lead-bucket?pincode=560001")
+    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
+    .expect(200);
+
+  const lead = bucket.body.data.rows.find((row) => row.userSellFlowId === flowId);
+  assert.equal(Boolean(lead), true);
+
+  const firstIntent = await withMockedNow("2026-08-20T10:00:00.000Z", async () => request(app)
+    .post(`/api/v1/partner/leads/${lead.id}/unlock-intent`)
+    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
+    .expect(200));
+
+  assert.equal(firstIntent.body.data.expiresAt, "2026-08-20T10:05:00.000Z");
+
+  await withMockedNow("2026-08-20T10:04:59.000Z", async () => request(app)
+    .post(`/api/v1/partner/leads/${lead.id}/unlock-intent`)
+    .set("Authorization", `Bearer ${otherPartnerSession.accessToken}`)
+    .expect(409));
+
+  const latePayment = await withMockedNow("2026-08-20T10:06:00.000Z", async () => request(app)
+    .post(`/api/v1/partner/lead-unlock-intents/${firstIntent.body.data.intent.id}/screenshot-sent`)
+    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
+    .expect(400));
+
+  assert.equal(latePayment.body.error.message, "Payment intent is EXPIRED. Start a new unlock payment.");
+
+  const retryIntent = await withMockedNow("2026-08-20T10:06:00.000Z", async () => request(app)
+    .post(`/api/v1/partner/leads/${lead.id}/unlock-intent`)
+    .set("Authorization", `Bearer ${otherPartnerSession.accessToken}`)
+    .expect(200));
+
+  assert.equal(retryIntent.body.data.intent.status, "PENDING_PAYMENT");
+});
+
+test("admin rejection releases unlock reservation for another partner", async () => {
+  const partnerSession = await createPartnerSession("9000000132");
+  const otherPartnerSession = await createPartnerSession("9000000133");
+  const adminToken = await createAdminToken();
+  const flowId = await createScheduledSellFlow({
+    userPhone: "8000000132",
+    modelId: "reservation-rejected",
+    modelName: "Reservation Rejected",
+    sellerName: "Rejected Seller",
+  });
+
+  const bucket = await request(app)
+    .get("/api/v1/partner/lead-bucket?pincode=560001")
+    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
+    .expect(200);
+
+  const lead = bucket.body.data.rows.find((row) => row.userSellFlowId === flowId);
+  assert.equal(Boolean(lead), true);
+
+  const intent = await request(app)
+    .post(`/api/v1/partner/leads/${lead.id}/unlock-intent`)
+    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
+    .expect(200);
+
+  await request(app)
+    .post(`/api/v1/partner/lead-unlock-intents/${intent.body.data.intent.id}/screenshot-sent`)
+    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
+    .expect(200);
+
+  await request(app)
+    .post(`/api/v1/partner/leads/${lead.id}/unlock-intent`)
+    .set("Authorization", `Bearer ${otherPartnerSession.accessToken}`)
+    .expect(409);
+
+  await request(app)
+    .patch(`/api/v1/partner/lead-unlock-intents/${intent.body.data.intent.id}/verify`)
+    .set("Authorization", `Bearer ${adminToken}`)
+    .send({ action: "REJECT", note: "Rejected to release reservation" })
+    .expect(200);
+
+  const retryIntent = await request(app)
+    .post(`/api/v1/partner/leads/${lead.id}/unlock-intent`)
+    .set("Authorization", `Bearer ${otherPartnerSession.accessToken}`)
+    .expect(200);
+
+  assert.equal(retryIntent.body.data.intent.status, "PENDING_PAYMENT");
 });
 
 test("scope resolution requires active serviceability", async () => {
@@ -644,6 +1182,43 @@ test("admin toggle endpoint updates serviceability status", async () => {
 
   assert.equal(list.body.data.count, 1);
   assert.equal(list.body.data.rows[0].status, "ACTIVE");
+});
+
+test("partner can configure more than four working pincodes", async () => {
+  const adminToken = await createAdminToken();
+  const partnerSession = await createPartnerSession("9000000199");
+  const pincodes = ["560901", "560902", "560903", "560904", "560905"];
+
+  for (const pincode of pincodes) {
+    await request(app)
+      .patch(`/api/v1/admin/serviceability/pincodes/${pincode}/toggle`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ enabled: true, reason: "Enable for partner pincode limit test" })
+      .expect(200);
+  }
+
+  for (const pincode of pincodes) {
+    const response = await request(app)
+      .post("/api/v1/partner/pincodes")
+      .set("Authorization", `Bearer ${partnerSession.accessToken}`)
+      .send({ pincode })
+      .expect(200);
+
+    assert.equal(response.body.data.pincodes.some((row) => row.pincode === pincode), true);
+  }
+
+  const configured = await request(app)
+    .get("/api/v1/partner/pincodes")
+    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
+    .expect(200);
+
+  assert.equal(configured.body.data.pincodes.length, 5);
+
+  await request(app)
+    .post("/api/v1/partner/pincodes")
+    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
+    .send({ pincode: pincodes[0] })
+    .expect(409);
 });
 
 test("admin serviceability supports validate/create/update/delete CRUD flow", async () => {
@@ -698,7 +1273,7 @@ test("admin pricing upload stores catalog and user pricing lookup returns listed
   const buffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
 
   const upload = await request(app)
-    .post("/api/v1/admin/pricing/upload")
+    .post("/api/v1/admin/pricing/upload/mobile")
     .set("Authorization", `Bearer ${adminToken}`)
     .attach("file", buffer, "prices.xlsx")
     .expect(200);
@@ -717,6 +1292,7 @@ test("admin pricing upload stores catalog and user pricing lookup returns listed
   const lookup = await request(app)
     .post("/api/v1/pricing/lookup")
     .send({
+      deviceType: "MOBILE",
       brand: "apple",
       series: "iphone",
       model: "13",
@@ -747,6 +1323,7 @@ test("admin pricing upload stores catalog and user pricing lookup returns listed
   const lookupAfterDeactivate = await request(app)
     .post("/api/v1/pricing/lookup")
     .send({
+      deviceType: "MOBILE",
       brand: "apple",
       series: "iphone",
       model: "13",
@@ -769,6 +1346,7 @@ test("admin pricing upload stores catalog and user pricing lookup returns listed
   const lookupAfterActivate = await request(app)
     .post("/api/v1/pricing/lookup")
     .send({
+      deviceType: "MOBILE",
       brand: "apple",
       series: "iphone",
       model: "13",
@@ -797,6 +1375,7 @@ test("admin pricing upload stores catalog and user pricing lookup returns listed
   const lookupAfterDelete = await request(app)
     .post("/api/v1/pricing/lookup")
     .send({
+      deviceType: "MOBILE",
       brand: "apple",
       series: "iphone",
       model: "13",
@@ -820,13 +1399,22 @@ test("admin pricing upload rejects excel when header labels are not exact", asyn
   const buffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
 
   const upload = await request(app)
-    .post("/api/v1/admin/pricing/upload")
+    .post("/api/v1/admin/pricing/upload/mobile")
     .set("Authorization", `Bearer ${adminToken}`)
     .attach("file", buffer, "prices-invalid.xlsx")
     .expect(400);
 
   assert.equal(upload.body.error.code, "BAD_REQUEST");
   assert.equal(upload.body.error.details.expectedHeaders[0], "Brand");
+});
+
+test("pricing catalog brands requires deviceType query parameter", async () => {
+  const response = await request(app)
+    .get("/api/v1/pricing/catalog/brands")
+    .expect(400);
+
+  assert.equal(response.body.success, false);
+  assert.equal(response.body.error.code, "VALIDATION_ERROR");
 });
 
 test("partner can list lead bucket and service leads without wallet recharge", async () => {
@@ -909,9 +1497,9 @@ test("partner can persist call status attempts and read active pickup state", as
       pickupSchedule: {
         pincode: "560001",
         primaryDate: "2026-07-16T00:00:00.000Z",
-        primaryTime: "10:00 AM - 12:00 PM",
+        primaryTime: "10:00 AM - 11:00 AM",
         alternateDate: "2026-07-17T00:00:00.000Z",
-        alternateTime: "2:00 PM - 4:00 PM",
+        alternateTime: "2:00 PM - 3:00 PM",
         sellerName: "Test User",
         callingPhoneNumber: "8000000111",
         addressLine: "House 11, Test Street",
@@ -921,12 +1509,12 @@ test("partner can persist call status attempts and read active pickup state", as
     })
     .expect(200);
 
-  const serviceLeads = await request(app)
-    .get("/api/v1/partner/service-leads?pincode=560001&date=2026-07-16")
+  const leadBucket = await request(app)
+    .get("/api/v1/partner/lead-bucket?pincode=560001")
     .set("Authorization", `Bearer ${partnerSession.accessToken}`)
     .expect(200);
 
-  const leadId = serviceLeads.body.data.rows[0].id;
+  const leadId = leadBucket.body.data.rows[0].id;
 
   await request(app)
     .post(`/api/v1/partner/leads/${leadId}/claim`)
@@ -986,6 +1574,21 @@ test("partner logout is blocked until active pickup workflow is completed", asyn
     txnRef: "TXN-9000000112",
   });
 
+  await request(app)
+    .post("/api/v1/admin/pricing/deductions")
+    .set("Authorization", `Bearer ${adminToken}`)
+    .send({
+      answerGroup: "basicFunctionality",
+      answerKey: "canMakeCalls",
+      answerValue: "no",
+      label: "Cannot make calls onsite",
+      deductionType: "RUPEES",
+      deductionValue: 1200,
+      appliesToModelId: "s23",
+      priority: 10,
+    })
+    .expect(200);
+
   const create = await request(app)
     .post("/api/v1/user/sell-flows")
     .set("Authorization", `Bearer ${userSession.accessToken}`)
@@ -1025,9 +1628,9 @@ test("partner logout is blocked until active pickup workflow is completed", asyn
       pickupSchedule: {
         pincode: "560001",
         primaryDate: "2026-07-16T00:00:00.000Z",
-        primaryTime: "12:00 PM - 03:00 PM",
+        primaryTime: "12:00 PM - 1:00 PM",
         alternateDate: "2026-07-17T00:00:00.000Z",
-        alternateTime: "2:00 PM - 4:00 PM",
+        alternateTime: "2:00 PM - 3:00 PM",
         sellerName: "Test User",
         callingPhoneNumber: "8000000112",
         addressLine: "House 12, Test Street",
@@ -1037,12 +1640,12 @@ test("partner logout is blocked until active pickup workflow is completed", asyn
     })
     .expect(200);
 
-  const serviceLeads = await request(app)
-    .get("/api/v1/partner/service-leads?pincode=560001&date=2026-07-16")
+  const leadBucket = await request(app)
+    .get("/api/v1/partner/lead-bucket?pincode=560001")
     .set("Authorization", `Bearer ${partnerSession.accessToken}`)
     .expect(200);
 
-  const leadId = serviceLeads.body.data.rows[0].id;
+  const leadId = leadBucket.body.data.rows[0].id;
 
   await request(app)
     .post(`/api/v1/partner/leads/${leadId}/claim`)
@@ -1068,11 +1671,76 @@ test("partner logout is blocked until active pickup workflow is completed", asyn
     .send({ status: "IN_PROGRESS" })
     .expect(200);
 
+  const rejectedValidationFields = await request(app)
+    .post(`/api/v1/partner/leads/${leadId}/onsite-validation`)
+    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
+    .field("result", "PASS")
+    .field("notes", "legacy note")
+    .expect(400);
+
+  assert.equal(rejectedValidationFields.body.error.message, "Unsupported field(s): result, notes");
+
   await request(app)
     .post(`/api/v1/partner/leads/${leadId}/onsite-validation`)
     .set("Authorization", `Bearer ${partnerSession.accessToken}`)
-    .send({ result: "PASS", checklist: { screen: "ok" }, observedIssues: [] })
+    .field(
+      "checklist",
+      JSON.stringify({
+        gstBillSameImei: JSON.stringify({
+          field: "GST Bill with Same IMEI",
+          userInput: "Yes",
+          partnerVerify: "yes",
+          deductRupees: 0,
+          comment: null,
+        }),
+        screen: "ok",
+        __deductions: JSON.stringify({
+          listedPrice: 41200,
+          totalDeductionAmount: 2200,
+          partnerDecisionDeductionAmount: 1200,
+          anyOtherIssueDeductionAmount: 1000,
+          finalAssessedPrice: 39000,
+          questionDeductions: [{ key: "screenOriginal", field: "Screen Original", deductRupees: 1200 }],
+          issues: [{ description: "Back panel scratch", deductionAmount: 1000 }],
+          anyOtherIssues: [{ description: "Back panel scratch", deductRupees: 1000 }],
+        }),
+      }),
+    )
+    .field("observedIssues", JSON.stringify(["Back panel scratch (Deduction: Rs. 1000)"]))
+    .field("observedIssueDeductions", JSON.stringify([{ description: "Back panel scratch", deductionAmount: 1000 }]))
+    .field("partnerChecks", JSON.stringify([
+      {
+        key: "basicFunctionality.canMakeCalls",
+        label: "Basic Functionality / Can Make Calls",
+        userValue: "yes",
+        partnerInput: "no",
+        comment: null,
+      },
+    ]))
+    .field("revisedQuote", "39000")
+    .attach("photos", Buffer.from("photo-1"), { filename: "photo-1.png", contentType: "image/png" })
+    .attach("photos", Buffer.from("photo-2"), { filename: "photo-2.png", contentType: "image/png" })
+    .attach("photos", Buffer.from("photo-3"), { filename: "photo-3.png", contentType: "image/png" })
+    .attach("photos", Buffer.from("photo-4"), { filename: "photo-4.png", contentType: "image/png" })
+    .attach("photos", Buffer.from("photo-5"), { filename: "photo-5.png", contentType: "image/png" })
+    .attach("photos", Buffer.from("photo-6"), { filename: "photo-6.png", contentType: "image/png" })
     .expect(200);
+
+  const rejectedPaymentFields = await request(app)
+    .post(`/api/v1/partner/leads/${leadId}/payment-proof/metadata`)
+    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
+    .send({
+      fileName: "proof.png",
+      mimeType: "image/png",
+      sizeBytes: 12345,
+      amountCollected: 40000,
+      paymentMode: "UPI",
+      transactionRef: "UPI-112",
+      notes: "legacy note",
+    })
+    .expect(400);
+
+  assert.equal(rejectedPaymentFields.body.error.message, "Unsupported field(s): transactionRef, notes");
 
   await request(app)
     .post(`/api/v1/partner/leads/${leadId}/payment-proof/metadata`)
@@ -1083,15 +1751,38 @@ test("partner logout is blocked until active pickup workflow is completed", asyn
       sizeBytes: 12345,
       amountCollected: 40000,
       paymentMode: "UPI",
-      transactionRef: "UPI-112",
     })
     .expect(200);
 
-  await request(app)
+  const rejectedWrongFinalAmount = await request(app)
     .post(`/api/v1/partner/leads/${leadId}/completion`)
     .set("Authorization", `Bearer ${partnerSession.accessToken}`)
-    .send({ finalAmount: 40000, handoverChecklist: { callDone: true }, remarks: "done" })
+    .send({ finalAmount: 38999, handoverChecklist: { callDone: true } })
+    .expect(400);
+
+  assert.equal(rejectedWrongFinalAmount.body.error.message, "Final amount must match the backend computed re quoted price.");
+
+  const rejectedCompletionFields = await request(app)
+    .post(`/api/v1/partner/leads/${leadId}/completion`)
+    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
+    .send({ finalAmount: 39000, handoverChecklist: { callDone: true }, remarks: "done" })
+    .expect(400);
+
+  assert.equal(rejectedCompletionFields.body.error.message, "Unsupported field(s): remarks");
+
+  const completion = await request(app)
+    .post(`/api/v1/partner/leads/${leadId}/completion`)
+    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
+    .send({ finalAmount: 39000, handoverChecklist: { callDone: true } })
     .expect(200);
+
+  assert.equal(completion.body.data.lead.onsiteValidation.revisedQuote, 39000);
+
+  assert.equal(completion.body.data.lead.completionEvent.invoice.deductions.deductionType, "RUPEES");
+  assert.equal(completion.body.data.lead.completionEvent.invoice.deductions.totalDeductionAmount, 2200);
+  assert.equal(completion.body.data.lead.completionEvent.invoice.deductions.questionDeductions[0].deductRupees, 1200);
+  assert.equal(completion.body.data.lead.completionEvent.invoice.deductions.issues[0].deductRupees, 1000);
+  assert.equal(completion.body.data.lead.completionEvent.invoice.finalAmount, 39000);
 
   const allowedLogout = await request(app)
     .post("/api/v1/auth/logout")
@@ -1099,6 +1790,171 @@ test("partner logout is blocked until active pickup workflow is completed", asyn
     .expect(200);
 
   assert.equal(allowedLogout.body.data.loggedOut, true);
+});
+
+test("onsite validation rejects legacy gstBill and sameImei checklist keys", async () => {
+  const userSession = await createUserSession("8000000310");
+  const partnerSession = await createPartnerSession("9000000310");
+
+  const create = await request(app)
+    .post("/api/v1/user/sell-flows")
+    .set("Authorization", `Bearer ${userSession.accessToken}`)
+    .send({
+      servicePincode: "560001",
+      selectedModel: {
+        brandSlug: "apple",
+        modelId: "iphone-13",
+        modelName: "iPhone 13",
+        listedPrice: 52000,
+      },
+    })
+    .expect(200);
+
+  const flowId = create.body.data.flow.id;
+
+  await request(app)
+    .patch(`/api/v1/user/sell-flows/${flowId}/device-details`)
+    .set("Authorization", `Bearer ${userSession.accessToken}`)
+    .send({
+      deviceDetails: {
+        basicFunctionality: { canMakeCalls: "yes", touchWorking: "yes" },
+        physicalIssues: [],
+      },
+    })
+    .expect(200);
+
+  await request(app)
+    .post(`/api/v1/user/sell-flows/${flowId}/quote`)
+    .set("Authorization", `Bearer ${userSession.accessToken}`)
+    .expect(200);
+
+  await request(app)
+    .patch(`/api/v1/user/sell-flows/${flowId}/pickup-schedule`)
+    .set("Authorization", `Bearer ${userSession.accessToken}`)
+    .send({
+      pickupSchedule: {
+        pincode: "560001",
+        primaryDate: "2026-07-30T00:00:00.000Z",
+        primaryTime: "12:00 PM - 1:00 PM",
+        alternateDate: "2026-07-31T00:00:00.000Z",
+        alternateTime: "2:00 PM - 3:00 PM",
+        sellerName: "Legacy Key User",
+        callingPhoneNumber: "8000000310",
+        addressLine: "House 310, Legacy Street",
+        landmark: "Near Legacy Circle",
+        city: "Bengaluru",
+      },
+    })
+    .expect(200);
+
+  const leadBucket = await request(app)
+    .get("/api/v1/partner/lead-bucket?pincode=560001")
+    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
+    .expect(200);
+
+  const leadId = leadBucket.body.data.rows.find((row) => row.userSellFlowId === flowId)?.id;
+  assert.equal(Boolean(leadId), true);
+
+  await request(app)
+    .post(`/api/v1/partner/leads/${leadId}/claim`)
+    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
+    .expect(200);
+
+  await request(app)
+    .patch(`/api/v1/partner/leads/${leadId}/status`)
+    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
+    .send({ status: "ACCEPTED" })
+    .expect(200);
+
+  await request(app)
+    .patch(`/api/v1/partner/leads/${leadId}/status`)
+    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
+    .send({ status: "IN_PROGRESS" })
+    .expect(200);
+
+  const legacyResponse = await request(app)
+    .post(`/api/v1/partner/leads/${leadId}/onsite-validation`)
+    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
+    .send({
+      checklist: {
+        gstBill: "Yes",
+        sameImei: "Yes",
+        __deductions: JSON.stringify({
+          listedPrice: 52000,
+          totalDeductionAmount: 0,
+          questionDeductions: [],
+          anyOtherIssues: [],
+        }),
+      },
+      observedIssues: [],
+      revisedQuote: 52000,
+    })
+    .expect(400);
+
+  assert.equal(legacyResponse.body.error.code, "BAD_REQUEST");
+  assert.equal(
+    legacyResponse.body.error.message,
+    "Use checklist.gstBillSameImei only. Legacy checklist keys gstBill and sameImei are no longer supported.",
+  );
+});
+
+test("onsite validation requires exactly six validation photos", async () => {
+  const partnerSession = await createPartnerSession("9000000311");
+  const flowId = await createScheduledSellFlow({
+    userPhone: "8000000311",
+    modelId: "photo-required-phone",
+    modelName: "Photo Required Phone",
+    sellerName: "Photo Required User",
+  });
+
+  const leadBucket = await request(app)
+    .get("/api/v1/partner/lead-bucket?pincode=560001")
+    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
+    .expect(200);
+
+  const leadId = leadBucket.body.data.rows.find((row) => row.userSellFlowId === flowId)?.id;
+  assert.equal(Boolean(leadId), true);
+
+  await request(app)
+    .post(`/api/v1/partner/leads/${leadId}/claim`)
+    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
+    .expect(200);
+
+  await request(app)
+    .patch(`/api/v1/partner/leads/${leadId}/status`)
+    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
+    .send({ status: "ACCEPTED" })
+    .expect(200);
+
+  await request(app)
+    .patch(`/api/v1/partner/leads/${leadId}/status`)
+    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
+    .send({ status: "IN_PROGRESS" })
+    .expect(200);
+
+  const response = await request(app)
+    .post(`/api/v1/partner/leads/${leadId}/onsite-validation`)
+    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
+    .field("checklist", JSON.stringify({
+      gstBillSameImei: JSON.stringify({
+        field: "GST Bill with Same IMEI",
+        userInput: "Yes",
+        partnerVerify: "yes",
+        deductRupees: 0,
+        comment: null,
+      }),
+      screen: "ok",
+    }))
+    .field("observedIssues", JSON.stringify([]))
+    .field("revisedQuote", "7020")
+    .attach("photos", Buffer.from("photo-1"), { filename: "photo-1.png", contentType: "image/png" })
+    .attach("photos", Buffer.from("photo-2"), { filename: "photo-2.png", contentType: "image/png" })
+    .attach("photos", Buffer.from("photo-3"), { filename: "photo-3.png", contentType: "image/png" })
+    .attach("photos", Buffer.from("photo-4"), { filename: "photo-4.png", contentType: "image/png" })
+    .attach("photos", Buffer.from("photo-5"), { filename: "photo-5.png", contentType: "image/png" })
+    .expect(400);
+
+  assert.equal(response.body.error.message, "Exactly 6 validation photos are required.");
 });
 
 test("admin lead assignment scope mapping and partner search support onboarding", async () => {
@@ -1221,9 +2077,9 @@ test("admin manual and bulk assignment enforce pincode eligibility and bulk cap"
       pickupSchedule: {
         pincode: "560001",
         primaryDate: "2026-08-15T00:00:00.000Z",
-        primaryTime: "10:00 AM - 12:00 PM",
+        primaryTime: "10:00 AM - 11:00 AM",
         alternateDate: "2026-08-16T00:00:00.000Z",
-        alternateTime: "2:00 PM - 4:00 PM",
+        alternateTime: "2:00 PM - 3:00 PM",
         sellerName: "Scope User",
         callingPhoneNumber: "8000000201",
         addressLine: "House 201",
@@ -1266,7 +2122,7 @@ test("admin manual and bulk assignment enforce pincode eligibility and bulk cap"
     .expect(400);
 });
 
-test("auto round-robin assignment alternates by mapped partners in same pincode", async () => {
+test("pickup scheduling leaves mapped pincode leads unassigned for partner unlock", async () => {
   const adminToken = await createAdminToken();
   const partnerOne = await createPartnerSession("9000000401");
   const partnerTwo = await createPartnerSession("9000000402");
@@ -1330,9 +2186,9 @@ test("auto round-robin assignment alternates by mapped partners in same pincode"
         pickupSchedule: {
           pincode: "560001",
           primaryDate: "2026-09-10T00:00:00.000Z",
-          primaryTime: "10:00 AM - 12:00 PM",
+          primaryTime: "10:00 AM - 11:00 AM",
           alternateDate: "2026-09-11T00:00:00.000Z",
-          alternateTime: "2:00 PM - 4:00 PM",
+          alternateTime: "2:00 PM - 3:00 PM",
           sellerName: "Auto User",
           callingPhoneNumber: phone,
           addressLine: "Auto House",
@@ -1361,7 +2217,169 @@ test("auto round-robin assignment alternates by mapped partners in same pincode"
     return;
   }
 
-  assert.equal(Boolean(firstLead.partnerId), true);
-  assert.equal(Boolean(secondLead.partnerId), true);
-  assert.notEqual(firstLead.partnerId, secondLead.partnerId);
+  assert.equal(firstLead.partnerId, null);
+  assert.equal(secondLead.partnerId, null);
+  assert.equal(firstLead.status, "AVAILABLE");
+  assert.equal(secondLead.status, "AVAILABLE");
+});
+
+test("pickup schedule rejects invalid slot labels", async () => {
+  const session = await createUserSession("8000000451");
+
+  const create = await request(app)
+    .post("/api/v1/user/sell-flows")
+    .set("Authorization", `Bearer ${session.accessToken}`)
+    .send({
+      servicePincode: "560001",
+      selectedModel: {
+        brandSlug: "apple",
+        modelId: "iphone-11",
+        modelName: "iPhone 11",
+        listedPrice: 21000,
+      },
+    })
+    .expect(200);
+
+  const flowId = create.body.data.flow.id;
+
+  await request(app)
+    .patch(`/api/v1/user/sell-flows/${flowId}/device-details`)
+    .set("Authorization", `Bearer ${session.accessToken}`)
+    .send({
+      deviceDetails: {
+        basicFunctionality: { canMakeCalls: "yes", touchWorking: "yes" },
+        physicalIssues: [],
+      },
+    })
+    .expect(200);
+
+  await request(app)
+    .post(`/api/v1/user/sell-flows/${flowId}/quote`)
+    .set("Authorization", `Bearer ${session.accessToken}`)
+    .expect(200);
+
+  const invalidSlot = await request(app)
+    .patch(`/api/v1/user/sell-flows/${flowId}/pickup-schedule`)
+    .set("Authorization", `Bearer ${session.accessToken}`)
+    .send({
+      pickupSchedule: {
+        pincode: "560001",
+        primaryDate: "2026-10-15T00:00:00.000Z",
+        primaryTime: "10:00 AM - 12:00 PM",
+        alternateDate: "2026-10-16T00:00:00.000Z",
+        alternateTime: "2:00 PM - 3:00 PM",
+        sellerName: "Invalid Slot User",
+        callingPhoneNumber: "8000000451",
+        addressLine: "House 451",
+        landmark: "Near Lake",
+        city: "Bengaluru",
+      },
+    })
+    .expect(400);
+
+  assert.equal(invalidSlot.body.error.code, "BAD_REQUEST");
+  assert.match(invalidSlot.body.error.message, /Invalid pickup slot selected/);
+});
+
+test("pickup schedule rejects past same-day slots and allows later same-day slots", async () => {
+  await withMockedNow("2026-10-15T08:45:00.000Z", async () => {
+    const session = await createUserSession("8000000452");
+
+    const create = await request(app)
+      .post("/api/v1/user/sell-flows")
+      .set("Authorization", `Bearer ${session.accessToken}`)
+      .send({
+        servicePincode: "560001",
+        selectedModel: {
+          brandSlug: "apple",
+          modelId: "iphone-12-mini",
+          modelName: "iPhone 12 Mini",
+          listedPrice: 26000,
+        },
+      })
+      .expect(200);
+
+    const flowId = create.body.data.flow.id;
+
+    await request(app)
+      .patch(`/api/v1/user/sell-flows/${flowId}/device-details`)
+      .set("Authorization", `Bearer ${session.accessToken}`)
+      .send({
+        deviceDetails: {
+          basicFunctionality: { canMakeCalls: "yes", touchWorking: "yes" },
+          physicalIssues: [],
+        },
+      })
+      .expect(200);
+
+    await request(app)
+      .post(`/api/v1/user/sell-flows/${flowId}/quote`)
+      .set("Authorization", `Bearer ${session.accessToken}`)
+      .expect(200);
+
+    const pastPrimarySlot = await request(app)
+      .patch(`/api/v1/user/sell-flows/${flowId}/pickup-schedule`)
+      .set("Authorization", `Bearer ${session.accessToken}`)
+      .send({
+        pickupSchedule: {
+          pincode: "560001",
+          primaryDate: "2026-10-15T00:00:00.000Z",
+          primaryTime: "2:00 PM - 3:00 PM",
+          alternateDate: "2026-10-16T00:00:00.000Z",
+          alternateTime: "4:00 PM - 5:00 PM",
+          sellerName: "Slot Timing User",
+          callingPhoneNumber: "8000000452",
+          addressLine: "House 452",
+          landmark: "Near Bridge",
+          city: "Bengaluru",
+        },
+      })
+      .expect(400);
+
+    assert.equal(pastPrimarySlot.body.error.code, "BAD_REQUEST");
+    assert.match(pastPrimarySlot.body.error.message, /preferred pickup slot has already passed/);
+
+    const pastAlternateSlot = await request(app)
+      .patch(`/api/v1/user/sell-flows/${flowId}/pickup-schedule`)
+      .set("Authorization", `Bearer ${session.accessToken}`)
+      .send({
+        pickupSchedule: {
+          pincode: "560001",
+          primaryDate: "2026-10-15T00:00:00.000Z",
+          primaryTime: "3:00 PM - 4:00 PM",
+          alternateDate: "2026-10-15T00:00:00.000Z",
+          alternateTime: "2:00 PM - 3:00 PM",
+          sellerName: "Slot Timing User",
+          callingPhoneNumber: "8000000452",
+          addressLine: "House 452",
+          landmark: "Near Bridge",
+          city: "Bengaluru",
+        },
+      })
+      .expect(400);
+
+    assert.equal(pastAlternateSlot.body.error.code, "BAD_REQUEST");
+    assert.match(pastAlternateSlot.body.error.message, /alternate pickup slot has already passed/);
+
+    const laterSameDaySlot = await request(app)
+      .patch(`/api/v1/user/sell-flows/${flowId}/pickup-schedule`)
+      .set("Authorization", `Bearer ${session.accessToken}`)
+      .send({
+        pickupSchedule: {
+          pincode: "560001",
+          primaryDate: "2026-10-15T00:00:00.000Z",
+          primaryTime: "3:00 PM - 4:00 PM",
+          alternateDate: "2026-10-16T00:00:00.000Z",
+          alternateTime: "2:00 PM - 3:00 PM",
+          sellerName: "Slot Timing User",
+          callingPhoneNumber: "8000000452",
+          addressLine: "House 452",
+          landmark: "Near Bridge",
+          city: "Bengaluru",
+        },
+      })
+      .expect(200);
+
+    assert.equal(laterSameDaySlot.body.data.flow.status, "PICKUP_SCHEDULED");
+  });
 });

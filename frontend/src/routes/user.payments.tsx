@@ -18,6 +18,19 @@ function formatInr(value: number) {
   return new Intl.NumberFormat("en-IN").format(value);
 }
 
+function getInvoiceDeductionAmount(invoice: UserDealInvoice) {
+  const flatAmount = invoice.deductions?.totalDeductionAmount;
+  if (Number.isFinite(flatAmount)) return Math.max(0, Math.round(flatAmount ?? 0));
+  const legacyPercent = invoice.deductions?.totalDeductionPercent ?? 0;
+  return Math.max(0, Math.round((invoice.listedPrice * legacyPercent) / 100));
+}
+
+function getIssueDeductionAmount(issue: { deductRupees?: number; deductionAmount?: number; deductionPercent?: number }, listedPrice: number) {
+  const flatAmount = issue.deductRupees ?? issue.deductionAmount;
+  if (Number.isFinite(flatAmount)) return Math.max(0, Math.round(flatAmount ?? 0));
+  return Math.max(0, Math.round((listedPrice * (issue.deductionPercent ?? 0)) / 100));
+}
+
 function UserPaymentsPage() {
   const [invoices, setInvoices] = useState<UserDealInvoice[]>([]);
   const [loading, setLoading] = useState(true);
@@ -65,16 +78,15 @@ function UserPaymentsPage() {
                   <div className="user-payment-invoice-amount">Rs. {formatInr(invoice.finalAmount)}</div>
                   <dl className="user-payment-invoice-grid">
                     <div><dt>Listed Price</dt><dd>Rs. {formatInr(invoice.listedPrice)}</dd></div>
-                    <div><dt>Deduction</dt><dd>{invoice.deductions?.totalDeductionPercent ?? 0}%</dd></div>
+                    <div><dt>Deduction</dt><dd>Rs. {formatInr(getInvoiceDeductionAmount(invoice))}</dd></div>
                     <div><dt>Payment Mode</dt><dd>{invoice.payment?.paymentMode || "-"}</dd></div>
                     <div><dt>Partner</dt><dd>{invoice.partner.name}{invoice.partner.phone ? ` | ${invoice.partner.phone}` : ""}</dd></div>
                     <div><dt>Closed At</dt><dd>{new Date(invoice.completedAt).toLocaleString("en-IN")}</dd></div>
-                    <div><dt>Reference</dt><dd>{invoice.payment?.transactionRef || "-"}</dd></div>
                   </dl>
                   {invoice.deductions?.issues?.length ? (
                     <div className="user-payment-deduction-list">
                       {invoice.deductions.issues.map((issue, index) => (
-                        <span key={`${issue.description}-${index}`}>{issue.description}: {issue.deductionPercent}%</span>
+                        <span key={`${issue.description}-${index}`}>{issue.description}: Rs. {formatInr(getIssueDeductionAmount(issue, invoice.listedPrice))}</span>
                       ))}
                     </div>
                   ) : null}

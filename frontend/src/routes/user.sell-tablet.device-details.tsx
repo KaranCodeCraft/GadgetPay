@@ -67,6 +67,14 @@ type StoredDetails = {
   batteryAndCharging?: AnswerMap;
   accessoriesAndOwnership?: AnswerMap;
   appleBatteryHealth?: AppleBatteryHealth;
+  metadata?: {
+    useCase?: "device-details";
+    questionnaireVersion?: string;
+    flowType?: "sell-tablet";
+    selectedIssues?: string[];
+    selectedIssueGroups?: string[];
+    updatedAt?: string;
+  };
   updatedAt?: string;
 };
 
@@ -293,6 +301,7 @@ function UserSellTabletDeviceDetailsPage() {
     if (typeof window === "undefined") return null;
 
     const cleanIssueAnswers = cleanNestedAnswers(issues, nestedPhysicalIssueAnswers);
+    const updatedAt = new Date().toISOString();
     const details = {
       canMakeCalls: toLegacyBoolean(basicFunctionality.canMakeCalls),
       touchWorking: toLegacyBoolean(basicFunctionality.touchWorking),
@@ -308,8 +317,19 @@ function UserSellTabletDeviceDetailsPage() {
       batteryAndCharging: nextBatteryAnswers,
       accessoriesAndOwnership,
       appleBatteryHealth: isApple ? nextAppleBatteryHealth : undefined,
-      updatedAt: new Date().toISOString(),
+      metadata: buildDeviceDetailsMetadata({ selectedIssues: issues, updatedAt }),
+      updatedAt,
     } satisfies StoredDetails;
+function buildDeviceDetailsMetadata({ selectedIssues, updatedAt }: { selectedIssues: string[]; updatedAt: string; }) {
+  return {
+    useCase: "device-details" as const,
+    questionnaireVersion: "sell-tablet-device-details-v1",
+    flowType: "sell-tablet" as const,
+    selectedIssues,
+    selectedIssueGroups: selectedIssues,
+    updatedAt,
+  };
+}
 
     window.localStorage.setItem(DEVICE_DETAILS_STORAGE_KEY, JSON.stringify(details));
     return details;

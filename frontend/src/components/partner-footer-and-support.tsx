@@ -8,7 +8,7 @@ export function PartnerSharedFooter() {
     <footer className="gp-user-footer">
       <div className="gp-wrap gp-user-footer-grid">
         <div className="gp-user-footer-brand">
-          <div className="gp-user-footer-logo"><img src="/logo.png" alt="GadgetPe" style={{ height: "40px", width: "auto" }} /></div>
+          <div className="gp-user-footer-logo"><img src="/logo-dark.png" alt="GadgetPe" style={{ height: "40px", width: "auto" }} /></div>
           <h3>Turn Your Device Into Money</h3>
           <p>GadgetPe is a modern device marketplace that makes selling your old smartphones, iPads, and tablets simple, secure, and rewarding.</p>
           <div className="gp-user-footer-social" aria-label="Contact shortcuts">
