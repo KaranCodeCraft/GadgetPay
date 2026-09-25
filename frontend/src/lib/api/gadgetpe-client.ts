@@ -152,7 +152,6 @@ type SendUserOtpResponse = {
   phone: string;
   otpTtlSeconds: number;
   resendAfterSeconds: number;
-  devOtp?: string;
   isNewUser: boolean;
   requiresName: boolean;
 };
@@ -876,10 +875,6 @@ export async function sendUserOtp(phone: string): Promise<SendUserOtpResponse> {
 
       const result = await parseResponse<SendUserOtpResponse>(response);
 
-      if (isLocalBrowser() && result.devOtp && base.includes("localhost:4000") && candidates.length > 1) {
-        continue;
-      }
-
       return result;
     } catch (error) {
       lastError = error;
@@ -916,24 +911,6 @@ export async function verifyUserOtp(phone: string, otp: string, name?: string): 
     throw lastError;
   }
   throw new ApiClientError("OTP verification failed.");
-}
-
-export async function userDevLogin(phone: string, name?: string): Promise<UserAuthResponse> {
-  const response = await fetch(`${API_BASE}/auth/user/dev-login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ phone, name }),
-  });
-  return parseResponse<UserAuthResponse>(response);
-}
-
-export async function partnerDevLogin(phone: string, name?: string): Promise<VerifyOtpResponse> {
-  const response = await fetch(`${API_BASE}/auth/partner/dev-login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ phone, name }),
-  });
-  return parseResponse<VerifyOtpResponse>(response);
 }
 
 export type LeadUnlockIntent = {
@@ -1277,7 +1254,7 @@ export async function getUserSellFlowInvoice(token: string, flowId: string): Pro
   return parseResponse(response);
 }
 
-export async function sendPartnerLeadCustomerOtp(token: string, leadId: string): Promise<{ message: string; phone: string; otpTtlSeconds?: number; resendAfterSeconds?: number; devOtp?: string }> {
+export async function sendPartnerLeadCustomerOtp(token: string, leadId: string): Promise<{ message: string; phone: string; otpTtlSeconds?: number; resendAfterSeconds?: number }> {
   const response = await fetch(`${API_BASE}/partner/leads/${encodeURIComponent(leadId)}/customer-otp/send`, {
     method: "POST",
     headers: {

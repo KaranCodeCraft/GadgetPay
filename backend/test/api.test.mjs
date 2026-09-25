@@ -15,7 +15,22 @@ process.env.SQLITE_PATH = testDbPath;
 process.env.JWT_ACCESS_SECRET = "test-access-secret";
 process.env.JWT_REFRESH_SECRET = "test-refresh-secret";
 process.env.ADMIN_DEV_KEY = "admin-dev-key";
-process.env.OTP_PROVIDER = "DEV";
+process.env.OTP_PROVIDER = "FONADA";
+process.env.FONADA_USERNAME = "test-user";
+process.env.FONADA_PASSWORD = "test-password";
+process.env.FONADA_FROM = "GDGTPE";
+process.env.FONADA_DLT_CONTENT_ID_FINAL_OFFERED_PRICE = "1777179007867211903";
+process.env.FONADA_DLT_CONTENT_ID_LOGIN_ACCOUNT = "1777179000698193088";
+process.env.FONADA_DLT_CONTENT_ID_AMOUNT_FOR_PHONE = "1777179000707168575";
+process.env.FONADA_DLT_CONTENT_ID_CREATE_PARTNER = "1777178996814117882";
+process.env.FONADA_DLT_CONTENT_ID_VERIFICATION = "1777178964331680004";
+
+let lastSentOtp;
+global.fetch = async (requestUrl) => {
+  const message = new URL(requestUrl).searchParams.get("text") || "";
+  lastSentOtp = message.match(/\b\d{4,6}\b/)?.[0];
+  return new Response("OK", { status: 200 });
+};
 
 const { app } = await import("../src/app.js");
 const { getPartnerLeadByFlowId, getUserByPhone, listUserSellFlows } = await import("../src/db/repository.js");
@@ -28,7 +43,7 @@ async function createPartnerSession(phone = "9000000001") {
 
   const verify = await request(app)
     .post("/api/v1/auth/partner/otp/verify")
-    .send({ phone, otp: "6767", name: "Test Partner" })
+    .send({ phone, otp: lastSentOtp, name: "Test Partner" })
     .expect(200);
 
   return verify.body.data;
@@ -42,7 +57,7 @@ async function createUserSession(phone = "8000000001") {
 
   const verify = await request(app)
     .post("/api/v1/auth/user/otp/verify")
-    .send({ phone, otp: "6767", name: "Test User" })
+    .send({ phone, otp: lastSentOtp, name: "Test User" })
     .expect(200);
 
   return verify.body.data;
@@ -198,7 +213,7 @@ test("user OTP login only requires name for new users", async () => {
 
   const firstVerify = await request(app)
     .post("/api/v1/auth/user/otp/verify")
-    .send({ phone, otp: "6767", name: "Original User" })
+    .send({ phone, otp: lastSentOtp, name: "Original User" })
     .expect(200);
 
   assert.equal(firstVerify.body.data.user.name, "Original User");
@@ -213,7 +228,7 @@ test("user OTP login only requires name for new users", async () => {
 
   const secondVerify = await request(app)
     .post("/api/v1/auth/user/otp/verify")
-    .send({ phone, otp: "6767" })
+    .send({ phone, otp: lastSentOtp })
     .expect(200);
 
   assert.equal(secondVerify.body.data.user.name, "Original User");

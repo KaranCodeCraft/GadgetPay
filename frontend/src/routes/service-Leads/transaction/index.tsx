@@ -29,8 +29,6 @@ export const Route = createFileRoute("/service-Leads/transaction/")({
 const PARTNER_TOKEN_KEY = "gadgetpe_partner_access_token";
 const LEGACY_PARTNER_TOKEN_KEY = "gadgetpe_access_token";
 const REQUIRED_VALIDATION_PHOTO_COUNT = 6;
-const isCustomerOtpBypassEnabled = import.meta.env.DEV;
-
 function getPartnerToken() {
   if (typeof window === "undefined") return null;
   return window.localStorage.getItem(PARTNER_TOKEN_KEY) || window.localStorage.getItem(LEGACY_PARTNER_TOKEN_KEY);
@@ -200,7 +198,6 @@ function ServiceLeadTransactionPage() {
   const [customerOtpSent, setCustomerOtpSent] = useState(false);
   const [customerOtpVerified, setCustomerOtpVerified] = useState(false);
   const [customerOtpLoading, setCustomerOtpLoading] = useState(false);
-  const [customerOtpDevCode, setCustomerOtpDevCode] = useState<string | null>(null);
   const [paymentFile, setPaymentFile] = useState<File | null>(null);
   const [paymentMode, setPaymentMode] = useState<"UPI" | "BANK_TRANSFER" | "CASH" | "OTHER">("UPI");
   const [paymentSaving, setPaymentSaving] = useState(false);
@@ -246,7 +243,6 @@ function ServiceLeadTransactionPage() {
     setCustomerOtpSent(false);
     setCustomerOtpVerified(false);
     setCustomerOtpLoading(false);
-    setCustomerOtpDevCode(null);
     setPaymentFile(null);
     setPaymentMode("UPI");
     setPaymentSaving(false);
@@ -566,7 +562,6 @@ function ServiceLeadTransactionPage() {
     try {
       const result = await sendPartnerLeadCustomerOtp(token, lead.id);
       setCustomerOtpSent(true);
-      setCustomerOtpDevCode(result.devOtp || null);
       toast.success(`OTP sent to ${result.phone}.`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Unable to send customer OTP.");
@@ -587,26 +582,12 @@ function ServiceLeadTransactionPage() {
     try {
       await verifyPartnerLeadCustomerOtp(token, lead.id, customerOtp.trim());
       setCustomerOtpVerified(true);
-      setCustomerOtpDevCode(null);
       toast.success("Customer OTP verified. Gadget information unlocked.");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Unable to verify customer OTP.");
     } finally {
       setCustomerOtpLoading(false);
     }
-  };
-
-  const handleBypassCustomerOtp = () => {
-    if (!canRequestCustomerOtp) {
-      toast.error("Customer OTP can be bypassed only after this lead is ready for validation.");
-      return;
-    }
-
-    setCustomerOtp("6767");
-    setCustomerOtpSent(true);
-    setCustomerOtpVerified(true);
-    setCustomerOtpDevCode(null);
-    toast.success("Customer OTP bypassed. Gadget information unlocked.");
   };
 
   const handleSubmitPaymentProof = async () => {
@@ -710,17 +691,6 @@ function ServiceLeadTransactionPage() {
                 <button type="button" className="lead-book-btn" onClick={() => { void handleVerifyCustomerOtp(); }} disabled={!customerOtpSent || customerOtpVerified || customerOtp.length < 4 || customerOtpLoading}>
                   {customerOtpVerified ? "Verified" : "Verify OTP"}
                 </button>
-                {isCustomerOtpBypassEnabled && !customerOtpVerified ? (
-                  <button
-                    type="button"
-                    className="lead-otp-bypass-link"
-                    onClick={handleBypassCustomerOtp}
-                    disabled={!canRequestCustomerOtp || customerOtpLoading}
-                  >
-                    Bypass OTP
-                  </button>
-                ) : null}
-                {customerOtpDevCode ? <span className="lead-hint">Dev OTP: {customerOtpDevCode}</span> : null}
               </div>
             </div>
 

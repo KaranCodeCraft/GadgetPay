@@ -23,16 +23,6 @@ export const adminDevLoginSchema = z.object({
   adminId: z.string().min(2).default("admin-1"),
 });
 
-export const partnerDevLoginSchema = z.object({
-  phone: z.string().regex(/^\d{10}$/),
-  name: z.string().min(2).max(80).optional(),
-});
-
-export const userDevLoginSchema = z.object({
-  phone: z.string().regex(/^\d{10}$/),
-  name: z.string().min(2).max(80).optional(),
-});
-
 export const verifyUserOtpSchema = z.object({
   phone: z.string().regex(/^\d{10}$/),
   otp: z.string().regex(/^\d{4,6}$/),

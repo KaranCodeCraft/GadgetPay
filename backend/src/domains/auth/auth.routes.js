@@ -2,8 +2,6 @@ import { Router } from "express";
 import { success } from "../../shared/http/response.js";
 import {
   adminDevLogin,
-  partnerDevLogin,
-  userDevLogin,
   refreshAccessToken,
   sendPartnerOtp,
   sendUserOtp,
@@ -13,8 +11,6 @@ import {
 } from "./auth.service.js";
 import {
   adminDevLoginSchema,
-  partnerDevLoginSchema,
-  userDevLoginSchema,
   refreshTokenSchema,
   sendOtpSchema,
   verifyOtpSchema,
@@ -44,26 +40,6 @@ authRouter.post("/partner/otp/verify", async (req, res, next) => {
   }
 });
 
-authRouter.post("/partner/dev-login", (req, res, next) => {
-  try {
-    const input = partnerDevLoginSchema.parse(req.body);
-    const result = partnerDevLogin(input);
-    res.json(success(result));
-  } catch (err) {
-    next(err);
-  }
-});
-
-authRouter.post("/user/dev-login", (req, res, next) => {
-  try {
-    const input = userDevLoginSchema.parse(req.body);
-    const result = userDevLogin(input);
-    res.json(success(result));
-  } catch (err) {
-    next(err);
-  }
-});
-
 authRouter.post("/refresh", (req, res, next) => {
   try {
     const input = refreshTokenSchema.parse(req.body);
@@ -87,7 +63,7 @@ authRouter.post("/logout", (req, res, next) => {
 authRouter.post("/user/otp/send", async (req, res, next) => {
   try {
     const input = sendOtpSchema.parse(req.body);
-    const result = await sendUserOtp(input.phone);
+    const result = await sendUserOtp(input.phone, "loginAccount");
     res.json(success(result));
   } catch (err) {
     next(err);

@@ -23,6 +23,18 @@ Default port is 4000.
 
 SQLite DB file defaults to backend/data/gadgetpe.sqlite.
 
+### OTP provider
+
+Set `OTP_PROVIDER=FONADA` in `backend/.env` to send OTP messages through Fonada. Configure `FONADA_USERNAME`, `FONADA_PASSWORD`, `FONADA_FROM`, and these DLT content IDs:
+
+- `FONADA_DLT_CONTENT_ID_FINAL_OFFERED_PRICE`
+- `FONADA_DLT_CONTENT_ID_LOGIN_ACCOUNT`
+- `FONADA_DLT_CONTENT_ID_AMOUNT_FOR_PHONE`
+- `FONADA_DLT_CONTENT_ID_CREATE_PARTNER`
+- `FONADA_DLT_CONTENT_ID_VERIFICATION`
+
+`FONADA_API_URL` defaults to the Fonada send endpoint and `FONADA_UNICODE` defaults to `false`. OTP message bodies are maintained in `src/domains/auth/otp-templates.js`.
+
 ## Domain layout
 
 - src/domains/auth: OTP and JWT

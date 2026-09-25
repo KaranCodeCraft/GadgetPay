@@ -2,15 +2,13 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent } from "react";
 import { activateRoleSession, clearRoleSession, getActiveRole } from "../lib/auth/role-session";
 import { PartnerSharedFooter, SupportFab } from "../components/partner-footer-and-support";
-import { getPartnerKycStatus, partnerDevLogin, sendPartnerOtp, submitPartnerKycMetadata, verifyPartnerOtp } from "../lib/api/gadgetpe-client";
+import { getPartnerKycStatus, sendPartnerOtp, submitPartnerKycMetadata, verifyPartnerOtp } from "../lib/api/gadgetpe-client";
 
 export const Route = createFileRoute("/partner")({
   component: PartnerAuthPage,
 });
 
 type IdentityProof = "Aadhar" | "Voter ID" | "Driving License" | "PAN Card" | "Passport";
-
-const isDevOtpBypassEnabled = import.meta.env.DEV;
 
 function PartnerAuthPage() {
   const navigate = useNavigate();
@@ -25,7 +23,6 @@ function PartnerAuthPage() {
   const [signupOtp, setSignupOtp] = useState("");
   const [signupStep, setSignupStep] = useState<"phone" | "otp">("phone");
   const [signupFormStep, setSignupFormStep] = useState<1 | 2 | 3>(1);
-  const [devSignupAuth, setDevSignupAuth] = useState<Awaited<ReturnType<typeof partnerDevLogin>> | null>(null);
   const [fullName, setFullName] = useState("");
   const [age, setAge] = useState("");
   const [gender, setGender] = useState("");
@@ -137,79 +134,6 @@ function PartnerAuthPage() {
     }
   };
 
-  const handleDevLoginOtpBypass = async () => {
-    const phone = loginPhone.trim();
-    if (phone.length < 10) {
-      setError("Please enter a valid phone number.");
-      return;
-    }
-
-    setError(null);
-    setNotice(null);
-    setIsSendingOtp(true);
-
-    try {
-      const result = await partnerDevLogin(phone);
-
-      localStorage.setItem("gadgetpe_access_token", result.accessToken);
-      localStorage.setItem("gadgetpe_partner_access_token", result.accessToken);
-      localStorage.setItem("gadgetpe_refresh_token", result.refreshToken);
-      localStorage.setItem("gadgetpe_partner_refresh_token", result.refreshToken);
-      localStorage.setItem("gadgetpe_partner_name", result.partner.name);
-      activateRoleSession("partner");
-
-      setNotice("Dev login successful.");
-      window.location.assign("/partner-page");
-    } catch (apiError) {
-      setError(apiError instanceof Error ? apiError.message : "Failed to use dev OTP bypass.");
-    } finally {
-      setIsSendingOtp(false);
-    }
-  };
-
-  const handleDevSignupOtpBypass = async () => {
-    if (!fullName.trim()) {
-      setError("Please enter full name.");
-      return;
-    }
-    if (!age.trim()) {
-      setError("Please enter your age.");
-      return;
-    }
-    if (!gender.trim()) {
-      setError("Please select your gender.");
-      return;
-    }
-    if (signupPhone.trim().length < 10) {
-      setError("Please enter a valid phone number.");
-      return;
-    }
-
-    setError(null);
-    setNotice(null);
-    setIsSendingOtp(true);
-
-    try {
-      const result = await partnerDevLogin(signupPhone.trim(), fullName.trim());
-
-      localStorage.setItem("gadgetpe_access_token", result.accessToken);
-      localStorage.setItem("gadgetpe_partner_access_token", result.accessToken);
-      localStorage.setItem("gadgetpe_refresh_token", result.refreshToken);
-      localStorage.setItem("gadgetpe_partner_refresh_token", result.refreshToken);
-      localStorage.setItem("gadgetpe_partner_name", result.partner.name);
-      activateRoleSession("partner");
-
-      setDevSignupAuth(result);
-      setSignupOtp("6767");
-      setSignupStep("otp");
-      setNotice("Dev registration bypass enabled. Submit to complete.");
-    } catch (apiError) {
-      setError(apiError instanceof Error ? apiError.message : "Failed to use dev registration bypass.");
-    } finally {
-      setIsSendingOtp(false);
-    }
-  };
-
   const handleResendLoginOtp = async () => {
     if (loginPhone.trim().length < 10) {
       setError("Please enter a valid phone number.");
@@ -260,7 +184,6 @@ function PartnerAuthPage() {
 
     try {
       await sendPartnerOtp(signupPhone.trim());
-      setDevSignupAuth(null);
       setSignupStep("otp");
       setNotice("OTP sent. Please enter OTP to complete signup.");
     } catch (apiError) {
@@ -299,7 +222,7 @@ function PartnerAuthPage() {
     setIsSubmitting(true);
 
     try {
-      const result = devSignupAuth ?? (await verifyPartnerOtp(signupPhone.trim(), signupOtp.trim(), fullName.trim()));
+      const result = await verifyPartnerOtp(signupPhone.trim(), signupOtp.trim(), fullName.trim());
 
       localStorage.setItem("gadgetpe_access_token", result.accessToken);
       localStorage.setItem("gadgetpe_partner_access_token", result.accessToken);
@@ -338,7 +261,6 @@ function PartnerAuthPage() {
 
     try {
       await sendPartnerOtp(signupPhone.trim());
-      setDevSignupAuth(null);
       setNotice(`OTP sent again to ${signupPhone.trim()}.`);
     } catch (apiError) {
       setError(apiError instanceof Error ? apiError.message : "Failed to resend OTP.");
@@ -381,7 +303,6 @@ function PartnerAuthPage() {
               setSignupStep("phone");
               setSignupFormStep(1);
               setSignupOtp("");
-                setDevSignupAuth(null);
               setError(null);
               setNotice(null);
             }}
@@ -415,16 +336,6 @@ function PartnerAuthPage() {
               <button type="submit" className="partner-submit-btn" disabled={isSendingOtp}>
                 {isSendingOtp ? "Sending OTP..." : "Send OTP"}
               </button>
-              {isDevOtpBypassEnabled ? (
-                <button
-                  type="button"
-                  className="partner-inline-link-btn"
-                  onClick={handleDevLoginOtpBypass}
-                  disabled={isSendingOtp}
-                >
-                  Dev login bypass
-                </button>
-              ) : null}
             </form>
           ) : (
             <form className="partner-auth-form" onSubmit={handleLogin}>
@@ -640,16 +551,6 @@ function PartnerAuthPage() {
                       {isSendingOtp ? "Sending..." : "Send OTP"}
                     </button>
                   </div>
-                  {isDevOtpBypassEnabled ? (
-                    <button
-                      type="button"
-                      className="partner-inline-link-btn"
-                      onClick={handleDevSignupOtpBypass}
-                      disabled={isSendingOtp}
-                    >
-                      Dev registration bypass
-                    </button>
-                  ) : null}
                 </form>
               ) : (
                 <form className="partner-signup-card" onSubmit={handleSignup}>
@@ -666,7 +567,7 @@ function PartnerAuthPage() {
                     <button
                       type="button"
                       className="partner-inline-link-btn"
-                      onClick={() => { setSignupStep("phone"); setSignupOtp(""); setDevSignupAuth(null); setError(null); setNotice(null); }}
+                      onClick={() => { setSignupStep("phone"); setSignupOtp(""); setError(null); setNotice(null); }}
                     >
                       Change number
                     </button>

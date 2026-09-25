@@ -1,8 +1,9 @@
 import crypto from "crypto";
 import jwt from "jsonwebtoken";
-import twilio from "twilio";
 import { env } from "../../config/env.js";
 import { badRequest, unauthorized } from "../../shared/http/errors.js";
+import { sendFonadaSms } from "./fonada.js";
+import { getOtpTemplate } from "./otp-templates.js";
 import {
   deleteOtpCode,
   getOtpCode,
@@ -33,90 +34,25 @@ function issueRefreshToken(payload) {
   });
 }
 
-function getOtpCodeForDev() {
-  return "6767";
-}
-
-function getOtpProvider() {
-  return String(env.otpProvider || "DEV").toUpperCase();
-}
-
-function isTwilioProviderEnabled() {
-  return getOtpProvider() === "TWILIO";
-}
-
-function assertTwilioConfig() {
-  if (!env.twilioAccountSid || !env.twilioAuthToken || !env.twilioVerifyServiceSid) {
-    throw badRequest("Twilio OTP is not configured. Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN and TWILIO_VERIFY_SERVICE_SID.");
-  }
-}
-
-let _twilioClient;
 let _providerBootLogged = false;
 
 function logOtpProviderOnce() {
   if (_providerBootLogged) return;
   _providerBootLogged = true;
-  const provider = getOtpProvider();
-  if (provider === "TWILIO") {
-    console.info(`[OTP] Provider=TWILIO service=${env.twilioVerifyServiceSid}`);
-  } else {
-    console.warn("[OTP] Provider=DEV using local OTP code flow");
-  }
-}
-
-function getTwilioClient() {
-  if (!_twilioClient) {
-    _twilioClient = twilio(env.twilioAccountSid, env.twilioAuthToken);
-  }
-  return _twilioClient;
-}
-
-function toIndianE164(phone) {
-  return `+91${phone}`;
+  console.info(`[OTP] Provider=FONADA sender=${env.fonadaFrom}`);
 }
 
 function getOtpStorageKey(role, phone) {
   return `${role}:${phone}`;
 }
 
-async function sendTwilioVerifyOtp(phone) {
-  logOtpProviderOnce();
-  assertTwilioConfig();
-  const client = getTwilioClient();
-  const verification = await client.verify.v2.services(env.twilioVerifyServiceSid).verifications.create({
-    to: toIndianE164(phone),
-    channel: "sms",
-  });
-
-  return {
-    phone,
-    otpTtlSeconds: env.otpExpiryMinutes * 60,
-    resendAfterSeconds: env.otpResendSeconds,
-    deliveryStatus: verification.status,
-  };
+function createOtp() {
+  return String(crypto.randomInt(100000, 1000000));
 }
 
-async function verifyTwilioOtp(phone, otp) {
-  assertTwilioConfig();
-  const client = getTwilioClient();
-  const check = await client.verify.v2.services(env.twilioVerifyServiceSid).verificationChecks.create({
-    to: toIndianE164(phone),
-    code: otp,
-  });
-
-  if (check.status !== "approved") {
-    throw unauthorized("Invalid or expired OTP");
-  }
-}
-
-export async function sendPartnerOtp(phone) {
+async function sendProviderOtp({ phone, role, templateKey, templateVariables = {} }) {
   logOtpProviderOnce();
-  if (isTwilioProviderEnabled()) {
-    return sendTwilioVerifyOtp(phone);
-  }
-
-  const otpStorageKey = getOtpStorageKey("partner", phone);
+  const otpStorageKey = getOtpStorageKey(role, phone);
   const existing = getOtpCode(otpStorageKey);
   const now = Date.now();
 
@@ -124,48 +60,50 @@ export async function sendPartnerOtp(phone) {
     throw badRequest(`OTP resend allowed after ${env.otpResendSeconds} seconds`);
   }
 
-  const otp = getOtpCodeForDev();
-  const expiresAt = now + env.otpExpiryMinutes * 60 * 1000;
+  const otp = createOtp();
+  const template = getOtpTemplate(templateKey);
+  const contentId = env[template.contentIdConfig];
+  const message = template.render({ ...templateVariables, otp });
+  await sendFonadaSms({ phone, message, contentId });
 
   upsertOtpCode({
     phone: otpStorageKey,
     otp,
     sentAt: now,
-    expiresAt,
+    expiresAt: now + env.otpExpiryMinutes * 60 * 1000,
   });
 
   return {
     phone,
     otpTtlSeconds: env.otpExpiryMinutes * 60,
     resendAfterSeconds: env.otpResendSeconds,
-    devOtp: otp,
+    deliveryStatus: "sent",
   };
+}
+
+export async function sendPartnerOtp(phone) {
+  return sendProviderOtp({ phone, role: "partner", templateKey: "createPartner" });
 }
 
 export async function verifyPartnerOtp({ phone, otp, name }) {
   const otpStorageKey = getOtpStorageKey("partner", phone);
 
-  if (isTwilioProviderEnabled()) {
-    await verifyTwilioOtp(phone, otp);
-    deleteOtpCode(otpStorageKey);
-  } else {
-    const rec = getOtpCode(otpStorageKey);
+  const rec = getOtpCode(otpStorageKey);
 
-    if (!rec) {
-      throw unauthorized("OTP not requested for this phone");
-    }
-
-    if (Date.now() > rec.expiresAt) {
-      deleteOtpCode(otpStorageKey);
-      throw unauthorized("OTP expired");
-    }
-
-    if (rec.otp !== otp) {
-      throw unauthorized("Invalid OTP");
-    }
-
-    deleteOtpCode(otpStorageKey);
+  if (!rec) {
+    throw unauthorized("OTP not requested for this phone");
   }
+
+  if (Date.now() > rec.expiresAt) {
+    deleteOtpCode(otpStorageKey);
+    throw unauthorized("OTP expired");
+  }
+
+  if (rec.otp !== otp) {
+    throw unauthorized("Invalid OTP");
+  }
+
+  deleteOtpCode(otpStorageKey);
 
   const partnerId = `partner-${phone}`;
   const existingPartner = getPartnerById(partnerId);
@@ -284,123 +222,12 @@ export function adminDevLogin({ key, adminId }) {
   };
 }
 
-export function partnerDevLogin({ phone, name }) {
-  if (env.nodeEnv === "production") {
-    throw unauthorized("Partner dev login is disabled in production");
-  }
-
-  const partnerId = `partner-${phone}`;
-  const existingPartner = getPartnerById(partnerId);
-  const partner = {
-    id: partnerId,
-    phone,
-    name: name || existingPartner?.name || `Partner ${phone.slice(-4)}`,
-    createdAt: existingPartner?.createdAt || nowIso(),
-    updatedAt: nowIso(),
-  };
-
-  const persistedPartner = upsertPartner(partner);
-  const accessToken = issueAccessToken({
-    sub: partnerId,
-    role: "partner",
-    phone,
-  });
-
-  const refreshTokenId = crypto.randomUUID();
-  const refreshToken = issueRefreshToken({
-    sub: partnerId,
-    role: "partner",
-    tokenId: refreshTokenId,
-  });
-
-  saveRefreshToken({
-    tokenId: refreshTokenId,
-    subjectId: partnerId,
-    role: "partner",
-    createdAt: nowIso(),
-  });
-
-  return {
-    partner: persistedPartner,
-    accessToken,
-    refreshToken,
-  };
-}
-
-export function userDevLogin({ phone, name }) {
-  if (env.nodeEnv === "production") {
-    throw unauthorized("User dev login is disabled in production");
-  }
-
-  const userId = `user-${phone}`;
-  const existingUser = getUserByPhone(phone);
-  const user = {
-    id: existingUser?.id || userId,
-    phone,
-    name: name || existingUser?.name || `User ${phone.slice(-4)}`,
-    createdAt: existingUser?.createdAt || nowIso(),
-    updatedAt: nowIso(),
-  };
-
-  const persistedUser = upsertUser(user);
-  const accessToken = issueAccessToken({
-    sub: userId,
-    role: "user",
-    phone,
-  });
-
-  const refreshTokenId = crypto.randomUUID();
-  const refreshToken = issueRefreshToken({
-    sub: userId,
-    role: "user",
-    tokenId: refreshTokenId,
-  });
-
-  saveRefreshToken({
-    tokenId: refreshTokenId,
-    subjectId: userId,
-    role: "user",
-    createdAt: nowIso(),
-  });
-
-  return {
-    user: persistedUser,
-    accessToken,
-    refreshToken,
-  };
-}
-
-export async function sendUserOtp(phone) {
-  logOtpProviderOnce();
-  if (isTwilioProviderEnabled()) {
-    const twilioResult = await sendTwilioVerifyOtp(phone);
-    const existingUser = getUserByPhone(phone);
-    return {
-      ...twilioResult,
-      isNewUser: !existingUser,
-      requiresName: !existingUser,
-    };
-  }
-
-  const otpStorageKey = getOtpStorageKey("user", phone);
-  const existing = getOtpCode(otpStorageKey);
-  const now = Date.now();
-
-  if (existing && now - existing.sentAt < env.otpResendSeconds * 1000) {
-    throw badRequest(`OTP resend allowed after ${env.otpResendSeconds} seconds`);
-  }
-
-  const otp = getOtpCodeForDev();
-  const expiresAt = now + env.otpExpiryMinutes * 60 * 1000;
-
-  upsertOtpCode({ phone: otpStorageKey, otp, sentAt: now, expiresAt });
+export async function sendUserOtp(phone, templateKey = "loginAccount") {
+  const fonadaResult = await sendProviderOtp({ phone, role: "user", templateKey });
   const existingUser = getUserByPhone(phone);
 
   return {
-    phone,
-    otpTtlSeconds: env.otpExpiryMinutes * 60,
-    resendAfterSeconds: env.otpResendSeconds,
-    devOtp: otp,
+    ...fonadaResult,
     isNewUser: !existingUser,
     requiresName: !existingUser,
   };
@@ -409,21 +236,16 @@ export async function sendUserOtp(phone) {
 export async function verifyUserOtp({ phone, otp, name }) {
   const otpStorageKey = getOtpStorageKey("user", phone);
 
-  if (isTwilioProviderEnabled()) {
-    await verifyTwilioOtp(phone, otp);
-    deleteOtpCode(otpStorageKey);
-  } else {
-    const rec = getOtpCode(otpStorageKey);
+  const rec = getOtpCode(otpStorageKey);
 
-    if (!rec) throw unauthorized("OTP not requested for this phone");
-    if (Date.now() > rec.expiresAt) {
-      deleteOtpCode(otpStorageKey);
-      throw unauthorized("OTP expired");
-    }
-    if (rec.otp !== otp) throw unauthorized("Invalid OTP");
-
+  if (!rec) throw unauthorized("OTP not requested for this phone");
+  if (Date.now() > rec.expiresAt) {
     deleteOtpCode(otpStorageKey);
+    throw unauthorized("OTP expired");
   }
+  if (rec.otp !== otp) throw unauthorized("Invalid OTP");
+
+  deleteOtpCode(otpStorageKey);
 
   const userId = `user-${phone}`;
   const now = nowIso();

@@ -1541,12 +1541,11 @@ partnerRouter.post("/leads/:leadId/customer-otp/send", requireAuth, requireRole(
       throw badRequest("Customer phone number is unavailable for this lead.");
     }
 
-    const result = await sendUserOtp(phone);
+    const result = await sendUserOtp(phone, "amountForPhone");
     res.json(success({
       phone: result.phone,
       otpTtlSeconds: result.otpTtlSeconds,
       resendAfterSeconds: result.resendAfterSeconds,
-      devOtp: result.devOtp,
     }));
   } catch (err) {
     next(err);

@@ -39,12 +39,17 @@ export const env = {
   jwtRefreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || "5d",
   otpResendSeconds: Number(process.env.OTP_RESEND_SECONDS || 30),
   otpExpiryMinutes: Number(process.env.OTP_EXPIRY_MINUTES || 5),
-  otpProvider: otpEnv("OTP_PROVIDER", "DEV"),
-  twilioAccountSid: otpEnv("TWILIO_ACCOUNT_SID"),
-  twilioAuthToken: otpEnv("TWILIO_AUTH_TOKEN"),
-  twilioVerifyServiceSid: otpEnv("TWILIO_VERIFY_SERVICE_SID"),
-  twilioMessagingServiceSid: otpEnv("TWILIO_MESSAGING_SERVICE_SID"),
-  twilioFromNumber: otpEnv("TWILIO_FROM_NUMBER"),
+  otpProvider: otpEnv("OTP_PROVIDER", "FONADA"),
+  fonadaApiUrl: otpEnv("FONADA_API_URL", "https://app3.flash49.com/fe/api/v1/send"),
+  fonadaUsername: otpEnv("FONADA_USERNAME"),
+  fonadaPassword: otpEnv("FONADA_PASSWORD"),
+  fonadaFrom: otpEnv("FONADA_FROM", "GDGTPE"),
+  fonadaUnicode: otpEnv("FONADA_UNICODE", "false"),
+  fonadaDltContentIdFinalOfferedPrice: otpEnv("FONADA_DLT_CONTENT_ID_FINAL_OFFERED_PRICE"),
+  fonadaDltContentIdLoginAccount: otpEnv("FONADA_DLT_CONTENT_ID_LOGIN_ACCOUNT"),
+  fonadaDltContentIdAmountForPhone: otpEnv("FONADA_DLT_CONTENT_ID_AMOUNT_FOR_PHONE"),
+  fonadaDltContentIdCreatePartner: otpEnv("FONADA_DLT_CONTENT_ID_CREATE_PARTNER"),
+  fonadaDltContentIdVerification: otpEnv("FONADA_DLT_CONTENT_ID_VERIFICATION"),
   pincodeCacheTtlSeconds: Number(process.env.PINCODE_CACHE_TTL_SECONDS || 300),
   adminDevKey: process.env.ADMIN_DEV_KEY || "admin-dev-key",
   leadEventProjectorIntervalMs: Number(process.env.LEAD_EVENT_PROJECTOR_INTERVAL_MS || 5000),
@@ -54,19 +59,22 @@ export const env = {
 };
 
 const otpProvider = String(env.otpProvider || "DEV").toUpperCase();
-const validOtpProviders = new Set(["DEV", "TWILIO"]);
+const validOtpProviders = new Set(["FONADA"]);
 
 if (!validOtpProviders.has(otpProvider)) {
-  throw new Error(`Invalid OTP_PROVIDER: ${env.otpProvider}. Allowed values are DEV or TWILIO.`);
+  throw new Error(`Invalid OTP_PROVIDER: ${env.otpProvider}. Only FONADA is supported.`);
 }
 
-if (otpProvider === "TWILIO") {
-  const missing = [];
-  if (!env.twilioAccountSid) missing.push("TWILIO_ACCOUNT_SID");
-  if (!env.twilioAuthToken) missing.push("TWILIO_AUTH_TOKEN");
-  if (!env.twilioVerifyServiceSid) missing.push("TWILIO_VERIFY_SERVICE_SID");
+const missing = [];
+if (!env.fonadaUsername) missing.push("FONADA_USERNAME");
+if (!env.fonadaPassword) missing.push("FONADA_PASSWORD");
+if (!env.fonadaFrom) missing.push("FONADA_FROM");
+if (!env.fonadaDltContentIdFinalOfferedPrice) missing.push("FONADA_DLT_CONTENT_ID_FINAL_OFFERED_PRICE");
+if (!env.fonadaDltContentIdLoginAccount) missing.push("FONADA_DLT_CONTENT_ID_LOGIN_ACCOUNT");
+if (!env.fonadaDltContentIdAmountForPhone) missing.push("FONADA_DLT_CONTENT_ID_AMOUNT_FOR_PHONE");
+if (!env.fonadaDltContentIdCreatePartner) missing.push("FONADA_DLT_CONTENT_ID_CREATE_PARTNER");
+if (!env.fonadaDltContentIdVerification) missing.push("FONADA_DLT_CONTENT_ID_VERIFICATION");
 
-  if (missing.length > 0) {
-    throw new Error(`OTP_PROVIDER=TWILIO but missing required env vars: ${missing.join(", ")}`);
-  }
+if (missing.length > 0) {
+  throw new Error(`Fonada OTP is not configured. Missing required env vars: ${missing.join(", ")}`);
 }
