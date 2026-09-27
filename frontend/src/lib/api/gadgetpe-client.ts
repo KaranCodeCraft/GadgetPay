@@ -570,6 +570,7 @@ export type ServiceabilityUploadResponse = {
 };
 
 export type PartnerLeadStatus = "AVAILABLE" | "CLAIMED" | "ACCEPTED" | "IN_PROGRESS" | "COMPLETED" | "REJECTED" | "CANCELLED";
+export type PartnerLeadCallStatus = "CALLED" | "NO_ANSWER" | "BUSY" | "DECLINED" | "RESCHEDULE_REQUESTED" | "FOLLOW_UP_REQUIRED";
 
 export type PartnerOnsiteDeductionRuleLine = {
   ruleId: string;
@@ -633,7 +634,7 @@ export type PartnerLead = {
   cancelledAt: string | null;
   rejectionReason: string | null;
   pickupStartedAt: string | null;
-  callStatus: "CALLED" | "NO_ANSWER" | "RESCHEDULE_REQUESTED" | "FOLLOW_UP_REQUIRED" | null;
+  callStatus: PartnerLeadCallStatus | null;
   callAttemptCount: number;
   lastCalledAt: string | null;
   callHistory: Array<{
@@ -657,6 +658,8 @@ export type PartnerLead = {
     mimeType: string;
     sizeBytes: number;
     amountCollected: number;
+    quotedAmount?: number;
+    extraPaidAmount?: number;
     paymentMode: "UPI" | "BANK_TRANSFER" | "CASH" | "OTHER";
     storageProvider: string;
     storageKey: string;
@@ -762,11 +765,23 @@ export type AdminPartnerSearchRow = {
   id: string;
   name: string;
   phone: string;
+  status: "ACTIVE" | "SUSPENDED" | "DEACTIVATED";
   createdAt: string;
   updatedAt: string;
   scopePincode: string | null;
   scopeActive: boolean;
   lastAssignedAt: string | null;
+};
+
+export type AdminPartnerRow = {
+  id: string;
+  name: string;
+  phone: string;
+  status: "ACTIVE" | "SUSPENDED" | "DEACTIVATED";
+  statusUpdatedBy: string | null;
+  statusUpdatedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type PartnerPincodeScope = {
@@ -1219,6 +1234,8 @@ export type UserDealInvoice = {
   status: string;
   modelName: string | null;
   listedPrice: number;
+  quotedAmount?: number;
+  extraPaidAmount?: number;
   finalAmount: number;
   deductions?: {
     deductionType?: string;
@@ -1461,7 +1478,7 @@ export async function updatePartnerLeadCallStatus(
   token: string,
   leadId: string,
   input: {
-    callStatus: "CALLED" | "NO_ANSWER" | "RESCHEDULE_REQUESTED" | "FOLLOW_UP_REQUIRED";
+    callStatus: PartnerLeadCallStatus;
     note?: string;
   },
 ): Promise<{ lead: PartnerLead }> {
@@ -1562,6 +1579,7 @@ export async function submitPartnerPaymentProofMetadata(
   input: {
     file: File;
     amountCollected: number;
+    extraPaidAmount?: number;
     paymentMode: "UPI" | "BANK_TRANSFER" | "CASH" | "OTHER";
   },
 ): Promise<{
@@ -1577,6 +1595,7 @@ export async function submitPartnerPaymentProofMetadata(
   const formData = new FormData();
   formData.append("file", input.file);
   formData.append("amountCollected", String(input.amountCollected));
+  formData.append("extraPaidAmount", String(input.extraPaidAmount ?? 0));
   formData.append("paymentMode", input.paymentMode);
 
   const response = await fetch(`${API_BASE}/partner/leads/${encodeURIComponent(leadId)}/payment-proof/metadata`, {
@@ -1943,6 +1962,54 @@ export async function assignAdminLead(
   return parseResponse<AdminLeadAssignmentResponse>(response);
 }
 
+export async function closeAdminLead(
+  token: string,
+  leadId: string,
+  note?: string,
+): Promise<{ lead: PartnerLead }> {
+  const response = await fetch(`${API_BASE}/admin/leads/${encodeURIComponent(leadId)}/close`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ note }),
+  });
+
+  return parseResponse<{ lead: PartnerLead }>(response);
+}
+
+export async function listAdminPartners(
+  token: string,
+  filters: { search?: string; limit?: number } = {},
+): Promise<{ rows: AdminPartnerRow[]; count: number }> {
+  const params = new URLSearchParams();
+  if (filters.search) params.set("search", filters.search);
+  if (typeof filters.limit === "number") params.set("limit", String(filters.limit));
+  const qs = params.toString();
+  const response = await fetch(`${API_BASE}/admin/leads/partners${qs ? `?${qs}` : ""}`, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return parseResponse<{ rows: AdminPartnerRow[]; count: number }>(response);
+}
+
+export async function updateAdminPartnerStatus(
+  token: string,
+  partnerId: string,
+  status: AdminPartnerRow["status"],
+): Promise<{ partner: AdminPartnerRow }> {
+  const response = await fetch(`${API_BASE}/admin/leads/partners/${encodeURIComponent(partnerId)}/status`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ status }),
+  });
+  return parseResponse<{ partner: AdminPartnerRow }>(response);
+}
+
 export async function assignAdminLeadsBulk(
   token: string,
   input: { leadIds: string[]; partnerId: string; note?: string },
@@ -2232,6 +2299,15 @@ export async function listKycSubmissions(
   });
 
   return parseResponse<{ rows: KycSubmissionRow[]; count: number }>(response);
+}
+
+export async function fetchAdminMediaBlob(token: string, mediaPath: string): Promise<Blob> {
+  const apiOrigin = new URL(API_BASE, window.location.origin).origin;
+  const response = await fetch(new URL(mediaPath, apiOrigin), {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) throw new Error("Document could not be loaded.");
+  return response.blob();
 }
 
 export async function verifyKycSubmission(

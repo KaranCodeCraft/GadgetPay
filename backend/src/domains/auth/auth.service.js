@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import { env } from "../../config/env.js";
-import { badRequest, unauthorized } from "../../shared/http/errors.js";
+import { badRequest, forbidden, unauthorized } from "../../shared/http/errors.js";
 import { sendFonadaSms } from "./fonada.js";
 import { getOtpTemplate } from "./otp-templates.js";
 import {
@@ -107,6 +107,9 @@ export async function verifyPartnerOtp({ phone, otp, name }) {
 
   const partnerId = `partner-${phone}`;
   const existingPartner = getPartnerById(partnerId);
+  if (existingPartner && existingPartner.status !== "ACTIVE") {
+    throw forbidden("Partner account is suspended or deactivated");
+  }
   const partner = {
     id: partnerId,
     phone,

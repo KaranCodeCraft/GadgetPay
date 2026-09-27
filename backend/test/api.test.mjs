@@ -27,7 +27,15 @@ process.env.FONADA_DLT_CONTENT_ID_VERIFICATION = "1777178964331680004";
 
 let lastSentOtp;
 global.fetch = async (requestUrl) => {
-  const message = new URL(requestUrl).searchParams.get("text") || "";
+  const url = new URL(requestUrl);
+  if (url.hostname === "aniket-thapa.github.io" && url.pathname.includes("/pincodes/")) {
+    return new Response(JSON.stringify({
+      state: "Karnataka",
+      district: "Bengaluru",
+      offices: [{ officeName: "Bengaluru GPO", officeType: "HO", deliveryStatus: "Delivery" }],
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }
+  const message = url.searchParams.get("text") || "";
   lastSentOtp = message.match(/\b\d{4,6}\b/)?.[0];
   return new Response("OK", { status: 200 });
 };
@@ -184,6 +192,27 @@ async function approvePartnerWalletRecharge({ partnerToken, adminToken, txnRef, 
     .send({ action: "APPROVE", note: "Approved for test lead access" })
     .expect(200);
 }
+
+test("admin can view a partner KYC document through authenticated media", async () => {
+  const adminToken = await createAdminToken();
+  const partner = await createPartnerSession("9000000109");
+  const document = Buffer.from("kyc-document-test");
+
+  const upload = await request(app)
+    .post("/api/v1/partner/kyc/metadata")
+    .set("Authorization", `Bearer ${partner.accessToken}`)
+    .field("identityProof", "Aadhar")
+    .attach("file", document, { filename: "identity.png", contentType: "image/png" })
+    .expect(200);
+
+  const mediaId = upload.body.data.kyc.id;
+  await request(app)
+    .get(`/api/v1/media/${mediaId}`)
+    .set("Authorization", `Bearer ${adminToken}`)
+    .expect("Content-Type", /image\/png/)
+    .expect(200)
+    .expect(document);
+});
 
 test("auth flow returns JWT and protected endpoint works", async () => {
   const session = await createPartnerSession("9000000100");
@@ -1649,6 +1678,21 @@ test("partner can persist call status attempts and read active pickup state", as
   assert.equal(calledTwice.body.data.lead.callAttemptCount, 2);
   assert.equal(calledTwice.body.data.lead.callHistory.length, 2);
 
+  const busy = await request(app)
+    .patch(`/api/v1/partner/leads/${leadId}/call-status`)
+    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
+    .send({ callStatus: "BUSY" })
+    .expect(200);
+  assert.equal(busy.body.data.lead.callStatus, "BUSY");
+
+  const declined = await request(app)
+    .patch(`/api/v1/partner/leads/${leadId}/call-status`)
+    .set("Authorization", `Bearer ${partnerSession.accessToken}`)
+    .send({ callStatus: "DECLINED" })
+    .expect(200);
+  assert.equal(declined.body.data.lead.callStatus, "DECLINED");
+  assert.equal(declined.body.data.lead.callAttemptCount, 4);
+
   const active = await request(app)
     .get("/api/v1/partner/active-pickups?pincode=560001")
     .set("Authorization", `Bearer ${partnerSession.accessToken}`)
@@ -1845,6 +1889,7 @@ test("partner logout is blocked until active pickup workflow is completed", asyn
       mimeType: "image/png",
       sizeBytes: 12345,
       amountCollected: 40000,
+      extraPaidAmount: 1000,
       paymentMode: "UPI",
     })
     .expect(200);
@@ -1855,12 +1900,12 @@ test("partner logout is blocked until active pickup workflow is completed", asyn
     .send({ finalAmount: 38999, handoverChecklist: { callDone: true } })
     .expect(400);
 
-  assert.equal(rejectedWrongFinalAmount.body.error.message, "Final amount must match the backend computed re quoted price.");
+  assert.equal(rejectedWrongFinalAmount.body.error.message, "Final amount must match the quoted amount plus the extra paid amount.");
 
   const rejectedCompletionFields = await request(app)
     .post(`/api/v1/partner/leads/${leadId}/completion`)
     .set("Authorization", `Bearer ${partnerSession.accessToken}`)
-    .send({ finalAmount: 39000, handoverChecklist: { callDone: true }, remarks: "done" })
+    .send({ finalAmount: 40000, handoverChecklist: { callDone: true }, remarks: "done" })
     .expect(400);
 
   assert.equal(rejectedCompletionFields.body.error.message, "Unsupported field(s): remarks");
@@ -1868,7 +1913,7 @@ test("partner logout is blocked until active pickup workflow is completed", asyn
   const completion = await request(app)
     .post(`/api/v1/partner/leads/${leadId}/completion`)
     .set("Authorization", `Bearer ${partnerSession.accessToken}`)
-    .send({ finalAmount: 39000, handoverChecklist: { callDone: true } })
+    .send({ finalAmount: 40000, handoverChecklist: { callDone: true } })
     .expect(200);
 
   assert.equal(completion.body.data.lead.onsiteValidation.revisedQuote, 39000);
@@ -1877,7 +1922,11 @@ test("partner logout is blocked until active pickup workflow is completed", asyn
   assert.equal(completion.body.data.lead.completionEvent.invoice.deductions.totalDeductionAmount, 2200);
   assert.equal(completion.body.data.lead.completionEvent.invoice.deductions.questionDeductions[0].deductRupees, 1200);
   assert.equal(completion.body.data.lead.completionEvent.invoice.deductions.issues[0].deductRupees, 1000);
-  assert.equal(completion.body.data.lead.completionEvent.invoice.finalAmount, 39000);
+  assert.equal(completion.body.data.lead.paymentProof.quotedAmount, 39000);
+  assert.equal(completion.body.data.lead.paymentProof.extraPaidAmount, 1000);
+  assert.equal(completion.body.data.lead.completionEvent.invoice.quotedAmount, 39000);
+  assert.equal(completion.body.data.lead.completionEvent.invoice.extraPaidAmount, 1000);
+  assert.equal(completion.body.data.lead.completionEvent.invoice.finalAmount, 40000);
 
   const allowedLogout = await request(app)
     .post("/api/v1/auth/logout")
@@ -2409,6 +2458,48 @@ test("admin lead assignment scope mapping and partner search support onboarding"
     .expect(403);
 });
 
+test("admin can suspend and reactivate agent accounts", async () => {
+  const adminToken = await createAdminToken();
+  const agent = await createPartnerSession("9000000291");
+
+  const listing = await request(app)
+    .get("/api/v1/admin/leads/partners?search=9000000291")
+    .set("Authorization", `Bearer ${adminToken}`)
+    .expect(200);
+  assert.equal(listing.body.data.rows[0].status, "ACTIVE");
+
+  await request(app)
+    .patch("/api/v1/admin/leads/partners/partner-9000000291/status")
+    .set("Authorization", `Bearer ${adminToken}`)
+    .send({ status: "SUSPENDED" })
+    .expect(200);
+
+  await request(app)
+    .get("/api/v1/partner/coins/balance")
+    .set("Authorization", `Bearer ${agent.accessToken}`)
+    .expect(403);
+
+  await request(app)
+    .post("/api/v1/auth/partner/otp/send")
+    .send({ phone: "9000000291" })
+    .expect(200);
+  await request(app)
+    .post("/api/v1/auth/partner/otp/verify")
+    .send({ phone: "9000000291", otp: lastSentOtp, name: "Test Partner" })
+    .expect(403);
+
+  await request(app)
+    .patch("/api/v1/admin/leads/partners/partner-9000000291/status")
+    .set("Authorization", `Bearer ${adminToken}`)
+    .send({ status: "ACTIVE" })
+    .expect(200);
+
+  await request(app)
+    .get("/api/v1/partner/coins/balance")
+    .set("Authorization", `Bearer ${agent.accessToken}`)
+    .expect(200);
+});
+
 test("admin manual and bulk assignment enforce pincode eligibility and bulk cap", async () => {
   const adminToken = await createAdminToken();
   const userSession = await createUserSession("8000000201");
@@ -2485,6 +2576,12 @@ test("admin manual and bulk assignment enforce pincode eligibility and bulk cap"
 
   const leadId = leadList.body.data.rows[0].id;
 
+  await request(app)
+    .patch("/api/v1/admin/leads/partners/partner-9000000301/status")
+    .set("Authorization", `Bearer ${adminToken}`)
+    .send({ status: "SUSPENDED" })
+    .expect(200);
+
   const ineligible = await request(app)
     .post(`/api/v1/admin/leads/${leadId}/assign`)
     .set("Authorization", `Bearer ${adminToken}`)
@@ -2493,6 +2590,12 @@ test("admin manual and bulk assignment enforce pincode eligibility and bulk cap"
 
   assert.equal(ineligible.body.error.code, "BAD_REQUEST");
 
+  await request(app)
+    .patch("/api/v1/admin/leads/partners/partner-9000000301/status")
+    .set("Authorization", `Bearer ${adminToken}`)
+    .send({ status: "ACTIVE" })
+    .expect(200);
+
   const eligible = await request(app)
     .post(`/api/v1/admin/leads/${leadId}/assign`)
     .set("Authorization", `Bearer ${adminToken}`)
@@ -2500,6 +2603,19 @@ test("admin manual and bulk assignment enforce pincode eligibility and bulk cap"
     .expect(200);
 
   assert.equal(eligible.body.data.assignment.partnerId, "partner-9000000301");
+
+  const closed = await request(app)
+    .post(`/api/v1/admin/leads/${leadId}/close`)
+    .set("Authorization", `Bearer ${adminToken}`)
+    .send({ note: "Customer request" })
+    .expect(200);
+
+  assert.equal(closed.body.data.lead.status, "CANCELLED");
+  await request(app)
+    .post(`/api/v1/admin/leads/${leadId}/close`)
+    .set("Authorization", `Bearer ${adminToken}`)
+    .send({})
+    .expect(400);
 
   await request(app)
     .post("/api/v1/admin/leads/assign/bulk")

@@ -131,6 +131,7 @@ const paymentProofMetadataSchema = z.object({
   fileName: z.string().trim().min(1).max(200),
   mimeType: z.string().trim().min(3).max(120),
   sizeBytes: z.number().int().positive().max(10 * 1024 * 1024),
+  extraPaidAmount: z.number().min(0).max(1000000).default(0),
   amountCollected: z.number().min(0).max(1000000),
   paymentMode: z.enum(["UPI", "BANK_TRANSFER", "CASH", "OTHER"]),
 }).strict();
@@ -153,7 +154,7 @@ const timelineQuerySchema = z.object({
 });
 
 const callStatusSchema = z.object({
-  callStatus: z.enum(["CALLED", "NO_ANSWER", "RESCHEDULE_REQUESTED", "FOLLOW_UP_REQUIRED"]),
+  callStatus: z.enum(["CALLED", "NO_ANSWER", "BUSY", "DECLINED", "RESCHEDULE_REQUESTED", "FOLLOW_UP_REQUIRED"]),
   note: z.string().trim().max(300).optional(),
 });
 
@@ -1747,11 +1748,13 @@ partnerRouter.post("/leads/:leadId/payment-proof/metadata", requireAuth, require
             fileName: req.file.originalname,
             mimeType: req.file.mimetype,
             sizeBytes: req.file.size,
+            extraPaidAmount: req.body.extraPaidAmount === undefined ? 0 : Number(req.body.extraPaidAmount),
             amountCollected: Number(req.body.amountCollected),
             paymentMode: req.body.paymentMode,
           }
         : {
             ...req.body,
+            extraPaidAmount: req.body.extraPaidAmount === undefined ? 0 : Number(req.body.extraPaidAmount),
             amountCollected: Number(req.body.amountCollected),
             sizeBytes: Number(req.body.sizeBytes),
           },
@@ -1766,6 +1769,16 @@ partnerRouter.post("/leads/:leadId/payment-proof/metadata", requireAuth, require
 
     if (!["ACCEPTED", "IN_PROGRESS"].includes(existing.status)) {
       throw badRequest("Payment proof metadata can be submitted only for active accepted leads.");
+    }
+
+    const quotedAmount = Math.round(Number(existing.onsiteValidation?.revisedQuote ?? 0));
+    const totalPayout = quotedAmount + Math.round(input.extraPaidAmount);
+    if (totalPayout > 1000000 || Math.round(input.amountCollected) !== totalPayout) {
+      throw badRequest("Payment amount must equal the quoted amount plus the extra paid amount.", {
+        quotedAmount,
+        extraPaidAmount: Math.round(input.extraPaidAmount),
+        totalPayout,
+      });
     }
 
     const now = nowIso();
@@ -1812,6 +1825,8 @@ partnerRouter.post("/leads/:leadId/payment-proof/metadata", requireAuth, require
       fileName: input.fileName,
       mimeType: input.mimeType,
       sizeBytes: input.sizeBytes,
+      quotedAmount,
+      extraPaidAmount: Math.round(input.extraPaidAmount),
       amountCollected: input.amountCollected,
       paymentMode: input.paymentMode,
       storageProvider: media ? "LOCAL_DISK" : "LOCAL_PLACEHOLDER",
@@ -1856,6 +1871,8 @@ partnerRouter.post("/leads/:leadId/payment-proof/metadata", requireAuth, require
         dispositionKey: "PAYMENT_PROOF_SUBMITTED",
         partnerId: lead.partnerId,
         pincode: lead.pincode,
+        quotedAmount,
+        extraPaidAmount: Math.round(input.extraPaidAmount),
         amountCollected: input.amountCollected,
         actorRole: "partner",
         actorId: req.auth.sub,
@@ -1905,14 +1922,16 @@ partnerRouter.post("/leads/:leadId/completion", requireAuth, requireRole("partne
       throw badRequest("Payment proof metadata is required before completion.");
     }
 
-    const expectedFinalAmount = Number(existing.onsiteValidation?.revisedQuote);
-    if (Number.isFinite(expectedFinalAmount) && Math.round(input.finalAmount) !== Math.round(expectedFinalAmount)) {
-      throw badRequest("Final amount must match the backend computed re quoted price.");
+    const quotedAmount = Number(existing.onsiteValidation?.revisedQuote);
+    const extraPaidAmount = Math.round(Number(existing.paymentProof?.extraPaidAmount ?? 0));
+    const expectedFinalAmount = Number.isFinite(quotedAmount) ? Math.round(quotedAmount) + extraPaidAmount : input.finalAmount;
+    if (Math.round(input.finalAmount) !== expectedFinalAmount) {
+      throw badRequest("Final amount must match the quoted amount plus the extra paid amount.");
     }
 
     const now = nowIso();
     const partner = getPartnerById(req.auth.sub);
-    const finalAmount = Number.isFinite(expectedFinalAmount) ? Math.round(expectedFinalAmount) : input.finalAmount;
+    const finalAmount = expectedFinalAmount;
     const invoice = {
       id: `invoice-${existing.id}`,
       leadId: existing.id,
@@ -1920,6 +1939,8 @@ partnerRouter.post("/leads/:leadId/completion", requireAuth, requireRole("partne
       status: "DEAL_CLOSED",
       modelName: existing.selectedModel?.modelName || null,
       listedPrice: existing.quote?.sellingPrice ?? existing.selectedModel?.listedPrice ?? 0,
+      quotedAmount: Number.isFinite(quotedAmount) ? Math.round(quotedAmount) : finalAmount,
+      extraPaidAmount,
       finalAmount,
       deductions: normalizeInvoiceDeductions(existing.onsiteValidation?.checklist?.__deductions),
       payment: existing.paymentProof ? {

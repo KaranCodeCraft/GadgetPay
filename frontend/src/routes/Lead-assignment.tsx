@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { getActiveRole } from "../lib/auth/role-session";
 import {
@@ -16,6 +16,10 @@ import {
 } from "../lib/api/gadgetpe-client";
 
 export const Route = createFileRoute("/Lead-assignment")({
+  validateSearch: (search: Record<string, unknown>) => ({
+    pincode: typeof search.pincode === "string" ? search.pincode : undefined,
+    leadId: typeof search.leadId === "string" ? search.leadId : undefined,
+  }),
   component: LeadAssignmentPage,
 });
 
@@ -23,9 +27,10 @@ const ADMIN_TOKEN_KEY = "gadgetpe_admin_access_token";
 
 function LeadAssignmentPage() {
   const navigate = useNavigate();
+  const search = Route.useSearch();
   const [adminToken, setAdminToken] = useState<string | null>(() => localStorage.getItem(ADMIN_TOKEN_KEY));
-  const [pincode, setPincode] = useState("");
-  const [mode, setMode] = useState<"AUTO" | "MANUAL">("AUTO");
+  const [pincode, setPincode] = useState(search.pincode ?? "");
+  const [mode, setMode] = useState<"AUTO" | "MANUAL">(search.leadId ? "MANUAL" : "AUTO");
   const [loading, setLoading] = useState(false);
   const [leads, setLeads] = useState<PartnerLead[]>([]);
   const [eligibleCount, setEligibleCount] = useState(0);
@@ -59,10 +64,15 @@ function LeadAssignmentPage() {
     () => leads.filter((lead) => lead.status === "AVAILABLE" && !lead.partnerId),
     [leads],
   );
+  const assignableLeads = useMemo(
+    () => leads.filter((lead) => !["COMPLETED", "REJECTED", "CANCELLED"].includes(lead.status)),
+    [leads],
+  );
+  const activePartners = useMemo(() => partners.filter((partner) => partner.status === "ACTIVE"), [partners]);
 
-  const applyPincodeScope = async () => {
+  const applyPincodeScope = useCallback(async (scopePincode = pincode) => {
     if (!adminToken) return;
-    if (!/^\d{6}$/.test(pincode)) {
+    if (!/^\d{6}$/.test(scopePincode)) {
       toast.error("Enter a valid 6-digit pincode.");
       return;
     }
@@ -70,18 +80,18 @@ function LeadAssignmentPage() {
     setLoading(true);
     try {
       const [leadResult, eligible] = await Promise.all([
-        listAdminLeads(adminToken, { pincode, leadType: "SERVICE_LEAD", limit: 200 }),
-        listAdminEligiblePartnersForPincode(adminToken, pincode),
+        listAdminLeads(adminToken, { pincode: scopePincode, leadType: "SERVICE_LEAD", limit: 200 }),
+        listAdminEligiblePartnersForPincode(adminToken, scopePincode),
       ]);
       setLeads(leadResult.rows);
       setEligibleCount(eligible.count);
       const scopeResult = await listAdminLeadPartnerScopes(adminToken, {
-        pincode,
+        pincode: scopePincode,
         activeOnly: false,
         limit: 200,
       });
       setScopeRows(scopeResult.rows);
-      setSelectedLeadId("");
+      setSelectedLeadId(leadResult.rows.some((lead) => lead.id === search.leadId) ? search.leadId ?? "" : "");
       setSelectedBulkLeadIds([]);
       setSelectedPartnerId("");
       setScopePartnerId("");
@@ -92,7 +102,14 @@ function LeadAssignmentPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [adminToken, pincode, search.leadId]);
+
+  useEffect(() => {
+    if (!search.pincode || !search.leadId) return;
+    setPincode(search.pincode);
+    setMode("MANUAL");
+    void applyPincodeScope(search.pincode);
+  }, [adminToken, applyPincodeScope, search.pincode, search.leadId]);
 
   const searchPartners = async () => {
     if (!adminToken) return;
@@ -331,11 +348,12 @@ function LeadAssignmentPage() {
                   <th className="px-2 py-2">Select</th>
                   <th className="px-2 py-2">Partner</th>
                   <th className="px-2 py-2">Phone</th>
+                  <th className="px-2 py-2">Account</th>
                   <th className="px-2 py-2">Last Assigned</th>
                 </tr>
               </thead>
               <tbody>
-                {partners.map((partner) => (
+                {activePartners.map((partner) => (
                   <tr key={partner.id} className="border-b border-slate-100">
                     <td className="px-2 py-2">
                       <input
@@ -347,13 +365,14 @@ function LeadAssignmentPage() {
                     </td>
                     <td className="px-2 py-2">{partner.name} ({partner.id})</td>
                     <td className="px-2 py-2">{partner.phone}</td>
+                    <td className="px-2 py-2">Active</td>
                     <td className="px-2 py-2">{partner.lastAssignedAt ? new Date(partner.lastAssignedAt).toLocaleString() : "-"}</td>
                   </tr>
                 ))}
-                {partners.length === 0 ? (
+                {activePartners.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="px-2 py-3 text-slate-500">
-                      No partners loaded. Search after applying pincode scope.
+                    <td colSpan={5} className="px-2 py-3 text-slate-500">
+                      No active partners found. Search after applying pincode scope.
                     </td>
                   </tr>
                 ) : null}
@@ -370,7 +389,7 @@ function LeadAssignmentPage() {
                 onChange={(event) => setScopePartnerId(event.target.value)}
               >
                 <option value="">Select partner to map</option>
-                {partners.map((partner) => (
+                {activePartners.map((partner) => (
                   <option key={partner.id} value={partner.id}>
                     {partner.name} ({partner.id})
                   </option>
@@ -394,14 +413,15 @@ function LeadAssignmentPage() {
               <thead>
                 <tr className="border-b border-slate-200 text-slate-500">
                   <th className="px-2 py-2">Pick</th>
-                  <th className="px-2 py-2">Lead</th>
-                  <th className="px-2 py-2">Seller</th>
+                  <th className="px-2 py-2">Device / Storage</th>
+                  <th className="px-2 py-2">Customer</th>
                   <th className="px-2 py-2">Phone</th>
+                  <th className="px-2 py-2">Pickup Location</th>
                   <th className="px-2 py-2">Updated</th>
                 </tr>
               </thead>
               <tbody>
-                {unassignedLeads.map((lead) => (
+                {assignableLeads.map((lead) => (
                   <tr key={lead.id} className="border-b border-slate-100">
                     <td className="px-2 py-2">
                       <input
@@ -419,16 +439,24 @@ function LeadAssignmentPage() {
                         }}
                       />
                     </td>
-                    <td className="px-2 py-2">{lead.id}</td>
+                    <td className="px-2 py-2">
+                      <div className="font-medium text-slate-900">{lead.selectedModel.modelName}</div>
+                      <div className="text-xs text-slate-500">{lead.id}</div>
+                    </td>
                     <td className="px-2 py-2">{lead.seller.name || "-"}</td>
                     <td className="px-2 py-2">{lead.seller.phone || "-"}</td>
+                    <td className="px-2 py-2">
+                      {[lead.seller.addressLine, lead.seller.landmark, lead.seller.city || lead.city]
+                        .filter(Boolean)
+                        .join(", ") || "-"}
+                    </td>
                     <td className="px-2 py-2">{new Date(lead.updatedAt).toLocaleString()}</td>
                   </tr>
                 ))}
-                {unassignedLeads.length === 0 ? (
+                {assignableLeads.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-2 py-3 text-slate-500">
-                      No unassigned SERVICE_LEAD records for this pincode.
+                    <td colSpan={6} className="px-2 py-3 text-slate-500">
+                      No open service leads for this pincode.
                     </td>
                   </tr>
                 ) : null}

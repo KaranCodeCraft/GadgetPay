@@ -155,8 +155,38 @@ export function upsertPartner(partner) {
 
 export function getPartnerById(id) {
   return sqlite
-    .prepare("SELECT id, phone, name, created_at as createdAt, updated_at as updatedAt FROM partners WHERE id = ?")
+    .prepare("SELECT id, phone, name, status, status_updated_by as statusUpdatedBy, status_updated_at as statusUpdatedAt, created_at as createdAt, updated_at as updatedAt FROM partners WHERE id = ?")
     .get(id);
+}
+
+export function listPartnersForAdmin({ search, limit = 100 }) {
+  const safeLimit = Math.min(Math.max(Number(limit) || 100, 1), 500);
+  const clauses = ["1=1"];
+  const params = [];
+  if (search) {
+    clauses.push("(name LIKE ? OR phone LIKE ? OR id LIKE ?)");
+    params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+  }
+
+  return sqlite
+    .prepare(`
+      SELECT id, phone, name, status, status_updated_by as statusUpdatedBy,
+        status_updated_at as statusUpdatedAt, created_at as createdAt, updated_at as updatedAt
+      FROM partners
+      WHERE ${clauses.join(" AND ")}
+      ORDER BY name COLLATE NOCASE ASC
+      LIMIT ?
+    `)
+    .all(...params, safeLimit);
+}
+
+export function updatePartnerAccountStatus({ partnerId, status, updatedBy, updatedAt }) {
+  const result = sqlite.prepare(`
+    UPDATE partners
+    SET status = ?, status_updated_by = ?, status_updated_at = ?, updated_at = ?
+    WHERE id = ?
+  `).run(status, updatedBy, updatedAt, updatedAt, partnerId);
+  return result.changes ? getPartnerById(partnerId) : null;
 }
 
 export function listPartnersForAdminSearch({ search, pincode, includeUnmapped = false, limit = 20 }) {
@@ -184,6 +214,7 @@ export function listPartnersForAdminSearch({ search, pincode, includeUnmapped = 
         p.id,
         p.name,
         p.phone,
+        p.status,
         p.created_at as createdAt,
         p.updated_at as updatedAt,
         s.pincode as scopePincode,
@@ -200,6 +231,7 @@ export function listPartnersForAdminSearch({ search, pincode, includeUnmapped = 
       id: row.id,
       name: row.name,
       phone: row.phone,
+      status: row.status,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
       scopePincode: row.scopePincode || null,
@@ -306,7 +338,7 @@ export function listEligiblePartnersForPincode(pincode) {
         s.last_assigned_at as lastAssignedAt
       FROM partner_pincode_scopes s
       JOIN partners p ON p.id = s.partner_id
-      WHERE s.pincode = ? AND s.is_active = 1
+      WHERE s.pincode = ? AND s.is_active = 1 AND p.status = 'ACTIVE'
       ORDER BY
         CASE WHEN s.last_assigned_at IS NULL THEN 0 ELSE 1 END ASC,
         s.last_assigned_at ASC,
@@ -326,7 +358,8 @@ export function partnerEligibleForPincode({ partnerId, pincode }) {
     .prepare(
       `SELECT 1 as ok
        FROM partner_pincode_scopes
-       WHERE partner_id = ? AND pincode = ? AND is_active = 1
+       JOIN partners p ON p.id = partner_pincode_scopes.partner_id
+       WHERE partner_id = ? AND pincode = ? AND is_active = 1 AND p.status = 'ACTIVE'
        LIMIT 1`
     )
     .get(partnerId, pincode);
@@ -1665,6 +1698,27 @@ export function assignAdminLead({ leadId, partnerId, adminId, assignmentMode = "
   });
 
   return tx({ leadId, partnerId, adminId, assignmentMode, note, createdAt });
+}
+
+export function closeAdminLead({ leadId, closedBy, closedAt }) {
+  const lead = getPartnerLeadById(leadId);
+  if (!lead) return { result: "NOT_FOUND", lead: null, previousStatus: null };
+  if (["COMPLETED", "REJECTED", "CANCELLED"].includes(lead.status)) {
+    return { result: "TERMINAL", lead, previousStatus: lead.status };
+  }
+
+  const result = sqlite.prepare(`
+    UPDATE partner_leads
+    SET status = 'CANCELLED', cancelled_at = ?, updated_at = ?
+    WHERE id = ? AND status NOT IN ('COMPLETED', 'REJECTED', 'CANCELLED')
+  `).run(closedAt, closedAt, leadId);
+
+  return {
+    result: result.changes ? "UPDATED" : "TERMINAL",
+    lead: getPartnerLeadById(leadId),
+    previousStatus: lead.status,
+    closedBy,
+  };
 }
 
 export function assignAdminLeadsBulk({ leadIds, partnerId, adminId, assignmentMode = "MANUAL", note = null, createdAt }) {

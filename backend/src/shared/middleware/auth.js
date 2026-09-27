@@ -1,5 +1,6 @@
 import jwt from "jsonwebtoken";
 import { env } from "../../config/env.js";
+import { getPartnerById } from "../../db/repository.js";
 import { forbidden, unauthorized } from "../http/errors.js";
 
 export function requireAuth(req, res, next) {
@@ -13,6 +14,12 @@ export function requireAuth(req, res, next) {
 
   try {
     req.auth = jwt.verify(token, env.jwtAccessSecret);
+    if (req.auth.role === "partner") {
+      const partner = getPartnerById(req.auth.sub);
+      if (!partner || partner.status !== "ACTIVE") {
+        return next(forbidden("Partner account is suspended or deactivated"));
+      }
+    }
     next();
   } catch {
     next(unauthorized("Invalid or expired access token"));

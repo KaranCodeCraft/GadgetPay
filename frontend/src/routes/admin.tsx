@@ -42,6 +42,9 @@ import {
   listAdminLeadDispositionEvents,
   listAdminLeadDispositionSummary,
   listAdminLeads,
+  closeAdminLead,
+  fetchAdminMediaBlob,
+  listAdminPartners,
   listPriceCatalog,
   listPriceUploadHistory,
   listQuoteDeductionRules,
@@ -54,6 +57,7 @@ import {
   deleteServiceabilityUpload,
   deletePriceUpload,
   updatePriceUploadStatus,
+  updateAdminPartnerStatus,
   updateServiceabilityUploadStatus,
   toggleQuoteDeductionRule,
   uploadIpadPricingExcel,
@@ -76,6 +80,7 @@ import {
   type PincodeValidationPreview,
   type PartnerCoinRechargeRequestRow,
   type AdminLeadUnlockIntentRow,
+  type AdminPartnerRow,
   type PartnerLeadStatus,
   type QuoteDeductionAnswerGroup,
   type QuoteDeductionRule,
@@ -174,7 +179,8 @@ type Partner = {
   leadsToday: number;
   leadsTotal: number;
   earnings: number;
-  status: "Active" | "Inactive";
+  status: "ACTIVE" | "SUSPENDED" | "DEACTIVATED";
+  statusUpdatedAt: string | null;
   rating: number;
 };
 
@@ -554,10 +560,15 @@ const PAGE_SIZE = 15;
 function LeadBucketSection({
   leads,
   onOpenTimeline,
+  onCloseLead,
+  onManualAssign,
 }: {
   leads: Lead[];
   onOpenTimeline: (lead: Lead) => void;
+  onCloseLead: (lead: Lead) => Promise<void>;
+  onManualAssign: (lead: Lead) => void;
 }) {
+  const [closingLeadId, setClosingLeadId] = useState<string | null>(null);
   const [filterStatus, setFilterStatus] = useState<LeadStatus | "All">("All");
   const [page, setPage] = useState(1);
 
@@ -648,6 +659,7 @@ function LeadBucketSection({
                 <th>Status</th>
                 <th>Updated</th>
                 <th>Timeline</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -685,11 +697,32 @@ function LeadBucketSection({
                       View
                     </button>
                   </td>
+                  <td>
+                    {lead.leadType === "SERVICE_LEAD" && !(["COMPLETED", "REJECTED", "CANCELLED"] as PartnerLeadStatus[]).includes(lead.rawStatus) ? (
+                      <button type="button" className="admin-page-btn" onClick={() => onManualAssign(lead)}>
+                        Assign
+                      </button>
+                    ) : null}
+                    {!(["COMPLETED", "REJECTED", "CANCELLED"] as PartnerLeadStatus[]).includes(lead.rawStatus) ? (
+                      <button
+                        type="button"
+                        className="admin-page-btn"
+                        disabled={closingLeadId === lead.id}
+                        onClick={() => {
+                          if (!window.confirm(`Close lead ${lead.id}?`)) return;
+                          setClosingLeadId(lead.id);
+                          void onCloseLead(lead).finally(() => setClosingLeadId(null));
+                        }}
+                      >
+                        {closingLeadId === lead.id ? "Closing..." : "Close"}
+                      </button>
+                    ) : null}
+                  </td>
                 </tr>
               ))}
               {rows.length === 0 ? (
                 <tr>
-                  <td colSpan={18} className="admin-muted">
+                  <td colSpan={19} className="admin-muted">
                     No lead bucket data available.
                   </td>
                 </tr>
@@ -3169,6 +3202,42 @@ function DeductionRuleSection() {
 
 //  Section: KYC Queue 
 
+function KycDocumentLink({ token, mediaUrl }: { token: string; mediaUrl: string }) {
+  const [documentUrl, setDocumentUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let objectUrl: string | null = null;
+    setDocumentUrl(null);
+    setFailed(false);
+
+    void fetchAdminMediaBlob(token, mediaUrl)
+      .then((blob) => {
+        if (controller.signal.aborted) return;
+        objectUrl = URL.createObjectURL(blob);
+        setDocumentUrl(objectUrl);
+      })
+      .catch((err: unknown) => {
+        if (controller.signal.aborted) return;
+        setFailed(true);
+      });
+
+    return () => {
+      controller.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [token, mediaUrl]);
+
+  if (failed) return <span className="admin-muted">Unavailable</span>;
+  if (!documentUrl) return <span className="admin-muted">Loading...</span>;
+  return (
+    <a href={documentUrl} target="_blank" rel="noreferrer" className="user-inline-link">
+      View document
+    </a>
+  );
+}
+
 function KycQueueSection() {
   const [rows, setRows] = useState<KycSubmissionRow[]>([]);
   const [filter, setFilter] = useState<"All" | "PENDING_REVIEW" | "VERIFIED" | "REJECTED">(
@@ -3332,14 +3401,7 @@ function KycQueueSection() {
                   <td>{row.fileName}</td>
                   <td>
                     {row.mediaUrl ? (
-                      <a
-                        href={row.mediaUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="user-inline-link"
-                      >
-                        Open
-                      </a>
+                      adminToken ? <KycDocumentLink token={adminToken} mediaUrl={row.mediaUrl} /> : null
                     ) : (
                       <span className="admin-muted">N/A</span>
                     )}
@@ -3732,34 +3794,64 @@ function PaymentsVerifySection() {
 
 //  Section: Partners Activity 
 
-function PartnersSection({ overview }: { overview: AdminOverviewMetricsResponse | null }) {
+function PartnersSection({ overview, adminToken }: { overview: AdminOverviewMetricsResponse | null; adminToken: string }) {
   const [search, setSearch] = useState("");
+  const [accountRows, setAccountRows] = useState<AdminPartnerRow[]>([]);
+  const [actionPartnerId, setActionPartnerId] = useState<string | null>(null);
 
-  const partners = useMemo<Partner[]>(() => {
-    return (overview?.partnerActivity ?? []).map((partner) => ({
-      id: partner.partnerId,
-      name: partner.partnerName || partner.partnerId,
+  const refreshPartners = async () => {
+    const result = await listAdminPartners(adminToken, { limit: 500 });
+    setAccountRows(result.rows);
+  };
+
+  useEffect(() => {
+    void listAdminPartners(adminToken, { limit: 500 })
+      .then((result) => setAccountRows(result.rows))
+      .catch((err) => toast.error(err instanceof Error ? err.message : "Unable to load partners."));
+  }, [adminToken]);
+
+  const activityById = new Map((overview?.partnerActivity ?? []).map((partner) => [partner.partnerId, partner]));
+  const partners: Partner[] = accountRows.map((account) => {
+    const activity = activityById.get(account.id);
+    return {
+      id: account.id,
+      name: account.name || account.id,
       area: "-",
       pincode: "-",
-      leadsToday: partner.leadsTouched,
-      leadsTotal: partner.completedLeads,
+      leadsToday: activity?.leadsTouched ?? 0,
+      leadsTotal: activity?.completedLeads ?? 0,
       earnings: 0,
-      status: partner.activeLeads > 0 ? "Active" : "Inactive",
+      status: account.status,
+      statusUpdatedAt: account.statusUpdatedAt,
       rating: 0,
-    }));
-  }, [overview]);
+    };
+  });
+
+  const setPartnerStatus = async (partnerId: string, status: AdminPartnerRow["status"]) => {
+    setActionPartnerId(partnerId);
+    try {
+      await updateAdminPartnerStatus(adminToken, partnerId, status);
+      await refreshPartners();
+      toast.success(`Agent ${status.toLowerCase()}.`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Unable to update agent status.");
+    } finally {
+      setActionPartnerId(null);
+    }
+  };
 
   const filtered = partners.filter(
     (p) =>
       p.name.toLowerCase().includes(search.toLowerCase()) ||
       p.id.toLowerCase().includes(search.toLowerCase()) ||
+      (accountRows.find((account) => account.id === p.id)?.phone ?? "").includes(search) ||
       p.area.toLowerCase().includes(search.toLowerCase()) ||
       p.pincode.toLowerCase().includes(search.toLowerCase()),
   );
 
   return (
     <div className="admin-section">
-      <h2 className="admin-section-title">Partners Activity</h2>
+      <h2 className="admin-section-title">Agent Management</h2>
 
       <div className="admin-stat-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
         <StatCard
@@ -3770,9 +3862,9 @@ function PartnersSection({ overview }: { overview: AdminOverviewMetricsResponse 
           accent="#1d9e75"
         />
         <StatCard
-          label="Active Today"
-          value={overview?.activePartners ?? partners.filter((p) => p.status === "Active").length}
-          sub="Online now"
+          label="Active Agents"
+          value={partners.filter((p) => p.status === "ACTIVE").length}
+          sub="Account status"
           icon={Activity}
           accent="#0ea5c9"
         />
@@ -3797,7 +3889,7 @@ function PartnersSection({ overview }: { overview: AdminOverviewMetricsResponse 
           <h3 className="admin-card-title">Partner Directory</h3>
           <input
             type="search"
-            placeholder="Search partner or area"
+            placeholder="Search agent name, ID, or phone"
             className="admin-search-input"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -3809,12 +3901,14 @@ function PartnersSection({ overview }: { overview: AdminOverviewMetricsResponse 
               <tr>
                 <th>ID</th>
                 <th>Name</th>
+                <th>Phone</th>
                 <th>Area</th>
                 <th>Leads Today</th>
                 <th>Total Leads</th>
                 <th>Earnings</th>
                 <th>Rating</th>
                 <th>Status</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -3832,6 +3926,7 @@ function PartnersSection({ overview }: { overview: AdminOverviewMetricsResponse 
                     </div>
                     {p.name}
                   </td>
+                  <td>{accountRows.find((account) => account.id === p.id)?.phone ?? "-"}</td>
                   <td>{p.area}</td>
                   <td className="admin-center">{p.leadsToday}</td>
                   <td className="admin-center">{p.leadsTotal}</td>
@@ -3844,19 +3939,31 @@ function PartnersSection({ overview }: { overview: AdminOverviewMetricsResponse 
                     <span
                       className="admin-status-badge"
                       style={{
-                        background: p.status === "Active" ? "#1d9e7518" : "#ef444418",
-                        color: p.status === "Active" ? "#1d9e75" : "#ef4444",
+                        background: p.status === "ACTIVE" ? "#1d9e7518" : p.status === "SUSPENDED" ? "#f59e0b18" : "#ef444418",
+                        color: p.status === "ACTIVE" ? "#1d9e75" : p.status === "SUSPENDED" ? "#b45309" : "#ef4444",
                       }}
                     >
-                      {p.status}
+                      {p.status === "ACTIVE" ? "Active" : p.status === "SUSPENDED" ? "Suspended" : "Deactivated"}
                     </span>
+                  </td>
+                  <td>
+                    {p.status === "ACTIVE" ? (
+                      <>
+                        <button type="button" className="admin-page-btn" disabled={actionPartnerId === p.id} onClick={() => void setPartnerStatus(p.id, "SUSPENDED")}>Suspend</button>{" "}
+                        <button type="button" className="admin-page-btn" disabled={actionPartnerId === p.id} onClick={() => {
+                          if (window.confirm(`Deactivate agent ${p.name}?`)) void setPartnerStatus(p.id, "DEACTIVATED");
+                        }}>Deactivate</button>
+                      </>
+                    ) : (
+                      <button type="button" className="admin-page-btn" disabled={actionPartnerId === p.id} onClick={() => void setPartnerStatus(p.id, "ACTIVE")}>Activate</button>
+                    )}
                   </td>
                 </tr>
               ))}
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="admin-muted">
-                    No partner data available.
+                  <td colSpan={10} className="admin-muted">
+                    No agent accounts found.
                   </td>
                 </tr>
               ) : null}
@@ -4305,7 +4412,26 @@ function AdminPage() {
         return <OverviewSection leads={leads} overview={overviewMetrics} />;
       case "Lead Bucket":
         return (
-          <LeadBucketSection leads={leads} onOpenTimeline={(lead) => void openTimeline(lead)} />
+          <LeadBucketSection
+            leads={leads}
+            onOpenTimeline={(lead) => void openTimeline(lead)}
+            onCloseLead={async (lead) => {
+              if (!adminToken) return;
+              try {
+                await closeAdminLead(adminToken, lead.id);
+                toast.success(`Lead ${lead.id} closed.`);
+                await fetchAdminAnalytics(adminToken);
+              } catch (err) {
+                toast.error(err instanceof Error ? err.message : "Unable to close lead.");
+              }
+            }}
+            onManualAssign={(lead) => {
+              void navigate({
+                to: "/Lead-assignment",
+                search: { pincode: lead.pincode, leadId: lead.id },
+              });
+            }}
+          />
         );
       case "Lead Disposition":
         return (
@@ -4316,6 +4442,7 @@ function AdminPage() {
           />
         );
       case "Lead Assignment":
+        if (!adminToken) return null;
         return (
           <div className="admin-section">
             <h2 className="admin-section-title">Lead Assignment</h2>
@@ -4326,7 +4453,7 @@ function AdminPage() {
               type="button"
               className="admin-assign-btn"
               onClick={() => {
-                void navigate({ to: "/Lead-assignment" });
+                void navigate({ to: "/Lead-assignment", search: { pincode: undefined, leadId: undefined } });
               }}
             >
               Open Dedicated Lead Assignment
@@ -4354,7 +4481,7 @@ function AdminPage() {
       case "Payments Verify":
         return <PaymentsVerifySection />;
       case "Partners":
-        return <PartnersSection overview={overviewMetrics} />;
+        return adminToken ? <PartnersSection overview={overviewMetrics} adminToken={adminToken} /> : null;
       case "Revenue":
         return <RevenueSection leads={leads} />;
       case "Settings":

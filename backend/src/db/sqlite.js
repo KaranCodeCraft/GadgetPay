@@ -149,6 +149,9 @@ sqlite.exec(`
     id TEXT PRIMARY KEY,
     phone TEXT NOT NULL UNIQUE,
     name TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'ACTIVE',
+    status_updated_by TEXT,
+    status_updated_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
@@ -640,6 +643,17 @@ sqlite.exec(`
   CREATE INDEX IF NOT EXISTS idx_quote_deduction_rules_brand_model
     ON quote_deduction_rules(applies_to_brand, applies_to_model_id);
 `);
+
+function ensurePartnerColumn(columnName, sqlType) {
+  const columns = sqlite.prepare("PRAGMA table_info(partners)").all();
+  if (!columns.some((column) => column.name === columnName)) {
+    sqlite.exec(`ALTER TABLE partners ADD COLUMN ${columnName} ${sqlType}`);
+  }
+}
+
+ensurePartnerColumn("status", "TEXT NOT NULL DEFAULT 'ACTIVE'");
+ensurePartnerColumn("status_updated_by", "TEXT");
+ensurePartnerColumn("status_updated_at", "TEXT");
 
 function ensureDevicePriceUploadHistoryColumn(columnName, sqlType) {
   const columns = sqlite.prepare("PRAGMA table_info(device_price_upload_history)").all();

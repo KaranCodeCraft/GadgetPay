@@ -78,6 +78,8 @@ function UserPaymentsPage() {
                   <div className="user-payment-invoice-amount">Rs. {formatInr(invoice.finalAmount)}</div>
                   <dl className="user-payment-invoice-grid">
                     <div><dt>Listed Price</dt><dd>Rs. {formatInr(invoice.listedPrice)}</dd></div>
+                    <div><dt>Final Quoted Payout</dt><dd>Rs. {formatInr(invoice.quotedAmount ?? invoice.finalAmount)}</dd></div>
+                    <div><dt>Extra Paid</dt><dd>Rs. {formatInr(invoice.extraPaidAmount ?? Math.max(0, invoice.finalAmount - (invoice.quotedAmount ?? invoice.finalAmount)))}</dd></div>
                     <div><dt>Deduction</dt><dd>Rs. {formatInr(getInvoiceDeductionAmount(invoice))}</dd></div>
                     <div><dt>Payment Mode</dt><dd>{invoice.payment?.paymentMode || "-"}</dd></div>
                     <div><dt>Partner</dt><dd>{invoice.partner.name}{invoice.partner.phone ? ` | ${invoice.partner.phone}` : ""}</dd></div>

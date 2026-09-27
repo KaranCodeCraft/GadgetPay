@@ -5,6 +5,7 @@ import {
   appendPartnerLeadDispositionEvent,
   assignAdminLead,
   assignAdminLeadsBulk,
+  closeAdminLead,
   enqueueLeadEventOutbox,
   getAdminLeadAssignmentMetrics,
   getAdminLeadAssignmentMetricsFromSnapshot,
@@ -14,6 +15,7 @@ import {
   getAdminPartnerActivityFeed,
   getPartnerById,
   listEligiblePartnersForPincode,
+  listPartnersForAdmin,
   listPartnerPincodeScopes,
   listPartnersForAdminSearch,
   partnerEligibleForPincode,
@@ -22,6 +24,7 @@ import {
   listPartnerLeadDispositionTimeline,
   listPartnerLeadsForAdmin,
   upsertPartnerPincodeScope,
+  updatePartnerAccountStatus,
 } from "../../db/repository.js";
 import { badRequest, notFound } from "../../shared/http/errors.js";
 import { success } from "../../shared/http/response.js";
@@ -75,6 +78,11 @@ const partnerSearchQuerySchema = z.object({
   pincode: z.string().regex(/^\d{6}$/),
   includeUnmapped: z.coerce.boolean().optional().default(false),
   limit: z.coerce.number().int().min(1).max(100).optional().default(20),
+});
+
+const adminPartnerListQuerySchema = z.object({
+  search: z.string().trim().min(1).max(120).optional(),
+  limit: z.coerce.number().int().min(1).max(500).optional().default(100),
 });
 
 const scopeListQuerySchema = z.object({
@@ -168,6 +176,32 @@ adminLeadsRouter.get("/partners/search", (req, res, next) => {
     });
 
     res.json(success({ rows, count: rows.length }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+adminLeadsRouter.get("/partners", (req, res, next) => {
+  try {
+    const query = adminPartnerListQuerySchema.parse(req.query);
+    const rows = listPartnersForAdmin(query);
+    res.json(success({ rows, count: rows.length }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+adminLeadsRouter.patch("/partners/:partnerId/status", (req, res, next) => {
+  try {
+    const input = z.object({ status: z.enum(["ACTIVE", "SUSPENDED", "DEACTIVATED"]) }).parse(req.body);
+    const partner = updatePartnerAccountStatus({
+      partnerId: req.params.partnerId,
+      status: input.status,
+      updatedBy: req.auth.sub,
+      updatedAt: nowIso(),
+    });
+    if (!partner) throw notFound("Partner not found");
+    res.json(success({ partner }));
   } catch (err) {
     next(err);
   }
@@ -281,6 +315,54 @@ adminLeadsRouter.post("/:leadId/assign", (req, res, next) => {
     });
 
     res.json(success({ lead: result.lead, assignment: result.assignment }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+adminLeadsRouter.post("/:leadId/close", (req, res, next) => {
+  try {
+    const input = z.object({ note: z.string().trim().max(300).optional() }).parse(req.body || {});
+    const now = nowIso();
+    const result = closeAdminLead({ leadId: req.params.leadId, closedBy: req.auth.sub, closedAt: now });
+    if (result.result === "NOT_FOUND" || !result.lead) throw notFound("Lead not found");
+    if (result.result === "TERMINAL") throw badRequest("Lead is already closed or completed.");
+
+    appendPartnerLeadDispositionEvent({
+      id: crypto.randomUUID(),
+      leadId: result.lead.id,
+      userSellFlowId: result.lead.userSellFlowId,
+      partnerId: result.lead.partnerId,
+      fromStatus: result.previousStatus,
+      toStatus: result.lead.status,
+      dispositionKey: "ADMIN_CLOSED",
+      note: input.note || "Lead closed by admin",
+      actorRole: "admin",
+      actorId: req.auth.sub,
+      createdAt: now,
+    });
+
+    enqueueLeadEventOutbox({
+      id: crypto.randomUUID(),
+      eventType: "lead.closed.admin",
+      leadId: result.lead.id,
+      payloadJson: JSON.stringify({
+        leadId: result.lead.id,
+        userSellFlowId: result.lead.userSellFlowId,
+        leadType: result.lead.leadType,
+        fromStatus: result.previousStatus,
+        toStatus: result.lead.status,
+        dispositionKey: "ADMIN_CLOSED",
+        partnerId: result.lead.partnerId,
+        pincode: result.lead.pincode,
+        actorRole: "admin",
+        actorId: req.auth.sub,
+        note: input.note || null,
+      }),
+      occurredAt: now,
+    });
+
+    res.json(success({ lead: result.lead }));
   } catch (err) {
     next(err);
   }

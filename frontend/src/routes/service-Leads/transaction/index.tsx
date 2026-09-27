@@ -16,6 +16,7 @@ import {
   submitPartnerOnsiteValidation,
   submitPartnerPaymentProofMetadata,
   updatePartnerLeadCallStatus,
+  type PartnerLeadCallStatus,
   updatePartnerLeadStatus,
   verifyPartnerLeadCustomerOtp,
   type PartnerLead,
@@ -184,6 +185,7 @@ function ServiceLeadTransactionPage() {
   const [lead, setLead] = useState<PartnerLead | null>(null);
   const [onsiteDeductionCatalog, setOnsiteDeductionCatalog] = useState<PartnerOnsiteDeductionCatalog | null>(null);
   const [callDone, setCallDone] = useState(false);
+  const [selectedCallStatus, setSelectedCallStatus] = useState<PartnerLeadCallStatus>("CALLED");
   const [hasObservedIssues, setHasObservedIssues] = useState(false);
   const [observedIssueRows, setObservedIssueRows] = useState<ObservedIssueRow[]>(() => [createObservedIssueRow()]);
   const [finishing, setFinishing] = useState(false);
@@ -200,6 +202,7 @@ function ServiceLeadTransactionPage() {
   const [customerOtpLoading, setCustomerOtpLoading] = useState(false);
   const [paymentFile, setPaymentFile] = useState<File | null>(null);
   const [paymentMode, setPaymentMode] = useState<"UPI" | "BANK_TRANSFER" | "CASH" | "OTHER">("UPI");
+  const [extraPaidAmount, setExtraPaidAmount] = useState("0");
   const [paymentSaving, setPaymentSaving] = useState(false);
 
   const loadLead = async () => {
@@ -245,6 +248,7 @@ function ServiceLeadTransactionPage() {
     setCustomerOtpLoading(false);
     setPaymentFile(null);
     setPaymentMode("UPI");
+    setExtraPaidAmount("0");
     setPaymentSaving(false);
     setOnsiteDeductionCatalog(null);
   }, [search.leadId]);
@@ -252,7 +256,12 @@ function ServiceLeadTransactionPage() {
   useEffect(() => {
     if (!lead) return;
     setCallDone((lead.callAttemptCount ?? 0) > 0 || Boolean(lead.lastCalledAt));
+    setSelectedCallStatus(lead.callStatus || "CALLED");
   }, [lead]);
+
+  useEffect(() => {
+    setExtraPaidAmount(String(lead?.paymentProof?.extraPaidAmount ?? 0));
+  }, [lead?.id, lead?.paymentProof?.extraPaidAmount]);
 
   useEffect(() => {
     const anchor = lead?.pickupStartedAt || lead?.claimedAt || lead?.updatedAt;
@@ -289,6 +298,9 @@ function ServiceLeadTransactionPage() {
   }, [lead?.deviceDetails]);
 
   const listedPrice = lead?.quote?.sellingPrice ?? lead?.selectedModel.listedPrice ?? 0;
+  const quotedPayout = lead?.onsiteValidation?.revisedQuote ?? reQuotedPrice;
+  const extraPaidValue = Math.max(0, Math.round(Number(extraPaidAmount) || 0));
+  const totalPayout = quotedPayout + extraPaidValue;
   const activeObservedIssueRows = hasObservedIssues ? observedIssueRows : [];
   const observedIssueDeductionAmount = activeObservedIssueRows.reduce((sum, row) => sum + Math.max(0, Math.round(row.deductionAmount || 0)), 0);
   const rowDeductionPreview = useMemo(() => {
@@ -442,7 +454,7 @@ function ServiceLeadTransactionPage() {
     setFinishing(true);
     try {
       const result = await completePartnerLead(token, lead.id, {
-        finalAmount: lead.onsiteValidation?.revisedQuote ?? lead.paymentProof?.amountCollected ?? reQuotedPrice,
+        finalAmount: lead.paymentProof?.amountCollected ?? totalPayout,
         handoverChecklist: {
           callDone,
           validationSaved: Boolean(lead.onsiteValidation),
@@ -533,7 +545,7 @@ function ServiceLeadTransactionPage() {
     }
   }, [lead?.completionEvent]);
 
-  const handleMarkCalled = async () => {
+  const handleSaveCallStatus = async () => {
     if (!lead) return;
     const token = getPartnerToken();
     if (!token) {
@@ -541,7 +553,7 @@ function ServiceLeadTransactionPage() {
       return;
     }
     try {
-      const result = await updatePartnerLeadCallStatus(token, lead.id, { callStatus: "CALLED" });
+      const result = await updatePartnerLeadCallStatus(token, lead.id, { callStatus: selectedCallStatus });
       setLead(result.lead);
       setCallDone(true);
       toast.success("Call status saved.");
@@ -602,7 +614,8 @@ function ServiceLeadTransactionPage() {
     try {
       const result = await submitPartnerPaymentProofMetadata(token, lead.id, {
         file: paymentFile,
-        amountCollected: lead.onsiteValidation?.revisedQuote ?? reQuotedPrice,
+        amountCollected: totalPayout,
+        extraPaidAmount: extraPaidValue,
         paymentMode,
       });
       setLead(result.lead);
@@ -661,7 +674,23 @@ function ServiceLeadTransactionPage() {
           <h3>2. Call Customer</h3>
           <div className="lead-decision-row lead-call-action-row">
             {lead?.seller.phone ? <a className="lead-view-btn lead-view-link" href={`tel:${lead.seller.phone}`}>Call {lead.seller.phone}</a> : <span className="lead-view-disabled">Customer number unavailable</span>}
-            <button type="button" className="lead-book-btn" onClick={() => { void handleMarkCalled(); }} disabled={!lead?.seller.phone}>Mark Called</button>
+            <label className="lead-booking-calendar lead-field-stack">
+              <span>Call outcome</span>
+              <select
+                className="lead-select"
+                value={selectedCallStatus}
+                onChange={(event) => setSelectedCallStatus(event.target.value as PartnerLeadCallStatus)}
+                disabled={!lead?.seller.phone}
+              >
+                <option value="CALLED">Customer answered</option>
+                <option value="NO_ANSWER">Customer did not answer</option>
+                <option value="BUSY">Customer busy</option>
+                <option value="DECLINED">Customer declined</option>
+                <option value="RESCHEDULE_REQUESTED">Requested reschedule</option>
+                <option value="FOLLOW_UP_REQUIRED">Follow-up required</option>
+              </select>
+            </label>
+            <button type="button" className="lead-book-btn" onClick={() => { void handleSaveCallStatus(); }} disabled={!lead?.seller.phone}>Save Outcome</button>
             <span className="lead-hint">Attempts: {lead?.callAttemptCount ?? 0}{lead?.lastCalledAt ? ` | Last called: ${new Date(lead.lastCalledAt).toLocaleString("en-IN")}` : ""}</span>
           </div>
         </section>
@@ -919,6 +948,22 @@ function ServiceLeadTransactionPage() {
           <>
             <section className="lead-booking-box">
               <h3>4. Pay To User</h3>
+              <div className="lead-booking-calendar lead-field-stack">
+                <p>Quoted payout: Rs. {formatInr(quotedPayout)}</p>
+                <label htmlFor="extra-paid-amount">Extra paid to customer (Rs.)</label>
+                <input
+                  id="extra-paid-amount"
+                  type="number"
+                  min="0"
+                  max="1000000"
+                  step="1"
+                  value={extraPaidAmount}
+                  onChange={(event) => setExtraPaidAmount(event.target.value)}
+                  disabled={!canPay || paymentSaving || Boolean(lead?.paymentProof)}
+                />
+                <strong>Total payout: Rs. {formatInr(totalPayout)}</strong>
+                {lead?.paymentProof ? <span className="lead-hint">Extra paid: Rs. {formatInr(lead.paymentProof.extraPaidAmount ?? 0)}</span> : null}
+              </div>
               <div className="lead-booking-calendar lead-field-stack">
                 <label htmlFor="payment-proof-file">Payment Screenshot</label>
                 <input
