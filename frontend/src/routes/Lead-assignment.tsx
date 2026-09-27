@@ -25,6 +25,35 @@ export const Route = createFileRoute("/Lead-assignment")({
 
 const ADMIN_TOKEN_KEY = "gadgetpe_admin_access_token";
 
+function getLeadDeviceLabel(lead: PartnerLead) {
+  const asRecord = (value: unknown): Record<string, unknown> =>
+    value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  const snapshot = asRecord(lead.flowSnapshot);
+  const model = asRecord(lead.selectedModel);
+  const snapshotModel = asRecord(snapshot.selectedModel);
+  const schedule = asRecord(lead.pickupSchedule);
+  const snapshotSchedule = asRecord(snapshot.pickupSchedule);
+  const modelName = [model.modelName, schedule.modelName, snapshotModel.modelName, snapshotSchedule.modelName]
+    .find((value): value is string => typeof value === "string" && Boolean(value.trim()) && !/^lead[-_]sell[-_](phone|tablet)(?:[-_]|$)/i.test(value.trim()))
+    ?.trim();
+  const modelId = [model.modelId, snapshotModel.modelId].find((value): value is string => typeof value === "string");
+  const modelParts = modelId?.split("__").filter(Boolean) ?? [];
+  const idModelName = modelParts.length >= 4
+    ? modelParts.slice(2, -1).join(" ").replace(/[-_]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase())
+    : "";
+  const deviceName = modelName || idModelName || "Device details unavailable";
+  const rawStorage = [model.storage, snapshotModel.storage, modelParts.length >= 4 ? modelParts.at(-1) : null]
+    .find((value): value is string => typeof value === "string" && Boolean(value.trim()))
+    ?.trim();
+  const storage = rawStorage?.replace(/(\d+)\s*(gb|tb)/i, "$1 $2").toUpperCase();
+  const deviceNameKey = deviceName.toLowerCase().replace(/\s/g, "");
+  const storageKey = storage?.toLowerCase().replace(/\s/g, "");
+
+  return storage && storageKey && !deviceNameKey.includes(storageKey)
+    ? `${deviceName} (${storage})`
+    : deviceName;
+}
+
 function LeadAssignmentPage() {
   const navigate = useNavigate();
   const search = Route.useSearch();
@@ -440,7 +469,7 @@ function LeadAssignmentPage() {
                       />
                     </td>
                     <td className="px-2 py-2">
-                      <div className="font-medium text-slate-900">{lead.selectedModel.modelName}</div>
+                      <div className="font-medium text-slate-900">{getLeadDeviceLabel(lead)}</div>
                       <div className="text-xs text-slate-500">{lead.id}</div>
                     </td>
                     <td className="px-2 py-2">{lead.seller.name || "-"}</td>
