@@ -25,14 +25,14 @@ function sleepMs(ms) {
 }
 
 function cleanupStaleLockArtifacts() {
-  if (!isWindows) return;
-
-  const candidates = [
-    `${resolvedDbPath}.lock`,
-    `${resolvedDbPath}-wal`,
-    `${resolvedDbPath}-shm`,
-    `${resolvedDbPath}-journal`,
-  ];
+  const candidates = isWindows
+    ? [
+        `${resolvedDbPath}.lock`,
+        `${resolvedDbPath}-wal`,
+        `${resolvedDbPath}-shm`,
+        `${resolvedDbPath}-journal`,
+      ]
+    : [`${resolvedDbPath}.lock`];
 
   for (const candidate of candidates) {
     try {
