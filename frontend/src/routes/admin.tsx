@@ -199,6 +199,35 @@ type RevenueBar = { label: string; value: number };
 const STATUSES: LeadStatus[] = ["Pending", "In Progress", "Completed", "Cancelled"];
 const WEEKLY_REVENUE: RevenueBar[] = [];
 
+function getLeadDeviceLabel(lead: PartnerLead) {
+  const asRecord = (value: unknown): Record<string, unknown> =>
+    value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  const snapshot = asRecord(lead.flowSnapshot);
+  const model = asRecord(lead.selectedModel);
+  const snapshotModel = asRecord(snapshot.selectedModel);
+  const schedule = asRecord(lead.pickupSchedule);
+  const snapshotSchedule = asRecord(snapshot.pickupSchedule);
+  const modelName = [model.modelName, schedule.modelName, snapshotModel.modelName, snapshotSchedule.modelName]
+    .find((value): value is string => typeof value === "string" && Boolean(value.trim()) && !/^lead[-_]sell[-_](phone|tablet)(?:[-_]|$)/i.test(value.trim()))
+    ?.trim();
+  const modelId = [model.modelId, snapshotModel.modelId].find((value): value is string => typeof value === "string");
+  const modelParts = modelId?.split("__").filter(Boolean) ?? [];
+  const idModelName = modelParts.length >= 4
+    ? modelParts.slice(2, -1).join(" ").replace(/[-_]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase())
+    : "";
+  const deviceName = modelName || idModelName || "Device details unavailable";
+  const rawStorage = [model.storage, snapshotModel.storage, modelParts.length >= 4 ? modelParts.at(-1) : null]
+    .find((value): value is string => typeof value === "string" && Boolean(value.trim()))
+    ?.trim();
+  const storage = rawStorage?.replace(/(\d+)\s*(gb|tb)/i, "$1 $2").toUpperCase();
+  const deviceNameKey = deviceName.toLowerCase().replace(/\s/g, "");
+  const storageKey = storage?.toLowerCase().replace(/\s/g, "");
+
+  return storage && storageKey && !deviceNameKey.includes(storageKey)
+    ? `${deviceName} (${storage})`
+    : deviceName;
+}
+
 function mapPartnerStatusToLeadStatus(status: PartnerLeadStatus): LeadStatus {
   if (status === "COMPLETED") return "Completed";
   if (status === "REJECTED" || status === "CANCELLED") return "Cancelled";
@@ -246,7 +275,7 @@ function mapPartnerLeadToLead(lead: PartnerLead): Lead {
     id: lead.id,
     userSellFlowId: lead.userSellFlowId,
     leadType: lead.leadType,
-    modelName: lead.selectedModel.modelName,
+    modelName: getLeadDeviceLabel(lead),
     listedPrice: lead.selectedModel.listedPrice ?? 0,
     quotedPrice: lead.quote?.sellingPrice ?? lead.selectedModel.listedPrice ?? 0,
     phone: lead.seller.phone || "-",
@@ -1136,7 +1165,7 @@ function LeadAssignmentSection({
                 <option value="">-- Pick a lead --</option>
                 {unassigned.slice(0, 15).map((l) => (
                   <option key={l.id} value={l.id}>
-                    {l.id}  {l.phone}  {l.city}
+                    {l.modelName} | {l.seller} | {l.phone} | {[l.sellerAddress, l.sellerLandmark, l.city, l.pincode].filter((value) => value && value !== "-").join(", ")}
                   </option>
                 ))}
               </select>
