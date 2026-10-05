@@ -43,12 +43,12 @@ function calculateDeductionAmount(basePrice, rule) {
   return roundMoney(rule.deductionValue);
 }
 
-export function calculateUserQuote({ selectedModel, deviceDetails = null, rules = null }) {
+export async function calculateUserQuote({ selectedModel, deviceDetails = null, rules = null }) {
   const basePrice = Number(selectedModel?.listedPrice || 0);
-  const activeRules = rules || listActiveQuoteDeductionRulesForModel({
+  const activeRules = rules || (await listActiveQuoteDeductionRulesForModel({
     brandSlug: selectedModel?.brandSlug,
     modelId: selectedModel?.modelId,
-  });
+  }));
 
   const deductions = activeRules
     .filter((rule) => ruleMatches(deviceDetails || {}, rule))

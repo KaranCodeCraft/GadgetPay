@@ -36,9 +36,9 @@ v1Router.use("/admin/kyc", adminKycRouter);
 v1Router.use("/admin/leads", adminLeadsRouter);
 v1Router.use("/admin/pricing", adminPricingRouter);
 
-v1Router.get("/media/:mediaId", requireAuth, (req, res, next) => {
+v1Router.get("/media/:mediaId", requireAuth, async (req, res, next) => {
   try {
-    const media = getMediaAssetById(req.params.mediaId);
+    const media = await getMediaAssetById(req.params.mediaId);
     if (!media || media.status !== "ACTIVE") {
       throw notFound("Media not found");
     }

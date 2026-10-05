@@ -3,7 +3,7 @@ import { env } from "../../config/env.js";
 import { getPartnerById } from "../../db/repository.js";
 import { forbidden, unauthorized } from "../http/errors.js";
 
-export function requireAuth(req, res, next) {
+export async function requireAuth(req, res, next) {
   const authHeader = req.header("authorization") || "";
 
   if (!authHeader.startsWith("Bearer ")) {
@@ -15,7 +15,7 @@ export function requireAuth(req, res, next) {
   try {
     req.auth = jwt.verify(token, env.jwtAccessSecret);
     if (req.auth.role === "partner") {
-      const partner = getPartnerById(req.auth.sub);
+      const partner = await getPartnerById(req.auth.sub);
       if (!partner || partner.status !== "ACTIVE") {
         return next(forbidden("Partner account is suspended or deactivated"));
       }

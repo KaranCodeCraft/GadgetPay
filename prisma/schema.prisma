@@ -1,0 +1,490 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Partner {
+  id              String   @id
+  phone           String   @unique
+  name            String
+  status          String   @default("ACTIVE")
+  statusUpdatedBy  String?
+  statusUpdatedAt String?
+  createdAt       String
+  updatedAt       String
+
+  kycSubmissions  PartnerKycSubmission[]
+  wallet          PartnerCoinWallet?
+  coinLedger      PartnerCoinLedger[]
+  rechargeRequests PartnerCoinRechargeRequest[]
+  scopes          PartnerPincodeScope[]
+  leadUnlocks     PartnerLeadUnlock[]
+  paymentIntents  PartnerLeadPaymentIntent[]
+  assignments     AdminLeadAssignment[]
+  leads           PartnerLead[]
+  dispositionEvents PartnerLeadDispositionEvent[]
+
+  @@map("partners")
+}
+
+model User {
+  id        String @id
+  phone     String @unique
+  name      String
+  createdAt String
+  updatedAt String
+
+  sellFlows UserSellFlow[]
+  leads     PartnerLead[]
+
+  @@map("users")
+}
+
+model OtpCode {
+  phone     String @id
+  otp       String
+  sentAt    Int
+  expiresAt Int
+
+  @@map("otp_codes")
+}
+
+model RefreshToken {
+  tokenId   String @id
+  subjectId String
+  role      String
+  createdAt String
+
+  @@map("refresh_tokens")
+}
+
+model UserSellFlow {
+  id                 String  @id
+  userId             String
+  flowType           String  @default("sell-phone")
+  status             String
+  selectedModelJson  String
+  deviceDetailsJson  String?
+  pickupScheduleJson String?
+  quoteJson          String?
+  flowJson           String
+  createdAt          String
+  updatedAt          String
+
+  user               User                  @relation(fields: [userId], references: [id])
+  partnerLeads       PartnerLead[]
+  dispositionEvents  PartnerLeadDispositionEvent[]
+  unlocks            PartnerLeadUnlock[]
+  paymentIntents     PartnerLeadPaymentIntent[]
+
+  @@index([userId, updatedAt], map: "idx_user_sell_flows_user_updated")
+  @@index([status], map: "idx_user_sell_flows_status")
+  @@map("user_sell_flows")
+}
+
+model MediaAsset {
+  id               String  @id
+  tenantType       String
+  tenantId         String?
+  ownerRole        String
+  ownerId          String
+  entityType       String
+  entityId         String
+  slot             String?
+  originalFileName String
+  storedFileName   String
+  mimeType         String
+  sizeBytes        Int
+  relativePath     String
+  storageProvider  String
+  status           String  @default("ACTIVE")
+  checksum         String?
+  createdAt        String
+  updatedAt        String
+  deletedAt        String?
+
+  @@index([tenantType, tenantId], map: "idx_media_tenant")
+  @@index([entityType, entityId], map: "idx_media_entity")
+  @@index([ownerRole, ownerId], map: "idx_media_owner")
+  @@map("media_assets")
+}
+
+model PartnerLead {
+  id                    String    @id
+  userSellFlowId        String    @unique
+  userId                String
+  leadType              String
+  status                String
+  partnerId             String?
+  pincode               String
+  city                  String?
+  sellerName            String?
+  sellerPhone           String?
+  addressLine           String?
+  landmark              String?
+  selectedModelJson     String
+  deviceDetailsJson     String?
+  quoteJson             String?
+  pickupScheduleJson    String?
+  flowSnapshotJson      String
+  createdAt             String
+  updatedAt             String
+  claimedAt             String?
+  completedAt           String?
+  cancelledAt           String?
+  rejectionReason       String?
+  pickupStartedAt       String?
+  callStatus            String?
+  callAttemptCount      Int       @default(0)
+  lastCalledAt          String?
+  callHistoryJson       String?
+  onsiteValidationJson  String?
+  onsiteValidatedAt     String?
+  onsiteValidatedBy     String?
+  paymentProofJson      String?
+  paymentSubmittedAt    String?
+  completionEventJson   String?
+  completionEventAt     String?
+
+  userSellFlow          UserSellFlow @relation(fields: [userSellFlowId], references: [id])
+  user                  User?        @relation(fields: [userId], references: [id])
+  partner               Partner?     @relation(fields: [partnerId], references: [id])
+  dispositionEvents     PartnerLeadDispositionEvent[]
+  unlocks              PartnerLeadUnlock[]
+  paymentIntents       PartnerLeadPaymentIntent[]
+  assignments          AdminLeadAssignment[]
+
+  @@index([pincode, status, updatedAt], map: "idx_partner_leads_scope_status")
+  @@index([partnerId, status], map: "idx_partner_leads_partner_status")
+  @@index([leadType, status], map: "idx_partner_leads_type_status")
+  @@map("partner_leads")
+}
+
+model PartnerLeadDispositionEvent {
+  id             String @id
+  leadId         String
+  userSellFlowId String
+  partnerId      String?
+  fromStatus     String?
+  toStatus       String
+  dispositionKey String
+  note           String?
+  actorRole      String
+  actorId        String
+  createdAt      String
+
+  lead           PartnerLead    @relation(fields: [leadId], references: [id])
+  userSellFlow   UserSellFlow   @relation(fields: [userSellFlowId], references: [id])
+  partner        Partner?       @relation(fields: [partnerId], references: [id])
+
+  @@index([leadId, createdAt], map: "idx_partner_lead_disp_events_lead_time")
+  @@index([toStatus, createdAt], map: "idx_partner_lead_disp_events_status_time")
+  @@index([dispositionKey, createdAt], map: "idx_partner_lead_disp_events_key_time")
+  @@map("partner_lead_disposition_events")
+}
+
+model ServiceabilityPincode {
+  pincode                String @id
+  status                 String
+  reason                 String?
+  state                  String?
+  district               String?
+  officeCount            Int?
+  deliveryOfficeCount    Int?
+  metadataJson           String?
+  sourceUploadId         String?
+  sourceFileName         String?
+  updatedBy              String
+  updatedAt              String
+
+  scopes                 PartnerPincodeScope[]
+
+  @@map("serviceability_pincodes")
+}
+
+model ServiceabilityUploadHistory {
+  id                     String @id
+  fileName               String
+  uploadedBy             String
+  uploadedAt             String
+  status                 String
+  mediaId                String?
+  deactivatedBy          String?
+  deactivatedAt          String?
+  deactivatedRowCount    Int @default(0)
+  insertedCount          Int @default(0)
+  updatedCount           Int @default(0)
+  totalProcessed         Int @default(0)
+
+  @@map("serviceability_upload_history")
+}
+
+model PartnerPincodeScope {
+  id           String @id
+  partnerId    String
+  pincode      String
+  isActive     Boolean @default(true)
+  lastAssignedAt String?
+  updatedBy    String
+  createdAt    String
+  updatedAt    String
+
+  partner      Partner @relation(fields: [partnerId], references: [id])
+  pincodeRef   ServiceabilityPincode @relation(fields: [pincode], references: [pincode])
+
+  @@unique([partnerId, pincode])
+  @@index([pincode, isActive, lastAssignedAt], map: "idx_partner_pincode_scopes_pincode_active")
+  @@map("partner_pincode_scopes")
+}
+
+model PartnerKycSubmission {
+  id               String @id
+  partnerId        String
+  identityProof    String
+  fileName         String
+  mimeType         String
+  sizeBytes        Int
+  storageStatus    String
+  storageProvider  String
+  storageKey       String?
+  verificationStatus String
+  verificationNotes String?
+  verifiedBy       String?
+  verifiedAt       String?
+  createdAt        String
+  updatedAt        String
+
+  partner          Partner @relation(fields: [partnerId], references: [id])
+
+  @@index([partnerId], map: "idx_kyc_partner_id")
+  @@index([verificationStatus], map: "idx_kyc_verification_status")
+  @@map("partner_kyc_submissions")
+}
+
+model PartnerCoinWallet {
+  partnerId String @id
+  balance   Int @default(0)
+  updatedAt String
+
+  partner   Partner @relation(fields: [partnerId], references: [id])
+
+  @@map("partner_coin_wallets")
+}
+
+model PartnerCoinLedger {
+  id         String @id
+  partnerId  String
+  txnType    String
+  amount     Int
+  method     String
+  reference  String?
+  note       String?
+  metadataJson String?
+  createdAt  String
+
+  partner    Partner @relation(fields: [partnerId], references: [id])
+
+  @@index([partnerId, createdAt], map: "idx_partner_coin_ledger_partner")
+  @@map("partner_coin_ledger")
+}
+
+model PartnerLeadUnlock {
+  id              String @id
+  leadId          String
+  partnerId       String
+  userSellFlowId  String
+  unlockPrice     Int
+  paymentMethod   String @default("UPI_QR")
+  status          String
+  screenshotStatus String @default("NOT_SENT")
+  adminNote       String?
+  approvedBy      String?
+  approvedAt      String?
+  rejectedAt      String?
+  metadataJson    String?
+  createdAt       String
+  expiresAt       String
+  closedAt        String?
+
+  lead            PartnerLead @relation(fields: [leadId], references: [id])
+  partner         Partner @relation(fields: [partnerId], references: [id])
+  userSellFlow    UserSellFlow @relation(fields: [userSellFlowId], references: [id])
+
+  @@unique([leadId])
+  @@index([partnerId, status, createdAt], map: "idx_partner_lead_unlocks_partner_status")
+  @@map("partner_lead_unlocks")
+}
+
+model PartnerLeadPaymentIntent {
+  id              String @id
+  leadId          String
+  partnerId       String
+  userSellFlowId  String
+  unlockPrice     Int
+  paymentMethod   String @default("UPI_QR")
+  status          String
+  screenshotStatus String @default("NOT_SENT")
+  adminNote       String?
+  approvedBy      String?
+  approvedAt      String?
+  rejectedAt      String?
+  metadataJson    String?
+  createdAt       String
+  expiresAt       String
+  closedAt        String?
+
+  lead            PartnerLead @relation(fields: [leadId], references: [id])
+  partner         Partner @relation(fields: [partnerId], references: [id])
+  userSellFlow    UserSellFlow @relation(fields: [userSellFlowId], references: [id])
+
+  @@unique([leadId])
+  @@index([partnerId, status, createdAt], map: "idx_partner_lead_payment_intents_partner_status")
+  @@map("partner_lead_payment_intents")
+}
+
+model PartnerCoinRechargeRequest {
+  id            String @id
+  partnerId     String
+  amount        Int
+  upiTxnRef     String
+  upiApp        String?
+  status        String
+  requestedAt   String
+  verifiedAt    String?
+  verifiedBy    String?
+  adminNote     String?
+  ledgerEntryId String?
+  metadataJson  String?
+
+  partner       Partner @relation(fields: [partnerId], references: [id])
+
+  @@index([partnerId, requestedAt], map: "idx_partner_coin_recharge_requests_partner")
+  @@index([status, requestedAt], map: "idx_partner_coin_recharge_requests_status")
+  @@map("partner_coin_recharge_requests")
+}
+
+model LeadEventOutbox {
+  id             String @id
+  eventType      String
+  leadId         String
+  payloadJson    String
+  occurredAt     String
+  deliveryStatus String @default("PENDING")
+  retryCount     Int @default(0)
+  nextRetryAt    String?
+  lastError      String?
+
+  @@index([deliveryStatus, occurredAt], map: "idx_lead_event_outbox_status_time")
+  @@map("lead_event_outbox")
+}
+
+model AdminMetricsSnapshot {
+  id            String @id
+  bucketDate    String
+  scopePincode String?
+  scopePartnerId String?
+  metricKey     String
+  metricValue   Float
+  updatedAt     String
+
+  @@index([bucketDate, scopePincode, scopePartnerId, metricKey], map: "idx_admin_metrics_snapshot_scope")
+  @@map("admin_metrics_snapshot")
+}
+
+model AdminLeadAssignment {
+  id                 String @id
+  leadId             String
+  assignedPartnerId  String
+  assignedByAdminId  String
+  assignmentMode     String
+  note               String?
+  createdAt          String
+  updatedAt          String
+
+  lead               PartnerLead @relation(fields: [leadId], references:[id])
+  partner            Partner @relation(fields: [assignedPartnerId], references:[id])
+
+  @@index([leadId, createdAt], map: "idx_admin_lead_assignments_lead_time")
+  @@index([assignedPartnerId, createdAt], map: "idx_admin_lead_assignments_partner_time")
+  @@map("admin_lead_assignments")
+}
+
+model DevicePriceCatalog {
+  id            Int @id @default(autoincrement())
+  deviceType    String
+  brand         String
+  series        String
+  model         String
+  storage       String
+  launchYear    Int
+  cashifyPrice  Float
+  rowJson       String
+  sourceUploadId String?
+  sourceFileName String?
+  createdAt     String
+  updatedAt     String
+
+  @@unique([deviceType, brand, series, model, storage, launchYear])
+  @@index([deviceType, brand, series, model, storage, launchYear], map: "idx_price_catalog_lookup")
+  @@map("device_price_catalog")
+}
+
+model QuoteDeductionRule {
+  id                  String @id
+  answerGroup         String
+  answerKey           String
+  answerValue         String?
+  label               String
+  deductionType       String
+  deductionValue      Float
+  maxDeductionAmount  Float?
+  priority            Int @default(100)
+  isActive            Boolean @default(true)
+  appliesToBrand      String?
+  appliesToModelId    String?
+  createdBy           String
+  createdAt           String
+  updatedAt           String
+
+  @@map("quote_deduction_rules")
+}
+
+model DevicePriceUploadHistory {
+  id                  String @id
+  deviceType          String
+  fileName            String
+  uploadedBy          String
+  uploadedAt          String
+  status              String @default("ACTIVE")
+  deactivatedBy       String?
+  deactivatedAt       String?
+  deactivatedRowCount Int @default(0)
+  insertedCount       Int
+  updatedCount        Int
+  totalProcessed      Int
+
+  @@map("device_price_upload_history")
+}
+
+model DevicePriceUploadRow {
+  id          Int @id @default(autoincrement())
+  uploadId    String
+  deviceType  String
+  brand       String
+  series      String
+  model       String
+  storage     String
+  launchYear  Int
+  cashifyPrice Float
+  rowJson     String
+  createdAt   String
+  updatedAt   String
+
+  @@unique([uploadId, deviceType, brand, series, model, storage, launchYear])
+  @@index([uploadId], map: "idx_price_upload_rows_upload")
+  @@map("device_price_upload_rows")
+}

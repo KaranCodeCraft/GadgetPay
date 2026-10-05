@@ -53,7 +53,7 @@ function createOtp() {
 async function sendProviderOtp({ phone, role, templateKey, templateVariables = {} }) {
   logOtpProviderOnce();
   const otpStorageKey = getOtpStorageKey(role, phone);
-  const existing = getOtpCode(otpStorageKey);
+  const existing = await getOtpCode(otpStorageKey);
   const now = Date.now();
 
   if (existing && now - existing.sentAt < env.otpResendSeconds * 1000) {
@@ -66,7 +66,7 @@ async function sendProviderOtp({ phone, role, templateKey, templateVariables = {
   const message = template.render({ ...templateVariables, otp });
   await sendFonadaSms({ phone, message, contentId });
 
-  upsertOtpCode({
+  await upsertOtpCode({
     phone: otpStorageKey,
     otp,
     sentAt: now,
@@ -88,14 +88,14 @@ export async function sendPartnerOtp(phone) {
 export async function verifyPartnerOtp({ phone, otp, name }) {
   const otpStorageKey = getOtpStorageKey("partner", phone);
 
-  const rec = getOtpCode(otpStorageKey);
+  const rec = await getOtpCode(otpStorageKey);
 
   if (!rec) {
     throw unauthorized("OTP not requested for this phone");
   }
 
   if (Date.now() > rec.expiresAt) {
-    deleteOtpCode(otpStorageKey);
+    await deleteOtpCode(otpStorageKey);
     throw unauthorized("OTP expired");
   }
 
@@ -103,10 +103,10 @@ export async function verifyPartnerOtp({ phone, otp, name }) {
     throw unauthorized("Invalid OTP");
   }
 
-  deleteOtpCode(otpStorageKey);
+  await deleteOtpCode(otpStorageKey);
 
   const partnerId = `partner-${phone}`;
-  const existingPartner = getPartnerById(partnerId);
+  const existingPartner = await getPartnerById(partnerId);
   if (existingPartner && existingPartner.status !== "ACTIVE") {
     throw forbidden("Partner account is suspended or deactivated");
   }
@@ -118,7 +118,7 @@ export async function verifyPartnerOtp({ phone, otp, name }) {
     updatedAt: nowIso(),
   };
 
-  const persistedPartner = upsertPartner(partner);
+  const persistedPartner = await upsertPartner(partner);
 
   const accessToken = issueAccessToken({
     sub: partnerId,
@@ -133,7 +133,7 @@ export async function verifyPartnerOtp({ phone, otp, name }) {
     tokenId: refreshTokenId,
   });
 
-  saveRefreshToken({
+  await saveRefreshToken({
     tokenId: refreshTokenId,
     subjectId: partnerId,
     role: "partner",
@@ -147,7 +147,7 @@ export async function verifyPartnerOtp({ phone, otp, name }) {
   };
 }
 
-export function refreshAccessToken(refreshToken) {
+export async function refreshAccessToken(refreshToken) {
   let payload;
   try {
     payload = jwt.verify(refreshToken, env.jwtRefreshSecret);
@@ -155,7 +155,7 @@ export function refreshAccessToken(refreshToken) {
     throw unauthorized("Invalid refresh token");
   }
 
-  const rec = getRefreshToken(payload.tokenId);
+  const rec = await getRefreshToken(payload.tokenId);
   if (!rec) {
     throw unauthorized("Refresh token revoked");
   }
@@ -170,7 +170,7 @@ export function refreshAccessToken(refreshToken) {
   };
 }
 
-export function logoutSession(refreshToken) {
+export async function logoutSession(refreshToken) {
   let payload;
   try {
     payload = jwt.verify(refreshToken, env.jwtRefreshSecret);
@@ -178,23 +178,23 @@ export function logoutSession(refreshToken) {
     throw unauthorized("Invalid refresh token");
   }
 
-  const rec = getRefreshToken(payload.tokenId);
+  const rec = await getRefreshToken(payload.tokenId);
   if (!rec) {
     throw unauthorized("Refresh token revoked");
   }
 
   if (payload.role === "partner") {
-    const activePickups = listPartnerActivePickups({ partnerId: payload.sub, limit: 50 });
+    const activePickups = await listPartnerActivePickups({ partnerId: payload.sub, limit: 50 });
     if (activePickups.length > 0) {
       throw badRequest("Complete active pickup and payment workflow before logout.");
     }
   }
 
-  revokeRefreshToken(payload.tokenId);
+  await revokeRefreshToken(payload.tokenId);
   return { loggedOut: true };
 }
 
-export function adminDevLogin({ key, adminId }) {
+export async function adminDevLogin({ key, adminId }) {
   if (key !== env.adminDevKey) {
     throw unauthorized("Invalid admin dev key");
   }
@@ -211,7 +211,7 @@ export function adminDevLogin({ key, adminId }) {
     tokenId: refreshTokenId,
   });
 
-  saveRefreshToken({
+  await saveRefreshToken({
     tokenId: refreshTokenId,
     subjectId: adminId,
     role: "admin",
@@ -227,7 +227,7 @@ export function adminDevLogin({ key, adminId }) {
 
 export async function sendUserOtp(phone, templateKey = "loginAccount") {
   const fonadaResult = await sendProviderOtp({ phone, role: "user", templateKey });
-  const existingUser = getUserByPhone(phone);
+  const existingUser = await getUserByPhone(phone);
 
   return {
     ...fonadaResult,
@@ -239,20 +239,20 @@ export async function sendUserOtp(phone, templateKey = "loginAccount") {
 export async function verifyUserOtp({ phone, otp, name }) {
   const otpStorageKey = getOtpStorageKey("user", phone);
 
-  const rec = getOtpCode(otpStorageKey);
+  const rec = await getOtpCode(otpStorageKey);
 
   if (!rec) throw unauthorized("OTP not requested for this phone");
   if (Date.now() > rec.expiresAt) {
-    deleteOtpCode(otpStorageKey);
+    await deleteOtpCode(otpStorageKey);
     throw unauthorized("OTP expired");
   }
   if (rec.otp !== otp) throw unauthorized("Invalid OTP");
 
-  deleteOtpCode(otpStorageKey);
+  await deleteOtpCode(otpStorageKey);
 
   const userId = `user-${phone}`;
   const now = nowIso();
-  const existingUser = getUserByPhone(phone);
+  const existingUser = await getUserByPhone(phone);
 
   if (!existingUser && !name) {
     throw badRequest("Name is required for new user");
@@ -266,14 +266,14 @@ export async function verifyUserOtp({ phone, otp, name }) {
     updatedAt: now,
   };
 
-  const persistedUser = upsertUser(user);
+  const persistedUser = await upsertUser(user);
 
   const accessToken = issueAccessToken({ sub: userId, role: "user", phone });
 
   const refreshTokenId = crypto.randomUUID();
   const refreshToken = issueRefreshToken({ sub: userId, role: "user", tokenId: refreshTokenId });
 
-  saveRefreshToken({ tokenId: refreshTokenId, subjectId: userId, role: "user", createdAt: now });
+  await saveRefreshToken({ tokenId: refreshTokenId, subjectId: userId, role: "user", createdAt: now });
 
   return { user: persistedUser, accessToken, refreshToken };
 }

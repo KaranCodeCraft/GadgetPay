@@ -64,17 +64,17 @@ const quotePreviewSchema = z.object({
 
 export const pricingRouter = Router();
 
-pricingRouter.get("/catalog/brands", (req, res, next) => {
+pricingRouter.get("/catalog/brands", async (req, res, next) => {
   try {
     const deviceType = deviceTypeSchema.parse(typeof req.query.deviceType === "string" ? req.query.deviceType.toUpperCase() : undefined);
-    const brands = listDistinctBrands(deviceType);
+    const brands = await listDistinctBrands(deviceType);
     res.json(success({ deviceType, brands }));
   } catch (err) {
     next(err);
   }
 });
 
-pricingRouter.get("/catalog/models", (req, res, next) => {
+pricingRouter.get("/catalog/models", async (req, res, next) => {
   try {
     const deviceType = deviceTypeSchema.parse(typeof req.query.deviceType === "string" ? req.query.deviceType.toUpperCase() : undefined);
     const brandRaw = req.query.brand;
@@ -82,7 +82,7 @@ pricingRouter.get("/catalog/models", (req, res, next) => {
       return res.status(400).json({ success: false, error: "brand query parameter is required" });
     }
     const brand = normalizeKey(brandRaw);
-    const rows = listModelsForBrand(brand, deviceType);
+    const rows = await listModelsForBrand(brand, deviceType);
 
     const seriesMap = new Map();
     for (const row of rows) {
@@ -110,10 +110,10 @@ pricingRouter.get("/catalog/models", (req, res, next) => {
   }
 });
 
-pricingRouter.post("/quote-preview", (req, res, next) => {
+pricingRouter.post("/quote-preview", async (req, res, next) => {
   try {
     const input = quotePreviewSchema.parse(req.body);
-    const quote = calculateUserQuote({
+    const quote = await calculateUserQuote({
       selectedModel: input.selectedModel,
       deviceDetails: input.deviceDetails || null,
     });
@@ -124,10 +124,10 @@ pricingRouter.post("/quote-preview", (req, res, next) => {
   }
 });
 
-pricingRouter.post("/lookup", (req, res, next) => {
+pricingRouter.post("/lookup", async (req, res, next) => {
   try {
     const input = lookupSchema.parse(req.body);
-    const row = findDevicePriceByExactMatch({
+    const row = await findDevicePriceByExactMatch({
       deviceType: input.deviceType,
       brand: normalizeKey(input.brand),
       series: normalizeKey(input.series),

@@ -51,7 +51,7 @@ async function fetchPincodeInfo(pincode) {
 export async function getPincodeDetails(pincodeRaw) {
   const pincode = pincodeSchema.parse(pincodeRaw);
   const provider = await fetchPincodeInfo(pincode);
-  const serviceability = getServiceabilityByPincode(pincode) || {
+  const serviceability = (await getServiceabilityByPincode(pincode)) || {
     pincode,
     status: "INACTIVE",
     reason: "Not enabled by admin",

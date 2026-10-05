@@ -40,20 +40,20 @@ authRouter.post("/partner/otp/verify", async (req, res, next) => {
   }
 });
 
-authRouter.post("/refresh", (req, res, next) => {
+authRouter.post("/refresh", async (req, res, next) => {
   try {
     const input = refreshTokenSchema.parse(req.body);
-    const result = refreshAccessToken(input.refreshToken);
+    const result = await refreshAccessToken(input.refreshToken);
     res.json(success(result));
   } catch (err) {
     next(err);
   }
 });
 
-authRouter.post("/logout", (req, res, next) => {
+authRouter.post("/logout", async (req, res, next) => {
   try {
     const input = logoutSchema.parse(req.body);
-    const result = logoutSession(input.refreshToken);
+    const result = await logoutSession(input.refreshToken);
     res.json(success(result));
   } catch (err) {
     next(err);
@@ -81,10 +81,10 @@ authRouter.post("/user/otp/verify", async (req, res, next) => {
 });
 
 // Dev-only helper so admin serviceability APIs can be tested from day one.
-authRouter.post("/admin/dev-login", (req, res, next) => {
+authRouter.post("/admin/dev-login", async (req, res, next) => {
   try {
     const input = adminDevLoginSchema.parse(req.body);
-    const result = adminDevLogin(input);
+    const result = await adminDevLogin(input);
     res.json(success(result));
   } catch (err) {
     next(err);

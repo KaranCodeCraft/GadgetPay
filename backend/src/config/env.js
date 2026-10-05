@@ -4,7 +4,18 @@ import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const envFilePath = path.resolve(__dirname, "../../.env");
+const backendRoot = path.resolve(__dirname, "../..");
+const envFilePath = path.resolve(backendRoot, ".env");
+
+function resolveBackendPath(value, fallbackRelative) {
+  if (value && typeof value === "string" && value.trim() !== "") {
+    const trimmed = value.trim();
+    const normalized = trimmed.replace(/\\/g, "/");
+    const withoutBackendPrefix = normalized.startsWith("backend/") ? normalized.slice("backend/".length) : normalized;
+    return path.isAbsolute(trimmed) ? trimmed : path.resolve(backendRoot, withoutBackendPrefix);
+  }
+  return path.resolve(backendRoot, fallbackRelative);
+}
 
 // Always load backend/.env regardless of process CWD.
 const dotenvResult = dotenv.config({ path: envFilePath });
@@ -31,8 +42,10 @@ for (const key of required) {
 export const env = {
   port: Number(process.env.PORT || 4000),
   nodeEnv: process.env.NODE_ENV || "development",
-  sqlitePath: process.env.SQLITE_PATH || "",
-  mediaRoot: process.env.MEDIA_ROOT || "backend/uploads",
+  databaseProvider: process.env.DATABASE_PROVIDER || "postgres",
+  databaseUrl: process.env.DATABASE_URL || "",
+  sqlitePath: resolveBackendPath(process.env.SQLITE_PATH || "", "data/gadgetpe.sqlite"),
+  mediaRoot: resolveBackendPath(process.env.MEDIA_ROOT || "", "uploads"),
   jwtAccessSecret: process.env.JWT_ACCESS_SECRET,
   jwtRefreshSecret: process.env.JWT_REFRESH_SECRET,
   jwtAccessExpiresIn: process.env.JWT_ACCESS_EXPIRES_IN || "15m",

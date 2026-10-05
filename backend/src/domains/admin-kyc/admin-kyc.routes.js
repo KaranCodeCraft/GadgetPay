@@ -27,14 +27,14 @@ export const adminKycRouter = Router();
 
 adminKycRouter.use(requireAuth, requireRole("admin"));
 
-adminKycRouter.get("/submissions", (req, res, next) => {
+adminKycRouter.get("/submissions", async (req, res, next) => {
   try {
     const query = listQuerySchema.parse({
       status: req.query.status,
       partnerId: req.query.partnerId,
     });
 
-    const rows = listKycSubmissions({
+    const rows = await listKycSubmissions({
       status: query.status,
       partnerId: query.partnerId,
     });
@@ -45,17 +45,17 @@ adminKycRouter.get("/submissions", (req, res, next) => {
   }
 });
 
-adminKycRouter.patch("/submissions/:kycId/verification", (req, res, next) => {
+adminKycRouter.patch("/submissions/:kycId/verification", async (req, res, next) => {
   try {
     const kycId = z.string().uuid().parse(req.params.kycId);
     const input = verifySchema.parse(req.body);
 
-    const existing = getKycById(kycId);
+    const existing = await getKycById(kycId);
     if (!existing) {
       throw notFound("KYC submission not found");
     }
 
-    const updated = updateKycVerification({
+    const updated = await updateKycVerification({
       kycId,
       verificationStatus: input.action === "APPROVE" ? "VERIFIED" : "REJECTED",
       verificationNotes: input.notes || (input.action === "APPROVE" ? "Approved by admin" : "Rejected by admin"),
@@ -69,3 +69,4 @@ adminKycRouter.patch("/submissions/:kycId/verification", (req, res, next) => {
     next(err);
   }
 });
+

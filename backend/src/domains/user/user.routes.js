@@ -132,9 +132,9 @@ const listQuerySchema = z.object({
 export const userRouter = Router();
 
 userRouter.use(requireAuth, requireRole("user"));
-userRouter.use((req, _res, next) => {
+userRouter.use(async (req, _res, next) => {
   try {
-    const user = getUserById(req.auth.sub);
+    const user = await getUserById(req.auth.sub);
     if (!user) throw notFound("User not found");
     req.userAccount = user;
     next();
@@ -216,9 +216,9 @@ function getFlowPincode(flow, pickupSchedule = null) {
   return pickupSchedule?.pincode || flow.flowJson?.servicePincode || flow.pickupSchedule?.pincode || null;
 }
 
-function maybeAutoExpireScheduledFlow(flow) {
+async function maybeAutoExpireScheduledFlow(flow) {
   if (!flow || flow.status !== "PICKUP_SCHEDULED") return flow;
-  const lead = getPartnerLeadByFlowId(flow.id);
+  const lead = await getPartnerLeadByFlowId(flow.id);
   if (!lead || lead.leadType !== "SERVICE_LEAD" || !["AVAILABLE", "CLAIMED"].includes(lead.status)) return flow;
 
   const pickupSchedule = flow.pickupSchedule || lead.pickupSchedule;
@@ -231,14 +231,14 @@ function maybeAutoExpireScheduledFlow(flow) {
     : "Pickup slot expired before partner accepted the lead";
 
   const updatedAt = nowIso();
-  const expiredLead = markPartnerLeadExpiredForFlow({
+  const expiredLead = await markPartnerLeadExpiredForFlow({
     userSellFlowId: flow.id,
     updatedAt,
     reason: expiryReason,
   });
   if (!expiredLead) return flow;
 
-  appendPartnerLeadDispositionEvent({
+  await appendPartnerLeadDispositionEvent({
     id: crypto.randomUUID(),
     leadId: expiredLead.id,
     userSellFlowId: expiredLead.userSellFlowId,
@@ -252,7 +252,7 @@ function maybeAutoExpireScheduledFlow(flow) {
     createdAt: updatedAt,
   });
 
-  enqueueLeadEventOutbox({
+  await enqueueLeadEventOutbox({
     id: crypto.randomUUID(),
     eventType: "lead.expired",
     leadId: expiredLead.id,
@@ -273,24 +273,25 @@ function maybeAutoExpireScheduledFlow(flow) {
     occurredAt: updatedAt,
   });
 
-  return expireUserSellFlow({
+  return (await expireUserSellFlow({
     id: flow.id,
     userId: flow.userId,
     updatedAt,
     reason: expiryReason,
-  }) || flow;
+  })) || flow;
 }
 
-function expireScheduledFlowsForUser(userId) {
-  listUserSellFlows({ userId, status: "PICKUP_SCHEDULED", limit: 100 }).forEach(maybeAutoExpireScheduledFlow);
+async function expireScheduledFlowsForUser(userId) {
+  const flows = await listUserSellFlows({ userId, status: "PICKUP_SCHEDULED", limit: 100 });
+  await Promise.all(flows.map(maybeAutoExpireScheduledFlow));
 }
 
-function syncPartnerLead({ flow, user, leadType, pincode, status = "AVAILABLE", updatedAt }) {
+async function syncPartnerLead({ flow, user, leadType, pincode, status = "AVAILABLE", updatedAt }) {
   if (!pincode) return null;
 
   const pickupSchedule = flow.pickupSchedule || null;
-  const existingLead = getPartnerLeadByFlowId(flow.id);
-  const lead = upsertPartnerLeadFromUserFlow({
+  const existingLead = await getPartnerLeadByFlowId(flow.id);
+  const lead = await upsertPartnerLeadFromUserFlow({
     id: `lead-${flow.id}`,
     userSellFlowId: flow.id,
     userId: flow.userId,
@@ -313,7 +314,7 @@ function syncPartnerLead({ flow, user, leadType, pincode, status = "AVAILABLE", 
 
   if (lead && (!existingLead || existingLead.status !== lead.status || existingLead.leadType !== lead.leadType)) {
     const dispositionKey = lead.status === "AVAILABLE" ? (lead.leadType === "SERVICE_LEAD" ? "SCHEDULED" : "CREATED") : lead.status;
-    appendPartnerLeadDispositionEvent({
+    await appendPartnerLeadDispositionEvent({
       id: crypto.randomUUID(),
       leadId: lead.id,
       userSellFlowId: lead.userSellFlowId,
@@ -327,7 +328,7 @@ function syncPartnerLead({ flow, user, leadType, pincode, status = "AVAILABLE", 
       createdAt: updatedAt,
     });
 
-    enqueueLeadEventOutbox({
+    await enqueueLeadEventOutbox({
       id: crypto.randomUUID(),
       eventType: "lead.synced",
       leadId: lead.id,
@@ -350,8 +351,8 @@ function syncPartnerLead({ flow, user, leadType, pincode, status = "AVAILABLE", 
   return lead;
 }
 
-function requireFlow(req) {
-  const flow = getUserSellFlowById({ id: req.params.flowId, userId: req.auth.sub });
+async function requireFlow(req) {
+  const flow = await getUserSellFlowById({ id: req.params.flowId, userId: req.auth.sub });
   if (!flow) throw notFound("Sell flow not found");
   return flow;
 }
@@ -360,10 +361,10 @@ userRouter.get("/me", (req, res) => {
   res.json(success({ user: getUser(req) }));
 });
 
-userRouter.patch("/me", (req, res, next) => {
+userRouter.patch("/me", async (req, res, next) => {
   try {
     const input = updateUserProfileSchema.parse(req.body);
-    const user = updateUserProfile({ id: req.auth.sub, name: input.name, updatedAt: nowIso() });
+    const user = await updateUserProfile({ id: req.auth.sub, name: input.name, updatedAt: nowIso() });
     if (!user) throw notFound("User not found");
     res.json(success({ user }));
   } catch (err) {
@@ -371,10 +372,10 @@ userRouter.patch("/me", (req, res, next) => {
   }
 });
 
-userRouter.delete("/me", (req, res, next) => {
+userRouter.delete("/me", async (req, res, next) => {
   try {
     deleteUserAccountSchema.parse(req.body || {});
-    const result = deleteUserAccount(req.auth.sub);
+    const result = await deleteUserAccount(req.auth.sub);
     if (!result) throw notFound("User not found");
 
     const mediaErrors = [];
@@ -392,7 +393,7 @@ userRouter.delete("/me", (req, res, next) => {
   }
 });
 
-userRouter.post("/sell-flows", (req, res, next) => {
+userRouter.post("/sell-flows", async (req, res, next) => {
   try {
     const input = createSellFlowSchema.parse(req.body);
     const user = getUser(req);
@@ -409,7 +410,7 @@ userRouter.post("/sell-flows", (req, res, next) => {
       updatedAt: now,
     });
 
-    const flow = createUserSellFlow({
+    const flow = await createUserSellFlow({
       id,
       userId: req.auth.sub,
       flowType: input.flowType,
@@ -426,12 +427,12 @@ userRouter.post("/sell-flows", (req, res, next) => {
   }
 });
 
-userRouter.get("/sell-flows", (req, res, next) => {
+userRouter.get("/sell-flows", async (req, res, next) => {
   try {
     const query = listQuerySchema.parse(req.query);
-    expireScheduledFlowsForUser(req.auth.sub);
-    const rows = listUserSellFlows({ userId: req.auth.sub, status: query.status, limit: query.limit })
-      .map(maybeAutoExpireScheduledFlow)
+    await expireScheduledFlowsForUser(req.auth.sub);
+    const rawRows = await listUserSellFlows({ userId: req.auth.sub, status: query.status, limit: query.limit });
+    const rows = (await Promise.all(rawRows.map(maybeAutoExpireScheduledFlow)))
       .filter((flow) => !query.status || flow.status === query.status);
     res.json(success({ rows, count: rows.length }));
   } catch (err) {
@@ -439,18 +440,19 @@ userRouter.get("/sell-flows", (req, res, next) => {
   }
 });
 
-userRouter.get("/sell-flows/:flowId", (req, res, next) => {
+userRouter.get("/sell-flows/:flowId", async (req, res, next) => {
   try {
-    res.json(success({ flow: maybeAutoExpireScheduledFlow(requireFlow(req)) }));
+    const existing = await requireFlow(req);
+    res.json(success({ flow: await maybeAutoExpireScheduledFlow(existing) }));
   } catch (err) {
     next(err);
   }
 });
 
-userRouter.patch("/sell-flows/:flowId/device-details", (req, res, next) => {
+userRouter.patch("/sell-flows/:flowId/device-details", async (req, res, next) => {
   try {
     const input = deviceDetailsBodySchema.parse(req.body);
-    const existing = requireFlow(req);
+    const existing = await requireFlow(req);
     if (existing.status === "CANCELLED") throw badRequest("Cancelled sell flow cannot be updated");
     const user = getUser(req);
     const updatedAt = nowIso();
@@ -468,7 +470,7 @@ userRouter.patch("/sell-flows/:flowId/device-details", (req, res, next) => {
       updatedAt,
     });
 
-    const flow = updateUserSellFlow({
+    const flow = await updateUserSellFlow({
       id: existing.id,
       userId: req.auth.sub,
       status: "QUESTIONNAIRE_COMPLETED",
@@ -483,9 +485,9 @@ userRouter.patch("/sell-flows/:flowId/device-details", (req, res, next) => {
   }
 });
 
-userRouter.post("/sell-flows/:flowId/quote", (req, res, next) => {
+userRouter.post("/sell-flows/:flowId/quote", async (req, res, next) => {
   try {
-    const existing = requireFlow(req);
+    const existing = await requireFlow(req);
     if (existing.status === "CANCELLED") throw badRequest("Cancelled sell flow cannot be quoted");
     if (existing.status !== "QUESTIONNAIRE_COMPLETED") {
       throw badRequest("Complete questionnaire before generating quote", {
@@ -497,7 +499,7 @@ userRouter.post("/sell-flows/:flowId/quote", (req, res, next) => {
       throw badRequest("Complete questionnaire before generating quote");
     }
     const user = getUser(req);
-    const quote = calculateUserQuote({ selectedModel: existing.selectedModel, deviceDetails: existing.deviceDetails });
+    const quote = await calculateUserQuote({ selectedModel: existing.selectedModel, deviceDetails: existing.deviceDetails });
     const updatedAt = nowIso();
     const flowJson = buildFlowJson({
       id: existing.id,
@@ -513,7 +515,7 @@ userRouter.post("/sell-flows/:flowId/quote", (req, res, next) => {
       updatedAt,
     });
 
-    const flow = updateUserSellFlow({
+    const flow = await updateUserSellFlow({
       id: existing.id,
       userId: req.auth.sub,
       status: "QUOTE_READY",
@@ -522,7 +524,7 @@ userRouter.post("/sell-flows/:flowId/quote", (req, res, next) => {
       updatedAt,
     });
 
-    syncPartnerLead({
+    await syncPartnerLead({
       flow,
       user,
       leadType: "LEAD_BUCKET",
@@ -540,7 +542,7 @@ userRouter.patch("/sell-flows/:flowId/pickup-schedule", async (req, res, next) =
   try {
     const input = pickupScheduleBodySchema.parse(req.body);
     validatePickupScheduleTiming(input.pickupSchedule);
-    const existing = requireFlow(req);
+    const existing = await requireFlow(req);
     if (existing.status === "CANCELLED") throw badRequest("Cancelled sell flow cannot be scheduled");
     if (existing.status !== "QUOTE_READY") {
       throw badRequest("Generate quote before scheduling pickup", {
@@ -589,7 +591,7 @@ userRouter.patch("/sell-flows/:flowId/pickup-schedule", async (req, res, next) =
       updatedAt,
     });
 
-    const flow = updateUserSellFlow({
+    const flow = await updateUserSellFlow({
       id: existing.id,
       userId: req.auth.sub,
       status: "PICKUP_SCHEDULED",
@@ -599,7 +601,7 @@ userRouter.patch("/sell-flows/:flowId/pickup-schedule", async (req, res, next) =
       updatedAt,
     });
 
-    const serviceLead = syncPartnerLead({
+    const serviceLead = await syncPartnerLead({
       flow,
       user,
       leadType: "SERVICE_LEAD",
@@ -618,11 +620,11 @@ userRouter.patch("/sell-flows/:flowId/reschedule", async (req, res, next) => {
   try {
     const input = rescheduleBodySchema.parse(req.body);
     validatePickupScheduleTiming(input);
-    const existing = requireFlow(req);
+    const existing = await requireFlow(req);
     if (existing.status === "CANCELLED") throw badRequest("Cancelled sell flow cannot be rescheduled");
     if (existing.status !== "PICKUP_SCHEDULED") throw badRequest("Only PICKUP_SCHEDULED flows can be rescheduled", { currentStatus: existing.status });
     if (!existing.pickupSchedule) throw badRequest("No existing pickup schedule found to base reschedule on");
-    const existingLead = getPartnerLeadByFlowId(existing.id);
+    const existingLead = await getPartnerLeadByFlowId(existing.id);
     if (existingLead && ["COMPLETED", "CANCELLED"].includes(existingLead.status)) {
       throw badRequest("Pickup is already " + existingLead.status.toLowerCase() + " and cannot be rescheduled");
     }
@@ -643,14 +645,14 @@ userRouter.patch("/sell-flows/:flowId/reschedule", async (req, res, next) => {
       servicePincode: getFlowPincode(existing),
       status: "PICKUP_SCHEDULED", createdAt: existing.createdAt, updatedAt,
     });
-    const flow = updateUserSellFlow({
+    const flow = await updateUserSellFlow({
       id: existing.id, userId: req.auth.sub, status: "PICKUP_SCHEDULED",
       pickupScheduleJson: JSON.stringify(pickupSchedule),
       quoteJson: null, flowJson: JSON.stringify(flowJson), updatedAt,
     });
     const pincode = getFlowPincode(flow) || existingLead?.pincode;
     if (pincode) {
-      upsertPartnerLeadFromUserFlow({
+      await upsertPartnerLeadFromUserFlow({
         id: `lead-${flow.id}`, userSellFlowId: flow.id, userId: flow.userId,
         leadType: existingLead?.leadType || "SERVICE_LEAD",
         status: existingLead?.status || "AVAILABLE",
@@ -667,7 +669,7 @@ userRouter.patch("/sell-flows/:flowId/reschedule", async (req, res, next) => {
         createdAt: flow.createdAt, updatedAt,
       });
       if (existingLead?.id) {
-        appendPartnerLeadDispositionEvent({
+        await appendPartnerLeadDispositionEvent({
           id: crypto.randomUUID(), leadId: existingLead.id,
           userSellFlowId: flow.id, partnerId: existingLead.partnerId || null,
           fromStatus: existingLead.status, toStatus: existingLead.status,
@@ -675,7 +677,7 @@ userRouter.patch("/sell-flows/:flowId/reschedule", async (req, res, next) => {
           note: `Pickup rescheduled by user to ${input.primaryDate.split("T")[0]} ${input.primaryTime}`,
           actorRole: "user", actorId: req.auth.sub, createdAt: updatedAt,
         });
-        enqueueLeadEventOutbox({
+        await enqueueLeadEventOutbox({
           id: crypto.randomUUID(), eventType: "lead.rescheduled", leadId: existingLead.id,
           payloadJson: JSON.stringify({
             leadId: existingLead.id, userSellFlowId: flow.id,
@@ -694,10 +696,11 @@ userRouter.patch("/sell-flows/:flowId/reschedule", async (req, res, next) => {
 });
 
 // User-facing: get partner lead pickup/payment status for invoice display
-userRouter.get("/sell-flows/:flowId/lead-status", (req, res, next) => {
+userRouter.get("/sell-flows/:flowId/lead-status", async (req, res, next) => {
   try {
-    const flow = maybeAutoExpireScheduledFlow(requireFlow(req));
-    const lead = getPartnerLeadByFlowId(flow.id);
+    const existing = await requireFlow(req);
+    const flow = await maybeAutoExpireScheduledFlow(existing);
+    const lead = await getPartnerLeadByFlowId(flow.id);
     if (!lead) return res.json(success({ found: false, lead: null }));
     res.json(success({
       found: true,
@@ -723,16 +726,16 @@ userRouter.get("/sell-flows/:flowId/lead-status", (req, res, next) => {
   }
 });
 
-userRouter.get("/sell-flows/:flowId/invoice", (req, res, next) => {
+userRouter.get("/sell-flows/:flowId/invoice", async (req, res, next) => {
   try {
     z.string().trim().min(1).parse(req.params.flowId);
-    const flow = requireFlow(req);
-    const lead = getPartnerLeadByFlowId(flow.id);
+    const flow = await requireFlow(req);
+    const lead = await getPartnerLeadByFlowId(flow.id);
     if (!lead || lead.status !== "COMPLETED" || !lead.completionEvent?.invoice) {
       throw notFound("Invoice not found");
     }
 
-    const user = getUserById(flow.userId) || null;
+    const user = flow.userId ? (await getUserById(flow.userId)) : null;
     const seller = lead.seller || {};
     const pickup = flow.pickupSchedule || lead.pickupSchedule || {};
     const invoice = {
@@ -755,16 +758,16 @@ userRouter.get("/sell-flows/:flowId/invoice", (req, res, next) => {
   }
 });
 
-userRouter.post("/sell-flows/:flowId/cancel", (req, res, next) => {
+userRouter.post("/sell-flows/:flowId/cancel", async (req, res, next) => {
   try {
     const updatedAt = nowIso();
-    const flow = cancelUserSellFlow({ id: req.params.flowId, userId: req.auth.sub, updatedAt });
+    const flow = await cancelUserSellFlow({ id: req.params.flowId, userId: req.auth.sub, updatedAt });
     if (!flow) throw notFound("Sell flow not found");
-    const existingLead = getPartnerLeadByFlowId(flow.id);
-    const cancelledLead = markPartnerLeadCancelledForFlow({ userSellFlowId: flow.id, updatedAt });
+    const existingLead = await getPartnerLeadByFlowId(flow.id);
+    const cancelledLead = await markPartnerLeadCancelledForFlow({ userSellFlowId: flow.id, updatedAt });
     if (cancelledLead) {
       const eventId = crypto.randomUUID();
-      appendPartnerLeadDispositionEvent({
+      await appendPartnerLeadDispositionEvent({
         id: eventId,
         leadId: cancelledLead.id,
         userSellFlowId: cancelledLead.userSellFlowId,
@@ -778,7 +781,7 @@ userRouter.post("/sell-flows/:flowId/cancel", (req, res, next) => {
         createdAt: updatedAt,
       });
 
-      enqueueLeadEventOutbox({
+      await enqueueLeadEventOutbox({
         id: crypto.randomUUID(),
         eventType: "lead.cancelled",
         leadId: cancelledLead.id,
