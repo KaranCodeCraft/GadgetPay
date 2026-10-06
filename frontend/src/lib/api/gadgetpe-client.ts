@@ -5,11 +5,11 @@ function getDefaultApiBase() {
 
   const host = window.location.hostname;
   const isLocalHost = host === "localhost" || host === "127.0.0.1";
-  const localFrontendPorts = new Set(["5173", "8080", "4173"]);
+  const localFrontendPorts = new Set(["5173", "5174", "8080", "8081", "8082", "3000", "4173"]);
 
   // Local setups often run frontend and backend on different ports.
   // Prefer direct backend calls when no explicit API base env is provided.
-  if (isLocalHost && localFrontendPorts.has(window.location.port)) {
+  if (isLocalHost && (localFrontendPorts.has(window.location.port) || window.location.port !== "4000")) {
     return "http://localhost:4000/api/v1";
   }
 

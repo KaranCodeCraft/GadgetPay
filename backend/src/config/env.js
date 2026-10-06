@@ -60,6 +60,7 @@ export const env = {
   fonadaUnicode: otpEnv("FONADA_UNICODE", "false"),
   fonadaDltContentIdFinalOfferedPrice: otpEnv("FONADA_DLT_CONTENT_ID_FINAL_OFFERED_PRICE"),
   fonadaDltContentIdLoginAccount: otpEnv("FONADA_DLT_CONTENT_ID_LOGIN_ACCOUNT"),
+  fonadaDltContentIdCxLoginAccount: otpEnv("FONADA_DLT_CONTENT_ID_CX_LOGIN_ACCOUNT", otpEnv("FONADA_DLT_CONTENT_ID_LOGIN_ACCOUNT")),
   fonadaDltContentIdAmountForPhone: otpEnv("FONADA_DLT_CONTENT_ID_AMOUNT_FOR_PHONE"),
   fonadaDltContentIdCreatePartner: otpEnv("FONADA_DLT_CONTENT_ID_CREATE_PARTNER"),
   fonadaDltContentIdVerification: otpEnv("FONADA_DLT_CONTENT_ID_VERIFICATION"),
@@ -83,7 +84,7 @@ if (!env.fonadaUsername) missing.push("FONADA_USERNAME");
 if (!env.fonadaPassword) missing.push("FONADA_PASSWORD");
 if (!env.fonadaFrom) missing.push("FONADA_FROM");
 if (!env.fonadaDltContentIdFinalOfferedPrice) missing.push("FONADA_DLT_CONTENT_ID_FINAL_OFFERED_PRICE");
-if (!env.fonadaDltContentIdLoginAccount) missing.push("FONADA_DLT_CONTENT_ID_LOGIN_ACCOUNT");
+if (!env.fonadaDltContentIdCxLoginAccount && !env.fonadaDltContentIdLoginAccount) missing.push("FONADA_DLT_CONTENT_ID_CX_LOGIN_ACCOUNT");
 if (!env.fonadaDltContentIdAmountForPhone) missing.push("FONADA_DLT_CONTENT_ID_AMOUNT_FOR_PHONE");
 if (!env.fonadaDltContentIdCreatePartner) missing.push("FONADA_DLT_CONTENT_ID_CREATE_PARTNER");
 if (!env.fonadaDltContentIdVerification) missing.push("FONADA_DLT_CONTENT_ID_VERIFICATION");

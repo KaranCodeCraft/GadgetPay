@@ -631,6 +631,7 @@ type SelectedModel = {
   listedPrice?: number;
   brandSlug?: string;
   thumbnailUrl?: string;
+  launchYear?: number;
 };
 
 function getStoredDeviceDetails(): StoredDetails | null {
@@ -712,6 +713,14 @@ function isAppleDevice(selectedModel: SelectedModel | null) {
   return selectedModel?.brandSlug?.toLowerCase() === "apple";
 }
 
+/** Returns true if the device's launch year is more than 3 years before the current year. */
+function isDeviceOlderThan3Years(selectedModel: SelectedModel | null): boolean {
+  const launchYear = selectedModel?.launchYear;
+  if (!launchYear || typeof launchYear !== "number") return false;
+  const currentYear = new Date().getFullYear();
+  return currentYear - launchYear > 3;
+}
+
 function getFunctionalProblemOptions(isApple: boolean) {
   if (!isApple) return functionalProblemOptions;
   return functionalProblemOptions.filter((option) => option.value !== "batteryFaulty");
@@ -759,10 +768,14 @@ function buildDeviceDetailsMetadata({ selectedIssues, flowType, updatedAt }: { s
   };
 }
 
-function buildSlideItems(selectedIssues: string[] = []): SlideItem[] {
+function buildSlideItems(selectedIssues: string[] = [], skipWarranty = false): SlideItem[] {
   const items: SlideItem[] = [
     ...basicFunctionalityQuestions.map((question) => ({ kind: "question" as const, group: "basicFunctionality" as const, question })),
-    ...warrantyAndBillQuestions.map((question) => ({ kind: "question" as const, group: "warrantyAndBill" as const, question })),
+    // Only include warranty & bill slide if device is NOT older than 3 years
+    ...(!skipWarranty
+      ? warrantyAndBillQuestions.map((question) => ({ kind: "question" as const, group: "warrantyAndBill" as const, question }))
+      : []
+    ),
     ...issueOptions.map((issue) => ({ kind: "issue" as const, issue })),
   ];
 
@@ -1010,8 +1023,9 @@ function UserSellPhoneDeviceDetailsPage() {
     const details = getStoredDeviceDetails();
     const selectedModel = getStoredSelectedModel();
     const isAppleModel = isAppleDevice(selectedModel);
+    const isOldDeviceModel = isDeviceOlderThan3Years(selectedModel);
     const restoredIssues = details?.physicalIssues ?? details?.selectedIssues ?? [];
-    const initialSlides = chunkSlideItems(buildSlideItems(details?.physicalIssues ?? details?.selectedIssues ?? []));
+    const initialSlides = chunkSlideItems(buildSlideItems(details?.physicalIssues ?? details?.selectedIssues ?? [], isOldDeviceModel));
     const restoredSlide = details?.questionnaireSlide ?? (typeof details?.detailStep === "number" ? details.detailStep - 1 : 0);
 
     setStoredDetails(details);
@@ -1031,9 +1045,14 @@ function UserSellPhoneDeviceDetailsPage() {
   }, []);
 
   const isApple = isAppleDevice(storedSelectedModel);
-  const slides = chunkSlideItems(buildSlideItems(selectedIssues));
+  const isOldDevice = isDeviceOlderThan3Years(storedSelectedModel);
+  const slides = chunkSlideItems(buildSlideItems(selectedIssues, isOldDevice));
   const functionalProblemOptionsForDevice = getFunctionalProblemOptions(isApple);
   const accessoryOptionsForDevice = getAccessoryOptions(isApple);
+  // For devices older than 3 years, remove the "underWarranty" question from accessoriesAndOwnership
+  const accessoriesAndOwnershipQuestionsForDevice = isOldDevice
+    ? accessoriesAndOwnershipQuestions.filter((q) => q.key !== "underWarranty")
+    : accessoriesAndOwnershipQuestions;
 
   const activeSlideIndex = normalizeSlideIndex(currentSlideIndex, slides.length);
   const activeSlide = slides[activeSlideIndex] ?? [];
@@ -1058,6 +1077,14 @@ function UserSellPhoneDeviceDetailsPage() {
 
     const cleanIssueAnswers = cleanNestedAnswers(issues, nextNestedAnswers);
     const updatedAt = new Date().toISOString();
+    
+    // Clear warranty responses if device > 3 years old
+    const finalWarrantyAndBill = isOldDevice ? {} : warrantyAndBill;
+    const finalAccessoriesAndOwnership = { ...accessoriesAndOwnership };
+    if (isOldDevice) {
+      delete finalAccessoriesAndOwnership.underWarranty;
+    }
+
     const details = {
       canMakeCalls: toLegacyBoolean(basicFunctionality.canMakeCalls),
       touchWorking: toLegacyBoolean(basicFunctionality.touchWorking),
@@ -1066,13 +1093,13 @@ function UserSellPhoneDeviceDetailsPage() {
       detailStep: Math.min(slideIndex + 1, 3),
       questionnaireSlide: slideIndex,
       basicFunctionality,
-      warrantyAndBill,
+      warrantyAndBill: finalWarrantyAndBill,
       physicalIssues: issues,
       nestedPhysicalIssueAnswers: cleanIssueAnswers,
       cameraAndBiometrics: storedDetails?.cameraAndBiometrics ?? {},
       sensorsAndConnectivity: storedDetails?.sensorsAndConnectivity ?? {},
       batteryAndCharging: nextBatteryAnswers,
-      accessoriesAndOwnership,
+      accessoriesAndOwnership: finalAccessoriesAndOwnership,
       appleBatteryHealth: isApple ? nextAppleBatteryHealth : undefined,
       mobileAge: nextMobileAge,
       functionalProblems: nextFunctionalProblems,

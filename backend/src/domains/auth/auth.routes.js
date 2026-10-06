@@ -63,7 +63,7 @@ authRouter.post("/logout", async (req, res, next) => {
 authRouter.post("/user/otp/send", async (req, res, next) => {
   try {
     const input = sendOtpSchema.parse(req.body);
-    const result = await sendUserOtp(input.phone, "loginAccount");
+    const result = await sendUserOtp(input.phone, "cxLoginAccount");
     res.json(success(result));
   } catch (err) {
     next(err);

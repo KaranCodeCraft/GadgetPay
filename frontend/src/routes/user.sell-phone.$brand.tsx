@@ -1,4 +1,4 @@
-﻿import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import {
   getCatalogModels,
@@ -45,7 +45,7 @@ function UserSellPhoneBrandPage() {
       .finally(() => setLoading(false));
   }, [brand]);
 
-  const startFlow = (series: string, model: string, storage: string, cashifyPrice: number) => {
+  const startFlow = (series: string, model: string, storage: string, cashifyPrice: number, launchYear: number) => {
     if (typeof window === "undefined") return;
     window.localStorage.removeItem(DEVICE_DETAILS_STORAGE_KEY);
     window.localStorage.removeItem(PICKUP_SCHEDULE_STORAGE_KEY);
@@ -56,6 +56,7 @@ function UserSellPhoneBrandPage() {
       modelId: `${brand}__${series}__${model}__${storage}`,
       modelName: `${toTitleCase(model)} (${storage})`,
       listedPrice: cashifyPrice,
+      launchYear,
       updatedAt: new Date().toISOString(),
     };
     window.localStorage.setItem(DEVICE_MODEL_STORAGE_KEY, JSON.stringify(payload));
@@ -106,7 +107,7 @@ function UserSellPhoneBrandPage() {
                   key={sv.storage}
                   type="button"
                   className="user-storage-chip user-storage-option"
-                  onClick={() => startFlow(selectedModel.series, selectedModel.model, sv.storage, sv.cashifyPrice)}
+                  onClick={() => startFlow(selectedModel.series, selectedModel.model, sv.storage, sv.cashifyPrice, sv.launchYear)}
                 >
                   <span>{sv.storage}</span>
                   <span className="user-storage-price">Rs. {formatInr(sv.cashifyPrice)}</span>

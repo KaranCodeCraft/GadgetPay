@@ -3,29 +3,122 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider          = "postgresql"
+  url               = env("DATABASE_URL")
+  shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
+}
+
+enum PartnerStatus {
+  ACTIVE
+  SUSPENDED
+  DEACTIVATED
+}
+
+enum UserSellFlowStatus {
+  DRAFT
+  QUESTIONNAIRE_COMPLETED
+  QUOTE_READY
+  PICKUP_SCHEDULED
+  CLAIMED
+  COMPLETED
+  CANCELLED
+  EXPIRED
+}
+
+enum MediaAssetStatus {
+  ACTIVE
+  DELETED
+  ARCHIVED
+}
+
+enum PartnerLeadStatus {
+  AVAILABLE
+  CLAIMED
+  ACCEPTED
+  IN_PROGRESS
+  PENDING_PAYMENT
+  COMPLETED
+  CANCELLED
+  REJECTED
+  EXPIRED
+  UNASSIGNED
+}
+
+enum ServiceabilityStatus {
+  SERVICEABLE
+  UNSERVICEABLE
+}
+
+enum UploadStatus {
+  ACTIVE
+  DEACTIVATED
+}
+
+enum KycVerificationStatus {
+  PENDING_REVIEW
+  VERIFIED
+  REJECTED
+}
+
+enum LeadUnlockStatus {
+  PENDING
+  PENDING_PAYMENT
+  SCREENSHOT_SENT
+  APPROVED
+  REJECTED
+  EXPIRED
+  CLOSED
+}
+
+enum PaymentIntentStatus {
+  PENDING
+  PENDING_PAYMENT
+  SCREENSHOT_SENT
+  APPROVED
+  REJECTED
+  EXPIRED
+  CLOSED
+}
+
+enum ScreenshotStatus {
+  NOT_SENT
+  SENT
+  SUBMITTED
+  APPROVED
+  REJECTED
+}
+
+enum RechargeRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum EventDeliveryStatus {
+  PENDING
+  SENT
+  FAILED
 }
 
 model Partner {
-  id              String   @id
-  phone           String   @unique
+  id              String        @id
+  phone           String        @unique
   name            String
-  status          String   @default("ACTIVE")
-  statusUpdatedBy  String?
+  status          PartnerStatus @default(ACTIVE)
+  statusUpdatedBy String?
   statusUpdatedAt String?
   createdAt       String
   updatedAt       String
 
-  kycSubmissions  PartnerKycSubmission[]
-  wallet          PartnerCoinWallet?
-  coinLedger      PartnerCoinLedger[]
+  kycSubmissions   PartnerKycSubmission[]
+  wallet           PartnerCoinWallet?
+  coinLedger       PartnerCoinLedger[]
   rechargeRequests PartnerCoinRechargeRequest[]
-  scopes          PartnerPincodeScope[]
-  leadUnlocks     PartnerLeadUnlock[]
-  paymentIntents  PartnerLeadPaymentIntent[]
-  assignments     AdminLeadAssignment[]
-  leads           PartnerLead[]
+  scopes           PartnerPincodeScope[]
+  leadUnlocks      PartnerLeadUnlock[]
+  paymentIntents   PartnerLeadPaymentIntent[]
+  assignments      AdminLeadAssignment[]
+  leads            PartnerLead[]
   dispositionEvents PartnerLeadDispositionEvent[]
 
   @@map("partners")
@@ -47,8 +140,8 @@ model User {
 model OtpCode {
   phone     String @id
   otp       String
-  sentAt    Int
-  expiresAt Int
+  sentAt    BigInt
+  expiresAt BigInt
 
   @@map("otp_codes")
 }
@@ -63,10 +156,10 @@ model RefreshToken {
 }
 
 model UserSellFlow {
-  id                 String  @id
+  id                 String             @id
   userId             String
-  flowType           String  @default("sell-phone")
-  status             String
+  flowType           String             @default("sell-phone")
+  status             UserSellFlowStatus
   selectedModelJson  String
   deviceDetailsJson  String?
   pickupScheduleJson String?
@@ -75,11 +168,11 @@ model UserSellFlow {
   createdAt          String
   updatedAt          String
 
-  user               User                  @relation(fields: [userId], references: [id])
-  partnerLeads       PartnerLead[]
-  dispositionEvents  PartnerLeadDispositionEvent[]
-  unlocks            PartnerLeadUnlock[]
-  paymentIntents     PartnerLeadPaymentIntent[]
+  user              User                          @relation(fields: [userId], references: [id])
+  partnerLeads      PartnerLead[]
+  dispositionEvents PartnerLeadDispositionEvent[]
+  unlocks           PartnerLeadUnlock[]
+  paymentIntents    PartnerLeadPaymentIntent[]
 
   @@index([userId, updatedAt], map: "idx_user_sell_flows_user_updated")
   @@index([status], map: "idx_user_sell_flows_status")
@@ -87,7 +180,7 @@ model UserSellFlow {
 }
 
 model MediaAsset {
-  id               String  @id
+  id               String           @id
   tenantType       String
   tenantId         String?
   ownerRole        String
@@ -101,7 +194,7 @@ model MediaAsset {
   sizeBytes        Int
   relativePath     String
   storageProvider  String
-  status           String  @default("ACTIVE")
+  status           MediaAssetStatus @default(ACTIVE)
   checksum         String?
   createdAt        String
   updatedAt        String
@@ -114,49 +207,49 @@ model MediaAsset {
 }
 
 model PartnerLead {
-  id                    String    @id
-  userSellFlowId        String    @unique
-  userId                String
-  leadType              String
-  status                String
-  partnerId             String?
-  pincode               String
-  city                  String?
-  sellerName            String?
-  sellerPhone           String?
-  addressLine           String?
-  landmark              String?
-  selectedModelJson     String
-  deviceDetailsJson     String?
-  quoteJson             String?
-  pickupScheduleJson    String?
-  flowSnapshotJson      String
-  createdAt             String
-  updatedAt             String
-  claimedAt             String?
-  completedAt           String?
-  cancelledAt           String?
-  rejectionReason       String?
-  pickupStartedAt       String?
-  callStatus            String?
-  callAttemptCount      Int       @default(0)
-  lastCalledAt          String?
-  callHistoryJson       String?
-  onsiteValidationJson  String?
-  onsiteValidatedAt     String?
-  onsiteValidatedBy     String?
-  paymentProofJson      String?
-  paymentSubmittedAt    String?
-  completionEventJson   String?
-  completionEventAt     String?
+  id                   String            @id
+  userSellFlowId       String            @unique
+  userId               String
+  leadType             String
+  status               PartnerLeadStatus
+  partnerId            String?
+  pincode              String
+  city                 String?
+  sellerName           String?
+  sellerPhone          String?
+  addressLine          String?
+  landmark             String?
+  selectedModelJson    String
+  deviceDetailsJson    String?
+  quoteJson            String?
+  pickupScheduleJson   String?
+  flowSnapshotJson     String
+  createdAt            String
+  updatedAt            String
+  claimedAt            String?
+  completedAt          String?
+  cancelledAt          String?
+  rejectionReason      String?
+  pickupStartedAt      String?
+  callStatus           String?
+  callAttemptCount     Int               @default(0)
+  lastCalledAt         String?
+  callHistoryJson      String?
+  onsiteValidationJson String?
+  onsiteValidatedAt    String?
+  onsiteValidatedBy    String?
+  paymentProofJson     String?
+  paymentSubmittedAt   String?
+  completionEventJson  String?
+  completionEventAt    String?
 
-  userSellFlow          UserSellFlow @relation(fields: [userSellFlowId], references: [id])
-  user                  User?        @relation(fields: [userId], references: [id])
-  partner               Partner?     @relation(fields: [partnerId], references: [id])
-  dispositionEvents     PartnerLeadDispositionEvent[]
-  unlocks              PartnerLeadUnlock[]
-  paymentIntents       PartnerLeadPaymentIntent[]
-  assignments          AdminLeadAssignment[]
+  userSellFlow      UserSellFlow                  @relation(fields: [userSellFlowId], references: [id])
+  user              User?                         @relation(fields: [userId], references: [id])
+  partner           Partner?                      @relation(fields: [partnerId], references: [id])
+  dispositionEvents PartnerLeadDispositionEvent[]
+  unlocks           PartnerLeadUnlock[]
+  paymentIntents    PartnerLeadPaymentIntent[]
+  assignments       AdminLeadAssignment[]
 
   @@index([pincode, status, updatedAt], map: "idx_partner_leads_scope_status")
   @@index([partnerId, status], map: "idx_partner_leads_partner_status")
@@ -165,7 +258,7 @@ model PartnerLead {
 }
 
 model PartnerLeadDispositionEvent {
-  id             String @id
+  id             String  @id
   leadId         String
   userSellFlowId String
   partnerId      String?
@@ -177,9 +270,9 @@ model PartnerLeadDispositionEvent {
   actorId        String
   createdAt      String
 
-  lead           PartnerLead    @relation(fields: [leadId], references: [id])
-  userSellFlow   UserSellFlow   @relation(fields: [userSellFlowId], references: [id])
-  partner        Partner?       @relation(fields: [partnerId], references: [id])
+  lead         PartnerLead  @relation(fields: [leadId], references: [id])
+  userSellFlow UserSellFlow @relation(fields: [userSellFlowId], references: [id])
+  partner      Partner?     @relation(fields: [partnerId], references: [id])
 
   @@index([leadId, createdAt], map: "idx_partner_lead_disp_events_lead_time")
   @@index([toStatus, createdAt], map: "idx_partner_lead_disp_events_status_time")
@@ -188,53 +281,53 @@ model PartnerLeadDispositionEvent {
 }
 
 model ServiceabilityPincode {
-  pincode                String @id
-  status                 String
-  reason                 String?
-  state                  String?
-  district               String?
-  officeCount            Int?
-  deliveryOfficeCount    Int?
-  metadataJson           String?
-  sourceUploadId         String?
-  sourceFileName         String?
-  updatedBy              String
-  updatedAt              String
+  pincode             String               @id
+  status              ServiceabilityStatus
+  reason              String?
+  state               String?
+  district            String?
+  officeCount         Int?
+  deliveryOfficeCount Int?
+  metadataJson        String?
+  sourceUploadId      String?
+  sourceFileName      String?
+  updatedBy           String
+  updatedAt           String
 
-  scopes                 PartnerPincodeScope[]
+  scopes PartnerPincodeScope[]
 
   @@map("serviceability_pincodes")
 }
 
 model ServiceabilityUploadHistory {
-  id                     String @id
-  fileName               String
-  uploadedBy             String
-  uploadedAt             String
-  status                 String
-  mediaId                String?
-  deactivatedBy          String?
-  deactivatedAt          String?
-  deactivatedRowCount    Int @default(0)
-  insertedCount          Int @default(0)
-  updatedCount           Int @default(0)
-  totalProcessed         Int @default(0)
+  id                  String       @id
+  fileName            String
+  uploadedBy          String
+  uploadedAt          String
+  status              UploadStatus
+  mediaId             String?
+  deactivatedBy       String?
+  deactivatedAt       String?
+  deactivatedRowCount Int          @default(0)
+  insertedCount       Int          @default(0)
+  updatedCount        Int          @default(0)
+  totalProcessed      Int          @default(0)
 
   @@map("serviceability_upload_history")
 }
 
 model PartnerPincodeScope {
-  id           String @id
-  partnerId    String
-  pincode      String
-  isActive     Boolean @default(true)
+  id             String  @id
+  partnerId      String
+  pincode        String
+  isActive       Boolean @default(true)
   lastAssignedAt String?
-  updatedBy    String
-  createdAt    String
-  updatedAt    String
+  updatedBy      String
+  createdAt      String
+  updatedAt      String
 
-  partner      Partner @relation(fields: [partnerId], references: [id])
-  pincodeRef   ServiceabilityPincode @relation(fields: [pincode], references: [pincode])
+  partner    Partner               @relation(fields: [partnerId], references: [id])
+  pincodeRef ServiceabilityPincode @relation(fields: [pincode], references: [pincode])
 
   @@unique([partnerId, pincode])
   @@index([pincode, isActive, lastAssignedAt], map: "idx_partner_pincode_scopes_pincode_active")
@@ -242,23 +335,23 @@ model PartnerPincodeScope {
 }
 
 model PartnerKycSubmission {
-  id               String @id
-  partnerId        String
-  identityProof    String
-  fileName         String
-  mimeType         String
-  sizeBytes        Int
-  storageStatus    String
-  storageProvider  String
-  storageKey       String?
-  verificationStatus String
-  verificationNotes String?
-  verifiedBy       String?
-  verifiedAt       String?
-  createdAt        String
-  updatedAt        String
+  id                 String                @id
+  partnerId          String
+  identityProof      String
+  fileName           String
+  mimeType           String
+  sizeBytes          Int
+  storageStatus      String
+  storageProvider    String
+  storageKey         String?
+  verificationStatus KycVerificationStatus
+  verificationNotes  String?
+  verifiedBy         String?
+  verifiedAt         String?
+  createdAt          String
+  updatedAt          String
 
-  partner          Partner @relation(fields: [partnerId], references: [id])
+  partner Partner @relation(fields: [partnerId], references: [id])
 
   @@index([partnerId], map: "idx_kyc_partner_id")
   @@index([verificationStatus], map: "idx_kyc_verification_status")
@@ -267,52 +360,52 @@ model PartnerKycSubmission {
 
 model PartnerCoinWallet {
   partnerId String @id
-  balance   Int @default(0)
+  balance   Int    @default(0)
   updatedAt String
 
-  partner   Partner @relation(fields: [partnerId], references: [id])
+  partner Partner @relation(fields: [partnerId], references: [id])
 
   @@map("partner_coin_wallets")
 }
 
 model PartnerCoinLedger {
-  id         String @id
-  partnerId  String
-  txnType    String
-  amount     Int
-  method     String
-  reference  String?
-  note       String?
+  id           String  @id
+  partnerId    String
+  txnType      String
+  amount       Int
+  method       String
+  reference    String?
+  note         String?
   metadataJson String?
-  createdAt  String
+  createdAt    String
 
-  partner    Partner @relation(fields: [partnerId], references: [id])
+  partner Partner @relation(fields: [partnerId], references: [id])
 
   @@index([partnerId, createdAt], map: "idx_partner_coin_ledger_partner")
   @@map("partner_coin_ledger")
 }
 
 model PartnerLeadUnlock {
-  id              String @id
-  leadId          String
-  partnerId       String
-  userSellFlowId  String
-  unlockPrice     Int
-  paymentMethod   String @default("UPI_QR")
-  status          String
-  screenshotStatus String @default("NOT_SENT")
-  adminNote       String?
-  approvedBy      String?
-  approvedAt      String?
-  rejectedAt      String?
-  metadataJson    String?
-  createdAt       String
-  expiresAt       String
-  closedAt        String?
+  id               String           @id
+  leadId           String
+  partnerId        String
+  userSellFlowId   String
+  unlockPrice      Int
+  paymentMethod    String           @default("UPI_QR")
+  status           LeadUnlockStatus
+  screenshotStatus ScreenshotStatus @default(NOT_SENT)
+  adminNote        String?
+  approvedBy       String?
+  approvedAt       String?
+  rejectedAt       String?
+  metadataJson     String?
+  createdAt        String
+  expiresAt        String
+  closedAt         String?
 
-  lead            PartnerLead @relation(fields: [leadId], references: [id])
-  partner         Partner @relation(fields: [partnerId], references: [id])
-  userSellFlow    UserSellFlow @relation(fields: [userSellFlowId], references: [id])
+  lead         PartnerLead  @relation(fields: [leadId], references: [id])
+  partner      Partner      @relation(fields: [partnerId], references: [id])
+  userSellFlow UserSellFlow @relation(fields: [userSellFlowId], references: [id])
 
   @@unique([leadId])
   @@index([partnerId, status, createdAt], map: "idx_partner_lead_unlocks_partner_status")
@@ -320,26 +413,26 @@ model PartnerLeadUnlock {
 }
 
 model PartnerLeadPaymentIntent {
-  id              String @id
-  leadId          String
-  partnerId       String
-  userSellFlowId  String
-  unlockPrice     Int
-  paymentMethod   String @default("UPI_QR")
-  status          String
-  screenshotStatus String @default("NOT_SENT")
-  adminNote       String?
-  approvedBy      String?
-  approvedAt      String?
-  rejectedAt      String?
-  metadataJson    String?
-  createdAt       String
-  expiresAt       String
-  closedAt        String?
+  id               String              @id
+  leadId           String
+  partnerId        String
+  userSellFlowId   String
+  unlockPrice      Int
+  paymentMethod    String              @default("UPI_QR")
+  status           PaymentIntentStatus
+  screenshotStatus ScreenshotStatus    @default(NOT_SENT)
+  adminNote        String?
+  approvedBy       String?
+  approvedAt       String?
+  rejectedAt       String?
+  metadataJson     String?
+  createdAt        String
+  expiresAt        String
+  closedAt         String?
 
-  lead            PartnerLead @relation(fields: [leadId], references: [id])
-  partner         Partner @relation(fields: [partnerId], references: [id])
-  userSellFlow    UserSellFlow @relation(fields: [userSellFlowId], references: [id])
+  lead         PartnerLead  @relation(fields: [leadId], references: [id])
+  partner      Partner      @relation(fields: [partnerId], references: [id])
+  userSellFlow UserSellFlow @relation(fields: [userSellFlowId], references: [id])
 
   @@unique([leadId])
   @@index([partnerId, status, createdAt], map: "idx_partner_lead_payment_intents_partner_status")
@@ -347,12 +440,12 @@ model PartnerLeadPaymentIntent {
 }
 
 model PartnerCoinRechargeRequest {
-  id            String @id
+  id            String                @id
   partnerId     String
   amount        Int
   upiTxnRef     String
   upiApp        String?
-  status        String
+  status        RechargeRequestStatus
   requestedAt   String
   verifiedAt    String?
   verifiedBy    String?
@@ -360,7 +453,7 @@ model PartnerCoinRechargeRequest {
   ledgerEntryId String?
   metadataJson  String?
 
-  partner       Partner @relation(fields: [partnerId], references: [id])
+  partner Partner @relation(fields: [partnerId], references: [id])
 
   @@index([partnerId, requestedAt], map: "idx_partner_coin_recharge_requests_partner")
   @@index([status, requestedAt], map: "idx_partner_coin_recharge_requests_status")
@@ -368,13 +461,13 @@ model PartnerCoinRechargeRequest {
 }
 
 model LeadEventOutbox {
-  id             String @id
+  id             String              @id
   eventType      String
   leadId         String
   payloadJson    String
   occurredAt     String
-  deliveryStatus String @default("PENDING")
-  retryCount     Int @default(0)
+  deliveryStatus EventDeliveryStatus @default(PENDING)
+  retryCount     Int                 @default(0)
   nextRetryAt    String?
   lastError      String?
 
@@ -383,30 +476,30 @@ model LeadEventOutbox {
 }
 
 model AdminMetricsSnapshot {
-  id            String @id
-  bucketDate    String
-  scopePincode String?
+  id             String  @id
+  bucketDate     String
+  scopePincode   String?
   scopePartnerId String?
-  metricKey     String
-  metricValue   Float
-  updatedAt     String
+  metricKey      String
+  metricValue    Float
+  updatedAt      String
 
   @@index([bucketDate, scopePincode, scopePartnerId, metricKey], map: "idx_admin_metrics_snapshot_scope")
   @@map("admin_metrics_snapshot")
 }
 
 model AdminLeadAssignment {
-  id                 String @id
-  leadId             String
-  assignedPartnerId  String
-  assignedByAdminId  String
-  assignmentMode     String
-  note               String?
-  createdAt          String
-  updatedAt          String
+  id                String @id
+  leadId            String
+  assignedPartnerId String
+  assignedByAdminId String
+  assignmentMode    String
+  note              String?
+  createdAt         String
+  updatedAt         String
 
-  lead               PartnerLead @relation(fields: [leadId], references:[id])
-  partner            Partner @relation(fields: [assignedPartnerId], references:[id])
+  lead    PartnerLead @relation(fields: [leadId], references: [id])
+  partner Partner     @relation(fields: [assignedPartnerId], references: [id])
 
   @@index([leadId, createdAt], map: "idx_admin_lead_assignments_lead_time")
   @@index([assignedPartnerId, createdAt], map: "idx_admin_lead_assignments_partner_time")
@@ -414,19 +507,19 @@ model AdminLeadAssignment {
 }
 
 model DevicePriceCatalog {
-  id            Int @id @default(autoincrement())
-  deviceType    String
-  brand         String
-  series        String
-  model         String
-  storage       String
-  launchYear    Int
-  cashifyPrice  Float
-  rowJson       String
+  id             Int     @id @default(autoincrement())
+  deviceType     String
+  brand          String
+  series         String
+  model          String
+  storage        String
+  launchYear     Int
+  cashifyPrice   Float
+  rowJson        String
   sourceUploadId String?
   sourceFileName String?
-  createdAt     String
-  updatedAt     String
+  createdAt      String
+  updatedAt      String
 
   @@unique([deviceType, brand, series, model, storage, launchYear])
   @@index([deviceType, brand, series, model, storage, launchYear], map: "idx_price_catalog_lookup")
@@ -434,35 +527,35 @@ model DevicePriceCatalog {
 }
 
 model QuoteDeductionRule {
-  id                  String @id
-  answerGroup         String
-  answerKey           String
-  answerValue         String?
-  label               String
-  deductionType       String
-  deductionValue      Float
-  maxDeductionAmount  Float?
-  priority            Int @default(100)
-  isActive            Boolean @default(true)
-  appliesToBrand      String?
-  appliesToModelId    String?
-  createdBy           String
-  createdAt           String
-  updatedAt           String
+  id                 String  @id
+  answerGroup        String
+  answerKey          String
+  answerValue        String?
+  label              String
+  deductionType      String
+  deductionValue     Float
+  maxDeductionAmount Float?
+  priority           Int     @default(100)
+  isActive           Boolean @default(true)
+  appliesToBrand     String?
+  appliesToModelId   String?
+  createdBy          String
+  createdAt          String
+  updatedAt          String
 
   @@map("quote_deduction_rules")
 }
 
 model DevicePriceUploadHistory {
-  id                  String @id
+  id                  String       @id
   deviceType          String
   fileName            String
   uploadedBy          String
   uploadedAt          String
-  status              String @default("ACTIVE")
+  status              UploadStatus @default(ACTIVE)
   deactivatedBy       String?
   deactivatedAt       String?
-  deactivatedRowCount Int @default(0)
+  deactivatedRowCount Int          @default(0)
   insertedCount       Int
   updatedCount        Int
   totalProcessed      Int
@@ -471,18 +564,18 @@ model DevicePriceUploadHistory {
 }
 
 model DevicePriceUploadRow {
-  id          Int @id @default(autoincrement())
-  uploadId    String
-  deviceType  String
-  brand       String
-  series      String
-  model       String
-  storage     String
-  launchYear  Int
+  id           Int    @id @default(autoincrement())
+  uploadId     String
+  deviceType   String
+  brand        String
+  series       String
+  model        String
+  storage      String
+  launchYear   Int
   cashifyPrice Float
-  rowJson     String
-  createdAt   String
-  updatedAt   String
+  rowJson      String
+  createdAt    String
+  updatedAt    String
 
   @@unique([uploadId, deviceType, brand, series, model, storage, launchYear])
   @@index([uploadId], map: "idx_price_upload_rows_upload")

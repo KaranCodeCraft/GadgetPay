@@ -378,7 +378,7 @@ function validatePricingUploadFile(file) {
   });
 }
 
-function persistPricingUpload({ file, parsed, uploadedBy, now, deviceType }) {
+async function persistPricingUpload({ file, parsed, uploadedBy, now, deviceType }) {
   const uploadId = randomUUID();
   const mediaRelativePath = buildMediaRelativePath({
     tenantType: "admin",
@@ -389,7 +389,7 @@ function persistPricingUpload({ file, parsed, uploadedBy, now, deviceType }) {
     fileName: file.originalname,
   });
   writeMediaBuffer({ relativePath: mediaRelativePath, buffer: file.buffer });
-  createMediaAsset({
+  await createMediaAsset({
     id: uploadId,
     tenantType: "admin",
     tenantId: uploadedBy,
@@ -438,8 +438,8 @@ function persistPricingUpload({ file, parsed, uploadedBy, now, deviceType }) {
     updatedAt: now,
   }));
 
-  const summary = upsertDevicePriceCatalogRows(upsertInput);
-  createDevicePriceUploadHistory({
+  const summary = await upsertDevicePriceCatalogRows(upsertInput);
+  await createDevicePriceUploadHistory({
     id: uploadId,
     deviceType,
     fileName: file.originalname,
@@ -449,7 +449,7 @@ function persistPricingUpload({ file, parsed, uploadedBy, now, deviceType }) {
     updatedCount: summary.updatedCount,
     totalProcessed: summary.totalProcessed,
   });
-  createDevicePriceUploadSnapshotRows(snapshotInput);
+  await createDevicePriceUploadSnapshotRows(snapshotInput);
 
   return {
     ...summary,
@@ -458,7 +458,7 @@ function persistPricingUpload({ file, parsed, uploadedBy, now, deviceType }) {
   };
 }
 
-function processPricingUploadRequest({ req, deviceType }) {
+async function processPricingUploadRequest({ req, deviceType }) {
   const files = getPricingUploadFiles(req);
   if (files.length === 0) {
     throw badRequest("Excel file is required");
@@ -466,8 +466,10 @@ function processPricingUploadRequest({ req, deviceType }) {
 
   const validatedFiles = files.map((file) => validatePricingUploadFile(file));
   const now = new Date().toISOString();
-  const uploads = validatedFiles.map((item) =>
-    persistPricingUpload({ ...item, uploadedBy: req.auth.sub, now, deviceType }),
+  const uploads = await Promise.all(
+    validatedFiles.map((item) =>
+      persistPricingUpload({ ...item, uploadedBy: req.auth.sub, now, deviceType }),
+    ),
   );
   const aggregate = uploads.reduce(
     (total, item) => ({
@@ -491,10 +493,10 @@ function processPricingUploadRequest({ req, deviceType }) {
 }
 
 function makePricingUploadHandler(fixedDeviceType, options = {}) {
-  return (req, res, next) => {
+  return async (req, res, next) => {
     try {
       const deviceType = fixedDeviceType || parseDeviceType(req.body?.deviceType);
-      const payload = processPricingUploadRequest({ req, deviceType });
+      const payload = await processPricingUploadRequest({ req, deviceType });
       if (options.deprecatedEndpoint) {
         payload.deprecatedEndpoint = true;
       }
@@ -509,35 +511,43 @@ export const adminPricingRouter = Router();
 
 adminPricingRouter.use(requireAuth, requireRole("admin"));
 
-adminPricingRouter.get("/catalog", (req, res) => {
-  const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
-  const deviceType = parseDeviceType(req.query.deviceType || "MOBILE");
-  const rows = listDevicePriceCatalog({ search, deviceType });
-  res.json(success({ rows, count: rows.length, expectedHeaders: EXPECTED_HEADERS }));
-});
-
-adminPricingRouter.get("/uploads", (req, res) => {
-  const deviceType = parseDeviceType(req.query.deviceType || "MOBILE");
-  const rows = listDevicePriceUploadHistory({ deviceType });
-  res.json(success({ rows, count: rows.length }));
-});
-
-adminPricingRouter.get("/deductions", (req, res, next) => {
+adminPricingRouter.get("/catalog", async (req, res, next) => {
   try {
-    const active = parseOptionalBooleanQuery(req.query.active);
     const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
-    const rows = listQuoteDeductionRules({ active, search });
+    const deviceType = parseDeviceType(req.query.deviceType || "MOBILE");
+    const rows = await listDevicePriceCatalog({ search, deviceType });
+    res.json(success({ rows, count: rows.length, expectedHeaders: EXPECTED_HEADERS }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+adminPricingRouter.get("/uploads", async (req, res, next) => {
+  try {
+    const deviceType = parseDeviceType(req.query.deviceType || "MOBILE");
+    const rows = await listDevicePriceUploadHistory({ deviceType });
     res.json(success({ rows, count: rows.length }));
   } catch (err) {
     next(err);
   }
 });
 
-adminPricingRouter.post("/deductions", (req, res, next) => {
+adminPricingRouter.get("/deductions", async (req, res, next) => {
+  try {
+    const active = parseOptionalBooleanQuery(req.query.active);
+    const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
+    const rows = await listQuoteDeductionRules({ active, search });
+    res.json(success({ rows, count: rows.length }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+adminPricingRouter.post("/deductions", async (req, res, next) => {
   try {
     const input = quoteDeductionRuleBodySchema.parse(req.body);
     const now = new Date().toISOString();
-    const rule = createQuoteDeductionRule({
+    const rule = await createQuoteDeductionRule({
       id: `quote-rule-${randomUUID()}`,
       ...input,
       createdBy: req.auth.sub,
@@ -550,13 +560,13 @@ adminPricingRouter.post("/deductions", (req, res, next) => {
   }
 });
 
-adminPricingRouter.put("/deductions/:ruleId", (req, res, next) => {
+adminPricingRouter.put("/deductions/:ruleId", async (req, res, next) => {
   try {
-    const existing = getQuoteDeductionRuleById(req.params.ruleId);
+    const existing = await getQuoteDeductionRuleById(req.params.ruleId);
     if (!existing) throw notFound("Quote deduction rule not found");
 
     const input = quoteDeductionRuleBodySchema.parse(req.body);
-    const rule = updateQuoteDeductionRule({
+    const rule = await updateQuoteDeductionRule({
       ...existing,
       ...input,
       updatedAt: new Date().toISOString(),
@@ -567,13 +577,13 @@ adminPricingRouter.put("/deductions/:ruleId", (req, res, next) => {
   }
 });
 
-adminPricingRouter.patch("/deductions/:ruleId/toggle", (req, res, next) => {
+adminPricingRouter.patch("/deductions/:ruleId/toggle", async (req, res, next) => {
   try {
-    const existing = getQuoteDeductionRuleById(req.params.ruleId);
+    const existing = await getQuoteDeductionRuleById(req.params.ruleId);
     if (!existing) throw notFound("Quote deduction rule not found");
 
     const input = z.object({ isActive: z.boolean() }).parse(req.body);
-    const rule = setQuoteDeductionRuleActive({
+    const rule = await setQuoteDeductionRuleActive({
       id: existing.id,
       isActive: input.isActive,
       updatedAt: new Date().toISOString(),
@@ -599,12 +609,12 @@ adminPricingRouter.post("/upload/ipad", handlePricingUploadMultipart, makePricin
 adminPricingRouter.post("/upload/tablet", handlePricingUploadMultipart, makePricingUploadHandler("TABLET"));
 adminPricingRouter.post("/upload", handlePricingUploadMultipart, makePricingUploadHandler(null, { deprecatedEndpoint: true }));
 
-adminPricingRouter.patch("/uploads/:uploadId/status", (req, res, next) => {
+adminPricingRouter.patch("/uploads/:uploadId/status", async (req, res, next) => {
   try {
     const uploadId = z.string().uuid().parse(req.params.uploadId);
     const input = z.object({ status: z.enum(["ACTIVE", "DEACTIVATED"]) }).parse(req.body);
 
-    const existing = getDevicePriceUploadHistoryById(uploadId);
+    const existing = await getDevicePriceUploadHistoryById(uploadId);
     if (!existing) {
       throw notFound("Upload history record not found");
     }
@@ -614,7 +624,7 @@ adminPricingRouter.patch("/uploads/:uploadId/status", (req, res, next) => {
     }
 
     if (input.status === "DEACTIVATED") {
-      const result = deactivateDevicePriceUploadAndRows({
+      const result = await deactivateDevicePriceUploadAndRows({
         uploadId,
         deactivatedBy: req.auth.sub,
         deactivatedAt: new Date().toISOString(),
@@ -632,7 +642,7 @@ adminPricingRouter.patch("/uploads/:uploadId/status", (req, res, next) => {
       return;
     }
 
-    const result = activateDevicePriceUploadAndRows({
+    const result = await activateDevicePriceUploadAndRows({
       uploadId,
       sourceFileName: existing.fileName,
     });
@@ -651,10 +661,10 @@ adminPricingRouter.patch("/uploads/:uploadId/status", (req, res, next) => {
   }
 });
 
-adminPricingRouter.delete("/uploads/:uploadId", (req, res, next) => {
+adminPricingRouter.delete("/uploads/:uploadId", async (req, res, next) => {
   try {
     const uploadId = z.string().uuid().parse(req.params.uploadId);
-    const existing = getDevicePriceUploadHistoryById(uploadId);
+    const existing = await getDevicePriceUploadHistoryById(uploadId);
     if (!existing) {
       throw notFound("Upload history record not found");
     }
@@ -663,7 +673,7 @@ adminPricingRouter.delete("/uploads/:uploadId", (req, res, next) => {
       throw badRequest("Deactivate upload before permanent delete");
     }
 
-    const result = deleteDevicePriceUploadPermanently({ uploadId });
+    const result = await deleteDevicePriceUploadPermanently({ uploadId });
 
     res.json(
       success({

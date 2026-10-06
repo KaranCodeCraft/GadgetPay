@@ -1,4 +1,4 @@
-import { prisma } from "./prisma.js";
+import { prismaWithReconnect as prisma } from "./prisma.js";
 
 // Helper functions for parsing and sanitizing
 export function parseJsonColumn(value, fallback = null) {
@@ -263,8 +263,8 @@ export async function markMediaAssetDeleted({ id, updatedAt, deletedAt }) {
 export async function upsertOtpCode({ phone, otp, sentAt, expiresAt }) {
   await prisma.otpCode.upsert({
     where: { phone },
-    update: { otp, sentAt, expiresAt },
-    create: { phone, otp, sentAt, expiresAt },
+    update: { otp, sentAt: BigInt(sentAt), expiresAt: BigInt(expiresAt) },
+    create: { phone, otp, sentAt: BigInt(sentAt), expiresAt: BigInt(expiresAt) },
   });
 }
 
@@ -274,8 +274,8 @@ export async function getOtpCode(phone) {
   return {
     phone: row.phone,
     otp: row.otp,
-    sentAt: row.sentAt,
-    expiresAt: row.expiresAt,
+    sentAt: Number(row.sentAt),
+    expiresAt: Number(row.expiresAt),
   };
 }
 
