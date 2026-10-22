@@ -43,6 +43,7 @@ import {
   savePartnerLeadOnsiteValidation,
   savePartnerLeadPaymentProofMetadata,
   updatePartnerLeadWorkflowStatus,
+  updateUserSellFlow,
   updatePartnerLeadReschedule,
   verifyPartnerLeadUnlockIntent,
   verifyPartnerCoinRechargeRequest,
@@ -1899,7 +1900,7 @@ partnerRouter.post("/leads/:leadId/payment-proof/metadata", requireAuth, require
   }
 });
 
-partnerRouter.post("/leads/:leadId/completion", requireAuth, requireRole("partner"), (req, res, next) => {
+partnerRouter.post("/leads/:leadId/completion", requireAuth, requireRole("partner"), async (req, res, next) => {
   try {
     rejectRemovedFields(req.body, ["remarks"]);
     const input = completionSchema.parse(req.body);
@@ -1977,6 +1978,12 @@ partnerRouter.post("/leads/:leadId/completion", requireAuth, requireRole("partne
       partnerId: req.auth.sub,
       status: "COMPLETED",
       rejectionReason: null,
+      updatedAt: now,
+    });
+    await updateUserSellFlow({
+      id: existing.userSellFlowId,
+      userId: existing.userId,
+      status: "COMPLETED",
       updatedAt: now,
     });
     closePartnerLeadUnlockOrder({ leadId: existing.id, partnerId: req.auth.sub, closedAt: now });

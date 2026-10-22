@@ -716,6 +716,7 @@ function isAppleDevice(selectedModel: SelectedModel | null) {
 /** Returns true if the device's launch year is more than 3 years before the current year. */
 function isDeviceOlderThan3Years(selectedModel: SelectedModel | null): boolean {
   const launchYear = selectedModel?.launchYear;
+  console.log("isDeviceOlderThan3Years: ", { model: selectedModel?.modelName, launchYear });
   if (!launchYear || typeof launchYear !== "number") return false;
   const currentYear = new Date().getFullYear();
   return currentYear - launchYear > 3;

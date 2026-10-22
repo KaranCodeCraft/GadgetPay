@@ -9,6 +9,7 @@ import {
   deleteUserAccount,
   expireUserSellFlow,
   getUserById,
+  getPartnerById,
   getPartnerLeadByFlowId,
   getUserSellFlowById,
   listUserSellFlows,
@@ -32,7 +33,7 @@ import {
   PICKUP_CUTOFF_TIME_ZONE,
 } from "./pickup-expiry.js";
 
-const flowStatuses = ["DRAFT", "QUESTIONNAIRE_COMPLETED", "QUOTE_READY", "PICKUP_SCHEDULED", "CANCELLED"];
+const flowStatuses = ["DRAFT", "QUESTIONNAIRE_COMPLETED", "QUOTE_READY", "PICKUP_SCHEDULED", "COMPLETED", "CANCELLED", "EXPIRED"];
 const PICKUP_SLOT_OPTIONS = [
   "10:00 AM - 11:00 AM",
   "11:00 AM - 12:00 PM",
@@ -726,31 +727,123 @@ userRouter.get("/sell-flows/:flowId/lead-status", async (req, res, next) => {
   }
 });
 
+async function buildUserDealInvoice({ flow, lead, user }) {
+  if (!lead || lead.status !== "COMPLETED") return null;
+
+  let invoiceData = lead.completionEvent?.invoice;
+  if (!invoiceData) {
+    const partner = lead.partnerId ? await getPartnerById(lead.partnerId) : null;
+    const quotedAmount = Number(lead.onsiteValidation?.revisedQuote);
+    const extraPaidAmount = Math.round(Number(lead.paymentProof?.extraPaidAmount ?? 0));
+    const finalAmount = Math.round(
+      Number(lead.paymentProof?.amountCollected ?? lead.onsiteValidation?.revisedQuote ?? lead.quote?.sellingPrice ?? 0)
+    );
+
+    invoiceData = {
+      id: `invoice-${lead.id}`,
+      leadId: lead.id,
+      userSellFlowId: lead.userSellFlowId,
+      status: "DEAL_CLOSED",
+      modelName: lead.selectedModel?.modelName || null,
+      listedPrice: lead.quote?.sellingPrice ?? lead.selectedModel?.listedPrice ?? 0,
+      quotedAmount: Number.isFinite(quotedAmount) ? Math.round(quotedAmount) : finalAmount,
+      extraPaidAmount,
+      finalAmount,
+      deductions: lead.onsiteValidation?.checklist?.__deductions || null,
+      payment: lead.paymentProof ? {
+        amountCollected: lead.paymentProof.amountCollected,
+        paymentMode: lead.paymentProof.paymentMode,
+        submittedAt: lead.paymentProof.submittedAt,
+      } : null,
+      partner: {
+        id: lead.partnerId || "partner",
+        name: partner?.name || "Partner",
+        phone: partner?.phone || null,
+      },
+      completedAt: lead.completedAt || lead.updatedAt || new Date().toISOString(),
+    };
+  }
+
+  const seller = lead.seller || {};
+  const pickup = flow.pickupSchedule || lead.pickupSchedule || {};
+  const customerName = user?.name || seller.name || pickup.sellerName || "Customer";
+  const customerPhone = user?.phone || seller.phone || pickup.callingPhoneNumber || null;
+  const addressLine = seller.addressLine || pickup.addressLine || null;
+  const landmark = seller.landmark || pickup.landmark || null;
+  const city = seller.city || pickup.city || null;
+  const pincode = seller.pincode || pickup.pincode || flow.servicePincode || null;
+
+  return {
+    ...invoiceData,
+    company: {
+      name: "GadgetPe",
+      website: "www.gadgetpe.com",
+      email: "support@gadgetpe.com",
+    },
+    customer: {
+      name: customerName,
+      phone: customerPhone,
+      addressLine,
+      landmark,
+      city,
+      pincode,
+    },
+    seller: {
+      name: customerName,
+      phone: customerPhone,
+      addressLine,
+      landmark,
+      city,
+      pincode,
+    },
+    purchaser: {
+      name: customerName,
+      addressLine,
+      landmark,
+      city,
+      pincode,
+    },
+    serviceNumber: lead.id,
+    orderCreatedAt: flow.createdAt || null,
+  };
+}
+
+userRouter.get("/invoices", async (req, res, next) => {
+  try {
+    const userId = req.auth.sub;
+    const user = await getUserById(userId);
+    const flows = await listUserSellFlows({ userId, limit: 100 });
+    const invoices = [];
+
+    for (const flow of flows) {
+      const lead = await getPartnerLeadByFlowId(flow.id);
+      if (lead && lead.status === "COMPLETED") {
+        const inv = await buildUserDealInvoice({ flow, lead, user });
+        if (inv) invoices.push(inv);
+      }
+    }
+
+    invoices.sort((a, b) => new Date(b.completedAt || 0).getTime() - new Date(a.completedAt || 0).getTime());
+    res.json(success({ invoices, count: invoices.length }));
+  } catch (err) {
+    next(err);
+  }
+});
+
 userRouter.get("/sell-flows/:flowId/invoice", async (req, res, next) => {
   try {
     z.string().trim().min(1).parse(req.params.flowId);
     const flow = await requireFlow(req);
     const lead = await getPartnerLeadByFlowId(flow.id);
-    if (!lead || lead.status !== "COMPLETED" || !lead.completionEvent?.invoice) {
+    if (!lead || lead.status !== "COMPLETED") {
       throw notFound("Invoice not found");
     }
 
-    const user = flow.userId ? (await getUserById(flow.userId)) : null;
-    const seller = lead.seller || {};
-    const pickup = flow.pickupSchedule || lead.pickupSchedule || {};
-    const invoice = {
-      ...lead.completionEvent.invoice,
-      company: { name: "GadgetPe", website: "www.gadgetpe.com" },
-      purchaser: {
-        name: user?.name || seller.name || pickup.sellerName || "Customer",
-        addressLine: seller.addressLine || pickup.addressLine || null,
-        landmark: seller.landmark || pickup.landmark || null,
-        city: seller.city || pickup.city || null,
-        pincode: seller.pincode || pickup.pincode || flow.servicePincode || null,
-      },
-      serviceNumber: lead.id,
-      orderCreatedAt: flow.createdAt || null,
-    };
+    const user = flow.userId ? await getUserById(flow.userId) : null;
+    const invoice = await buildUserDealInvoice({ flow, lead, user });
+    if (!invoice) {
+      throw notFound("Invoice not found");
+    }
 
     res.json(success({ invoice }));
   } catch (err) {

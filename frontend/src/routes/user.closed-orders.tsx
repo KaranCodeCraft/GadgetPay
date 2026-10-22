@@ -1,7 +1,16 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { CheckCircle, Clock, History } from "lucide-react";
+import { CheckCircle, Clock, Download, Eye, History } from "lucide-react";
 import { useEffect, useState } from "react";
-import { ApiClientError, getUserSellFlowLeadStatus, type UserSellFlow } from "../lib/api/gadgetpe-client";
+import { toast } from "sonner";
+import { InvoiceModal } from "../components/InvoiceModal";
+import {
+  ApiClientError,
+  getUserSellFlowInvoice,
+  getUserSellFlowLeadStatus,
+  type UserDealInvoice,
+  type UserSellFlow,
+} from "../lib/api/gadgetpe-client";
+import { downloadInvoicePdf } from "../lib/invoice-pdf";
 
 export const Route = createFileRoute("/user/closed-orders")({
   component: UserClosedOrdersPage,
@@ -30,6 +39,8 @@ function UserClosedOrdersPage() {
   const [flows, setFlows] = useState<EnrichedFlow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [activeInvoice, setActiveInvoice] = useState<UserDealInvoice | null>(null);
+  const [loadingInvoiceId, setLoadingInvoiceId] = useState<string | null>(null);
 
   const token = typeof window !== "undefined" ? window.localStorage.getItem(USER_TOKEN_KEY) : null;
 
@@ -39,18 +50,19 @@ function UserClosedOrdersPage() {
       try {
         const { listUserSellFlows } = await import("../lib/api/gadgetpe-client");
 
-        // Fetch cancelled flows
+        // Fetch completed and cancelled flows
+        const { rows: completedList } = await listUserSellFlows(token, { status: "COMPLETED", limit: 100 }).catch(() => ({ rows: [] }));
         const { rows: cancelled } = await listUserSellFlows(token, { status: "CANCELLED", limit: 100 });
 
-        // Fetch all scheduled flows and check if their lead is COMPLETED
+        // Also fetch scheduled flows to check if any have lead completed
         const { rows: scheduled } = await listUserSellFlows(token, { status: "PICKUP_SCHEDULED", limit: 100 });
         const leadChecks = await Promise.allSettled(
           scheduled.map((f) => getUserSellFlowLeadStatus(token, f.id).then((s) => ({ flow: f, status: s })))
         );
-        const completedFlows: EnrichedFlow[] = [];
+        const completedFromScheduled: EnrichedFlow[] = [];
         for (const r of leadChecks) {
           if (r.status === "fulfilled" && r.value.status.found && r.value.status.lead?.status === "COMPLETED") {
-            completedFlows.push({
+            completedFromScheduled.push({
               ...r.value.flow,
               leadStatus: "COMPLETED",
               amountCollected: r.value.status.lead.paymentProof?.amountCollected,
@@ -59,8 +71,18 @@ function UserClosedOrdersPage() {
           }
         }
 
+        const directCompleted: EnrichedFlow[] = completedList.map((f) => ({
+          ...f,
+          leadStatus: "COMPLETED",
+        }));
+
+        const completedMap = new Map<string, EnrichedFlow>();
+        for (const f of [...completedFromScheduled, ...directCompleted]) {
+          completedMap.set(f.id, f);
+        }
+
         const allClosed: EnrichedFlow[] = [
-          ...completedFlows,
+          ...Array.from(completedMap.values()),
           ...cancelled.map((f) => ({ ...f, leadStatus: isAutoExpiredFlow(f) ? "EXPIRED" : "CANCELLED" } as EnrichedFlow)),
         ].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 
@@ -73,12 +95,39 @@ function UserClosedOrdersPage() {
     })();
   }, [token]);
 
+  const handleViewInvoice = async (flowId: string) => {
+    if (!token) return;
+    setLoadingInvoiceId(flowId);
+    try {
+      const res = await getUserSellFlowInvoice(token, flowId);
+      setActiveInvoice(res.invoice);
+    } catch {
+      toast.error("Failed to load invoice for this device.");
+    } finally {
+      setLoadingInvoiceId(null);
+    }
+  };
+
+  const handleDownloadInvoice = async (flowId: string) => {
+    if (!token) return;
+    setLoadingInvoiceId(flowId);
+    try {
+      const res = await getUserSellFlowInvoice(token, flowId);
+      downloadInvoicePdf(res.invoice);
+      toast.success("Invoice PDF downloaded successfully.");
+    } catch {
+      toast.error("Failed to download invoice PDF.");
+    } finally {
+      setLoadingInvoiceId(null);
+    }
+  };
+
   return (
     <main className="user-seller-page">
       <section className="user-dashboard-shell" style={{ maxWidth: 760, margin: "0 auto" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
           <History size={22} color="#16a387" />
-          <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: "#0f1f30" }}>Closed Orders</h2>
+          <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: "#0f1f30" }}>Closed Orders & Invoices</h2>
         </div>
 
         <Link to="/user" style={{ fontSize: 13, color: "#16a387", textDecoration: "none", marginBottom: 20, display: "inline-block" }}>
@@ -115,7 +164,8 @@ function UserClosedOrdersPage() {
             const badgeBackground = isCompleted ? "#f0fdf4" : isExpired ? "#fff7ed" : "#fff5f5";
             const badgeColor = isCompleted ? "#16a34a" : isExpired ? "#d97706" : "#dc2626";
             const badgeBorder = isCompleted ? "#bbf7d0" : isExpired ? "#fed7aa" : "#fecaca";
-            const badgeLabel = isCompleted ? "Completed" : isExpired ? "Expired" : "Cancelled";
+            const badgeLabel = isCompleted ? "Completed & Sold" : isExpired ? "Expired" : "Cancelled";
+            const isBusy = loadingInvoiceId === flow.id;
 
             return (
               <div
@@ -152,10 +202,36 @@ function UserClosedOrdersPage() {
                   {!ps && <span>Updated: {formatDate(flow.updatedAt)}</span>}
                 </div>
 
-                {isCompleted && flow.amountCollected && (
-                  <div style={{ background: "#f0fdf4", borderRadius: 7, padding: "8px 12px", fontSize: 13 }}>
-                    <strong style={{ color: "#16a34a" }}>Payment Received: </strong>
-                    <span style={{ color: "#526171" }}>₹{formatInr(flow.amountCollected)} via {flow.paymentMode}</span>
+                {isCompleted && (
+                  <div style={{ background: "#f0fdf4", borderRadius: 8, padding: "10px 14px", border: "1px solid #bbf7d0" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+                      <div>
+                        <strong style={{ color: "#16a34a" }}>Payment Settled: </strong>
+                        <span style={{ color: "#526171", fontWeight: 600 }}>
+                          {flow.amountCollected ? `₹${formatInr(flow.amountCollected)}` : ""} {flow.paymentMode ? `via ${flow.paymentMode}` : ""}
+                        </span>
+                      </div>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <button
+                          type="button"
+                          onClick={() => void handleViewInvoice(flow.id)}
+                          disabled={isBusy}
+                          className="user-btn-view-invoice"
+                          style={{ padding: "6px 12px", fontSize: 12 }}
+                        >
+                          <Eye size={13} /> {isBusy ? "Loading..." : "View Invoice"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleDownloadInvoice(flow.id)}
+                          disabled={isBusy}
+                          className="user-btn-download-invoice"
+                          style={{ padding: "6px 12px", fontSize: 12 }}
+                        >
+                          <Download size={13} /> {isBusy ? "..." : "Download PDF"}
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 )}
 
@@ -170,6 +246,14 @@ function UserClosedOrdersPage() {
           })}
         </div>
       </section>
+
+      {/* Invoice Preview Modal */}
+      <InvoiceModal
+        invoice={activeInvoice}
+        isOpen={Boolean(activeInvoice)}
+        onClose={() => setActiveInvoice(null)}
+      />
     </main>
   );
 }
+

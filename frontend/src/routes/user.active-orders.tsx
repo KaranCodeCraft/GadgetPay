@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { CalendarClock, PackageCheck, RotateCcw, X } from "lucide-react";
+import { CalendarClock, Eye, PackageCheck, RotateCcw, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -268,15 +268,38 @@ function UserActiveOrdersPage() {
 
                 {/* Payment proof */}
                 {leadInfo?.paymentProof && (
-                  <div style={{ background: "#f0fdf4", borderRadius: 8, padding: "8px 12px", fontSize: 13 }}>
-                    <strong style={{ color: "#16a34a" }}>Payment Received</strong>
-                    <span style={{ color: "#526171", marginLeft: 8 }}>
-                      ₹{formatInr(leadInfo.paymentProof.amountCollected)} via {leadInfo.paymentProof.paymentMode}
-                    </span>
+                  <div style={{ background: "#f0fdf4", borderRadius: 8, padding: "8px 12px", fontSize: 13, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
+                    <div>
+                      <strong style={{ color: "#16a34a" }}>Payment Received</strong>
+                      <span style={{ color: "#526171", marginLeft: 8 }}>
+                        ₹{formatInr(leadInfo.paymentProof.amountCollected)} via {leadInfo.paymentProof.paymentMode}
+                      </span>
+                    </div>
+                    {leadInfo.status === "COMPLETED" && (
+                      <Link
+                        to="/user/payments"
+                        search={{ flowId: flow.id }}
+                        className="user-btn-view-invoice"
+                        style={{ padding: "4px 10px", fontSize: 12 }}
+                      >
+                        <Eye size={12} /> View Invoice
+                      </Link>
+                    )}
                   </div>
                 )}
 
                 {/* Action buttons */}
+                {leadInfo?.status === "COMPLETED" ? (
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 4 }}>
+                    <Link
+                      to="/user/payments"
+                      search={{ flowId: flow.id }}
+                      className="user-btn-view-invoice"
+                    >
+                      <Eye size={14} /> View Deal Invoice
+                    </Link>
+                  </div>
+                ) : (
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 4 }}>
                   <button
                     type="button"
@@ -317,6 +340,7 @@ function UserActiveOrdersPage() {
                     </span>
                   )}
                 </div>
+                )}
 
                 {/* Confirm cancel dialog */}
                 {confirmCancelId === flow.id && (

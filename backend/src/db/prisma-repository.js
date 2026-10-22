@@ -2302,7 +2302,7 @@ export async function upsertServiceability(row) {
   const result = await prisma.serviceabilityPincode.upsert({
     where: { pincode: row.pincode },
     update: {
-      status: row.status,
+      status: row.status === "ACTIVE" || row.status === "SERVICEABLE" ? "SERVICEABLE" : "UNSERVICEABLE",
       reason: row.reason,
       state: row.state || null,
       district: row.district || null,
@@ -2316,7 +2316,7 @@ export async function upsertServiceability(row) {
     },
     create: {
       pincode: row.pincode,
-      status: row.status,
+      status: row.status === "ACTIVE" || row.status === "SERVICEABLE" ? "SERVICEABLE" : "UNSERVICEABLE",
       reason: row.reason,
       state: row.state || null,
       district: row.district || null,
@@ -2336,8 +2336,11 @@ export async function getServiceabilityByPincode(pincode) {
   if (!pincode) return null;
   const row = await prisma.serviceabilityPincode.findUnique({ where: { pincode } });
   if (!row) return null;
+  // Normalize Prisma enum → runtime status used throughout the backend
+  const normalizedStatus = row.status === "SERVICEABLE" ? "ACTIVE" : row.status === "UNSERVICEABLE" ? "INACTIVE" : row.status;
   return {
     ...row,
+    status: normalizedStatus,
     metadata: row.metadataJson ? parseJsonColumn(row.metadataJson, null) : null,
   };
 }

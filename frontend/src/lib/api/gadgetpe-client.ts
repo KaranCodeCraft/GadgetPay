@@ -364,7 +364,7 @@ export type ListedPriceLookupResponse = {
   message?: string;
 };
 
-export type UserSellFlowStatus = "DRAFT" | "QUESTIONNAIRE_COMPLETED" | "QUOTE_READY" | "PICKUP_SCHEDULED" | "CANCELLED";
+export type UserSellFlowStatus = "DRAFT" | "QUESTIONNAIRE_COMPLETED" | "QUOTE_READY" | "PICKUP_SCHEDULED" | "COMPLETED" | "CANCELLED" | "EXPIRED";
 export type UserSellFlowType = "sell-phone" | "sell-tablet";
 
 export type UserSellFlowSelectedModel = {
@@ -1241,16 +1241,34 @@ export type UserDealInvoice = {
     deductionType?: string;
     totalDeductionAmount?: number;
     totalDeductionPercent?: number;
+    questionDeductions?: Array<{ description?: string; deductRupees?: number; deductPercent?: number }>;
     issues?: Array<{ description: string; deductRupees?: number; deductionAmount?: number; deductionPercent?: number }>;
   } | null;
   payment?: {
     amountCollected: number;
     paymentMode: string;
     submittedAt?: string;
+    transactionRef?: string;
   } | null;
   partner: { id: string; name: string; phone?: string | null };
   completedAt: string;
-  company?: { name: string; website: string };
+  company?: { name: string; website: string; email?: string };
+  seller?: {
+    name: string;
+    phone?: string | null;
+    addressLine?: string | null;
+    landmark?: string | null;
+    city?: string | null;
+    pincode?: string | null;
+  };
+  customer?: {
+    name: string;
+    phone?: string | null;
+    addressLine?: string | null;
+    landmark?: string | null;
+    city?: string | null;
+    pincode?: string | null;
+  };
   purchaser?: {
     name: string;
     addressLine?: string | null;
@@ -1264,6 +1282,15 @@ export type UserDealInvoice = {
 
 export async function getUserSellFlowInvoice(token: string, flowId: string): Promise<{ invoice: UserDealInvoice }> {
   const response = await fetch(`${API_BASE}/user/sell-flows/${encodeURIComponent(flowId)}/invoice`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  return parseResponse(response);
+}
+
+export async function listUserInvoices(token: string): Promise<{ invoices: UserDealInvoice[]; count: number }> {
+  const response = await fetch(`${API_BASE}/user/invoices`, {
     headers: {
       Authorization: `Bearer ${token}`,
     },

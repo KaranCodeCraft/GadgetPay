@@ -1275,7 +1275,7 @@ function LocationSection() {
         status: filterToStatus[filter],
         search: search.trim() || undefined,
       });
-      setRows(result.rows);
+      setRows(Array.isArray(result.rows) ? result.rows : []);
     } catch (err) {
       if (isTokenExpiredError(err)) {
         localStorage.removeItem("gadgetpe_admin_access_token");
@@ -1292,7 +1292,7 @@ function LocationSection() {
   const fetchUploadRows = async (token: string) => {
     try {
       const result = await listServiceabilityUploadHistory(token);
-      setUploadRows(result.rows);
+      setUploadRows(Array.isArray(result.rows) ? result.rows : []);
     } catch (err) {
       if (isTokenExpiredError(err)) {
         localStorage.removeItem("gadgetpe_admin_access_token");
@@ -1507,9 +1507,11 @@ function LocationSection() {
     }
   };
 
-  const activeCount = rows.filter((r) => r.status === "ACTIVE").length;
-  const limitedCount = rows.filter((r) => r.status === "LIMITED").length;
-  const inactiveCount = rows.filter((r) => r.status === "INACTIVE").length;
+  const safeRows = Array.isArray(rows) ? rows : [];
+
+  const activeCount = safeRows.filter((r) => r.status === "ACTIVE").length;
+  const limitedCount = safeRows.filter((r) => r.status === "LIMITED").length;
+  const inactiveCount = safeRows.filter((r) => r.status === "INACTIVE").length;
 
   const COV_COLORS: Record<string, string> = {
     Active: "#1d9e75",
@@ -1702,7 +1704,7 @@ function LocationSection() {
           {uploadRows.length === 0 ? (
             <p className="admin-muted">No location excel files uploaded yet.</p>
           ) : (
-            uploadRows.map((row) => (
+            safeUploadRows.map((row) => (
               <div key={row.id} className="admin-location-upload-card">
                 <div className="admin-location-upload-head">
                   <div>
@@ -1744,7 +1746,7 @@ function LocationSection() {
       </div>
 
       <div className="admin-location-grid">
-        {rows.map((loc) => {
+        {safeRows.map((loc) => {
           const coverage =
             loc.status === "ACTIVE" ? "Active" : loc.status === "LIMITED" ? "Limited" : "Inactive";
           return (
@@ -3830,17 +3832,18 @@ function PartnersSection({ overview, adminToken }: { overview: AdminOverviewMetr
 
   const refreshPartners = async () => {
     const result = await listAdminPartners(adminToken, { limit: 500 });
-    setAccountRows(result.rows);
+    setAccountRows(Array.isArray(result.rows) ? result.rows : []);
   };
 
   useEffect(() => {
     void listAdminPartners(adminToken, { limit: 500 })
-      .then((result) => setAccountRows(result.rows))
+      .then((result) => setAccountRows(Array.isArray(result.rows) ? result.rows : []))
       .catch((err) => toast.error(err instanceof Error ? err.message : "Unable to load partners."));
   }, [adminToken]);
 
   const activityById = new Map((overview?.partnerActivity ?? []).map((partner) => [partner.partnerId, partner]));
-  const partners: Partner[] = accountRows.map((account) => {
+  const safeAccountRows = Array.isArray(accountRows) ? accountRows : [];
+  const partners: Partner[] = safeAccountRows.map((account) => {
     const activity = activityById.get(account.id);
     return {
       id: account.id,
