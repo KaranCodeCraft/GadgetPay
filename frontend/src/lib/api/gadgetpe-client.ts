@@ -2415,8 +2415,12 @@ export async function uploadTabletPricingExcel(token: string, files: File | File
 export async function listPriceCatalog(
   token: string,
   search?: string,
+  deviceType?: "MOBILE" | "IPAD" | "TABLET",
 ): Promise<{ rows: DevicePriceCatalogRow[]; count: number; expectedHeaders: string[] }> {
-  const query = search ? `?search=${encodeURIComponent(search)}` : "";
+  const params = new URLSearchParams();
+  if (search) params.set("search", search);
+  if (deviceType) params.set("deviceType", deviceType);
+  const query = params.toString() ? `?${params.toString()}` : "";
   const response = await fetch(`${API_BASE}/admin/pricing/catalog${query}`, {
     headers: {
       Authorization: `Bearer ${token}`,

@@ -380,9 +380,9 @@ function isRuleMatchForCandidate(rule, candidate) {
   return true;
 }
 
-function buildPartnerOnsiteDeductionCatalog(lead) {
+async function buildPartnerOnsiteDeductionCatalog(lead) {
   const basePrice = Number(lead?.quote?.basePrice || lead?.selectedModel?.listedPrice || lead?.quote?.sellingPrice || 0);
-  const rules = listActiveQuoteDeductionRulesForModel({
+  const rules = await listActiveQuoteDeductionRulesForModel({
     brandSlug: lead?.selectedModel?.brandSlug,
     modelId: lead?.selectedModel?.modelId,
   });
@@ -623,9 +623,9 @@ function getCatalogCandidateRulesForPartnerCheck(check, catalog) {
   return rules;
 }
 
-function computeOnsiteRequote({ lead, checklist, partnerChecks, observedIssueDeductions }) {
+async function computeOnsiteRequote({ lead, checklist, partnerChecks, observedIssueDeductions }) {
   const listedPrice = Math.max(0, Math.round(Number(lead?.quote?.sellingPrice ?? lead?.selectedModel?.listedPrice ?? 0)));
-  const catalog = buildPartnerOnsiteDeductionCatalog(lead);
+  const catalog = await buildPartnerOnsiteDeductionCatalog(lead);
   const checks = partnerChecks.length ? partnerChecks : parsePartnerChecksFromChecklist(checklist);
   const questionDeductions = [];
   const decisionTrace = [];
@@ -810,25 +810,29 @@ const verifyLeadUnlockIntentSchema = z.object({
 
 export const partnerRouter = Router();
 
-partnerRouter.get("/me", requireAuth, requireRole("partner"), (req, res) => {
-  const partner = getPartnerById(req.auth.sub);
+partnerRouter.get("/me", requireAuth, requireRole("partner"), async (req, res, next) => {
+  try {
+    const partner = await getPartnerById(req.auth.sub);
 
-  res.json(
-    success({
-      partner: partner || {
-        id: req.auth.sub,
-        phone: req.auth.phone || null,
-        name: "Partner",
-      },
-      tenantScope: {
-        scopeType: "PINCODE",
-        selectedPincode: null,
-      },
-    }),
-  );
+    res.json(
+      success({
+        partner: partner || {
+          id: req.auth.sub,
+          phone: req.auth.phone || null,
+          name: "Partner",
+        },
+        tenantScope: {
+          scopeType: "PINCODE",
+          selectedPincode: null,
+        },
+      }),
+    );
+  } catch (err) {
+    next(err);
+  }
 });
 
-partnerRouter.post("/kyc/metadata", requireAuth, requireRole("partner"), upload.single("file"), (req, res, next) => {
+partnerRouter.post("/kyc/metadata", requireAuth, requireRole("partner"), upload.single("file"), async (req, res, next) => {
   try {
     const input = kycMetadataSchema.parse(
       req.file
@@ -860,7 +864,7 @@ partnerRouter.post("/kyc/metadata", requireAuth, requireRole("partner"), upload.
         fileName: input.fileName,
       });
       writeMediaBuffer({ relativePath: mediaRelativePath, buffer: req.file.buffer });
-      media = createMediaAsset({
+      media = await createMediaAsset({
         id: kycId,
         tenantType: "partner",
         tenantId: req.auth.sub,
@@ -881,7 +885,7 @@ partnerRouter.post("/kyc/metadata", requireAuth, requireRole("partner"), upload.
       });
     }
 
-    const row = createKycSubmission({
+    const row = await createKycSubmission({
       id: kycId,
       partnerId: req.auth.sub,
       identityProof: input.identityProof,
@@ -919,52 +923,68 @@ partnerRouter.post("/kyc/metadata", requireAuth, requireRole("partner"), upload.
   }
 });
 
-partnerRouter.get("/kyc/status", requireAuth, requireRole("partner"), (req, res) => {
-  const latest = getLatestKycForPartner(req.auth.sub);
-  res.json(success({ latestSubmission: latest || null }));
+partnerRouter.get("/kyc/status", requireAuth, requireRole("partner"), async (req, res, next) => {
+  try {
+    const latest = await getLatestKycForPartner(req.auth.sub);
+    res.json(success({ latestSubmission: latest || null }));
+  } catch (err) {
+    next(err);
+  }
 });
 
-partnerRouter.get("/coins/balance", requireAuth, requireRole("partner"), (req, res) => {
-  const now = nowIso();
-  ensurePartnerCoinWallet(req.auth.sub, now);
-  const wallet = getPartnerCoinWallet(req.auth.sub);
+partnerRouter.get("/coins/balance", requireAuth, requireRole("partner"), async (req, res, next) => {
+  try {
+    const now = nowIso();
+    await ensurePartnerCoinWallet(req.auth.sub, now);
+    const wallet = await getPartnerCoinWallet(req.auth.sub);
 
-  res.json(
-    success({
-      partnerId: req.auth.sub,
-      balance: wallet?.balance || 0,
-      updatedAt: wallet?.updatedAt || now,
-    }),
-  );
+    res.json(
+      success({
+        partnerId: req.auth.sub,
+        balance: wallet?.balance || 0,
+        updatedAt: wallet?.updatedAt || now,
+      }),
+    );
+  } catch (err) {
+    next(err);
+  }
 });
 
-partnerRouter.get("/coins/ledger", requireAuth, requireRole("partner"), (req, res) => {
-  const rows = listPartnerCoinLedger(req.auth.sub, 30);
-  res.json(success({ rows, count: rows.length }));
+partnerRouter.get("/coins/ledger", requireAuth, requireRole("partner"), async (req, res, next) => {
+  try {
+    const rows = await listPartnerCoinLedger(req.auth.sub, 30);
+    res.json(success({ rows, count: rows.length }));
+  } catch (err) {
+    next(err);
+  }
 });
 
-partnerRouter.get("/pincodes", requireAuth, requireRole("partner"), (req, res) => {
-  const pincodes = listActivePartnerPincodes(req.auth.sub);
-  res.json(success({ pincodes }));
+partnerRouter.get("/pincodes", requireAuth, requireRole("partner"), async (req, res, next) => {
+  try {
+    const pincodes = await listActivePartnerPincodes(req.auth.sub);
+    res.json(success({ pincodes }));
+  } catch (err) {
+    next(err);
+  }
 });
 
-partnerRouter.post("/pincodes", requireAuth, requireRole("partner"), (req, res, next) => {
+partnerRouter.post("/pincodes", requireAuth, requireRole("partner"), async (req, res, next) => {
   try {
     const { pincode } = pincodeBodySchema.parse(req.body);
 
-    const existing = listActivePartnerPincodes(req.auth.sub);
+    const existing = await listActivePartnerPincodes(req.auth.sub);
     const alreadySaved = existing.some((p) => p.pincode === pincode);
     if (alreadySaved) {
       throw conflict(`Pincode ${pincode} is already configured for this partner.`);
     }
 
-    const serviceability = getServiceabilityByPincode(pincode);
+    const serviceability = await getServiceabilityByPincode(pincode);
     if (!serviceability || serviceability.status !== "ACTIVE") {
       throw badRequest(`Pincode ${pincode} is not serviceable in this area.`);
     }
 
     const now = nowIso();
-    upsertPartnerPincodeScope({
+    await upsertPartnerPincodeScope({
       id: crypto.randomUUID(),
       partnerId: req.auth.sub,
       pincode,
@@ -974,25 +994,25 @@ partnerRouter.post("/pincodes", requireAuth, requireRole("partner"), (req, res, 
       updatedAt: now,
     });
 
-    const pincodes = listActivePartnerPincodes(req.auth.sub);
+    const pincodes = await listActivePartnerPincodes(req.auth.sub);
     res.json(success({ pincodes }));
   } catch (err) {
     next(err);
   }
 });
 
-partnerRouter.delete("/pincodes/:pincode", requireAuth, requireRole("partner"), (req, res, next) => {
+partnerRouter.delete("/pincodes/:pincode", requireAuth, requireRole("partner"), async (req, res, next) => {
   try {
     const { pincode } = z.object({ pincode: z.string().regex(/^\d{6}$/) }).parse(req.params);
-    deactivatePartnerPincodeScope(req.auth.sub, pincode);
-    const pincodes = listActivePartnerPincodes(req.auth.sub);
+    await deactivatePartnerPincodeScope({ partnerId: req.auth.sub, pincode, updatedBy: req.auth.sub, updatedAt: nowIso() });
+    const pincodes = await listActivePartnerPincodes(req.auth.sub);
     res.json(success({ pincodes }));
   } catch (err) {
     next(err);
   }
 });
 
-partnerRouter.get("/lead-bucket", requireAuth, requireRole("partner"), (req, res, next) => {
+partnerRouter.get("/lead-bucket", requireAuth, requireRole("partner"), async (req, res, next) => {
   try {
     const query = leadBucketQuerySchema.parse(req.query);
 
@@ -1005,7 +1025,7 @@ partnerRouter.get("/lead-bucket", requireAuth, requireRole("partner"), (req, res
       pincodeFilter = { pincode: query.pincode };
     }
 
-    const bucketRows = listPartnerLeadsForScope({
+    const bucketRows = await listPartnerLeadsForScope({
       ...pincodeFilter,
       leadType: "LEAD_BUCKET",
       status: query.status,
@@ -1014,7 +1034,7 @@ partnerRouter.get("/lead-bucket", requireAuth, requireRole("partner"), (req, res
       limit: query.limit,
     });
 
-    const scheduledRows = listPartnerLeadsForScope({
+    const scheduledRows = await listPartnerLeadsForScope({
       ...pincodeFilter,
       leadType: "SERVICE_LEAD",
       status: query.status,
@@ -1033,10 +1053,10 @@ partnerRouter.get("/lead-bucket", requireAuth, requireRole("partner"), (req, res
   }
 });
 
-partnerRouter.get("/service-leads", requireAuth, requireRole("partner"), (req, res, next) => {
+partnerRouter.get("/service-leads", requireAuth, requireRole("partner"), async (req, res, next) => {
   try {
     const query = leadListQuerySchema.parse(req.query);
-    const rows = listPartnerLeadsForScope({
+    const rows = await listPartnerLeadsForScope({
       pincode: query.pincode,
       leadType: "SERVICE_LEAD",
       status: "ACCEPTED",
@@ -1050,14 +1070,14 @@ partnerRouter.get("/service-leads", requireAuth, requireRole("partner"), (req, r
   }
 });
 
-partnerRouter.get("/my-leads", requireAuth, requireRole("partner"), (req, res, next) => {
+partnerRouter.get("/my-leads", requireAuth, requireRole("partner"), async (req, res, next) => {
   try {
     const query = z.object({
       status: z.enum(["ACCEPTED", "IN_PROGRESS", "COMPLETED", "REJECTED"]).optional(),
       limit: z.coerce.number().int().min(1).max(100).optional().default(50),
     }).parse(req.query);
 
-    const rows = listPartnerLeadsForPartner({
+    const rows = await listPartnerLeadsForPartner({
       partnerId: req.auth.sub,
       status: query.status,
       limit: query.limit,
@@ -1069,9 +1089,9 @@ partnerRouter.get("/my-leads", requireAuth, requireRole("partner"), (req, res, n
   }
 });
 
-partnerRouter.get("/leads/:leadId", requireAuth, requireRole("partner"), (req, res, next) => {
+partnerRouter.get("/leads/:leadId", requireAuth, requireRole("partner"), async (req, res, next) => {
   try {
-    const lead = getPartnerLeadById(req.params.leadId, { viewerPartnerId: req.auth.sub });
+    const lead = await getPartnerLeadById(req.params.leadId, { viewerPartnerId: req.auth.sub });
     if (!lead) throw notFound("Partner lead not found");
     if (!partnerHasUnlockedLead(lead, req.auth.sub)) {
       throw forbidden("Pay to unlock this lead before viewing details.");
@@ -1082,24 +1102,24 @@ partnerRouter.get("/leads/:leadId", requireAuth, requireRole("partner"), (req, r
   }
 });
 
-partnerRouter.get("/leads/:leadId/onsite-deduction-catalog", requireAuth, requireRole("partner"), (req, res, next) => {
+partnerRouter.get("/leads/:leadId/onsite-deduction-catalog", requireAuth, requireRole("partner"), async (req, res, next) => {
   try {
-    const lead = getPartnerLeadById(req.params.leadId, { viewerPartnerId: req.auth.sub });
+    const lead = await getPartnerLeadById(req.params.leadId, { viewerPartnerId: req.auth.sub });
     if (!lead) throw notFound("Partner lead not found");
     if (!partnerHasUnlockedLead(lead, req.auth.sub)) {
       throw forbidden("Pay to unlock this lead before viewing details.");
     }
 
-    const catalog = buildPartnerOnsiteDeductionCatalog(lead);
+    const catalog = await buildPartnerOnsiteDeductionCatalog(lead);
     res.json(success({ catalog }));
   } catch (err) {
     next(err);
   }
 });
 
-partnerRouter.post("/leads/:leadId/unlock-intent", requireAuth, requireRole("partner"), (req, res, next) => {
+partnerRouter.post("/leads/:leadId/unlock-intent", requireAuth, requireRole("partner"), async (req, res, next) => {
   try {
-    const existing = getPartnerLeadById(req.params.leadId, { viewerPartnerId: req.auth.sub });
+    const existing = await getPartnerLeadById(req.params.leadId, { viewerPartnerId: req.auth.sub });
     if (!existing) throw notFound("Partner lead not found");
 
     const unlockPrice = getLeadUnlockPrice(existing);
@@ -1109,7 +1129,7 @@ partnerRouter.post("/leads/:leadId/unlock-intent", requireAuth, requireRole("par
 
     const now = nowIso();
     const expiresAt = new Date(Date.now() + LEAD_UNLOCK_TTL_MINUTES * 60 * 1000).toISOString();
-    const result = createPartnerLeadUnlockIntent({
+    const result = await createPartnerLeadUnlockIntent({
       leadId: existing.id,
       partnerId: req.auth.sub,
       unlockPrice,
@@ -1135,21 +1155,21 @@ partnerRouter.post("/leads/:leadId/unlock-intent", requireAuth, requireRole("par
   }
 });
 
-partnerRouter.get("/lead-unlock-intents/:intentId([0-9a-fA-F-]{36})", requireAuth, requireRole("partner"), (req, res, next) => {
+partnerRouter.get("/lead-unlock-intents/:intentId([0-9a-fA-F-]{36})", requireAuth, requireRole("partner"), async (req, res, next) => {
   try {
     const now = nowIso();
-    const intent = getPartnerLeadUnlockIntentById({ intentId: req.params.intentId, partnerId: req.auth.sub, now });
+    const intent = await getPartnerLeadUnlockIntentById({ intentId: req.params.intentId, partnerId: req.auth.sub, now });
     if (!intent) throw notFound("Lead unlock payment intent not found");
-    const lead = getPartnerLeadById(intent.leadId, { viewerPartnerId: req.auth.sub });
+    const lead = await getPartnerLeadById(intent.leadId, { viewerPartnerId: req.auth.sub });
     res.json(success({ intent, lead: lead && partnerHasUnlockedLead(lead, req.auth.sub) ? lead : maskLeadForPartnerList(lead, req.auth.sub) }));
   } catch (err) {
     next(err);
   }
 });
 
-partnerRouter.post("/lead-unlock-intents/:intentId([0-9a-fA-F-]{36})/screenshot-sent", requireAuth, requireRole("partner"), (req, res, next) => {
+partnerRouter.post("/lead-unlock-intents/:intentId([0-9a-fA-F-]{36})/screenshot-sent", requireAuth, requireRole("partner"), async (req, res, next) => {
   try {
-    const intent = markPartnerLeadUnlockScreenshotSent({
+    const intent = await markPartnerLeadUnlockScreenshotSent({
       intentId: req.params.intentId,
       partnerId: req.auth.sub,
       now: nowIso(),
@@ -1164,10 +1184,10 @@ partnerRouter.post("/lead-unlock-intents/:intentId([0-9a-fA-F-]{36})/screenshot-
   }
 });
 
-partnerRouter.get("/lead-unlock-intents/admin", requireAuth, requireRole("admin"), (req, res, next) => {
+partnerRouter.get("/lead-unlock-intents/admin", requireAuth, requireRole("admin"), async (req, res, next) => {
   try {
     const query = leadUnlockIntentListSchema.parse(req.query);
-    const rows = listPartnerLeadUnlockIntentsForAdmin({
+    const rows = await listPartnerLeadUnlockIntentsForAdmin({
       status: query.status,
       partnerId: query.partnerId,
       limit: query.limit,
@@ -1179,11 +1199,11 @@ partnerRouter.get("/lead-unlock-intents/admin", requireAuth, requireRole("admin"
   }
 });
 
-partnerRouter.patch("/lead-unlock-intents/:intentId([0-9a-fA-F-]{36})/verify", requireAuth, requireRole("admin"), (req, res, next) => {
+partnerRouter.patch("/lead-unlock-intents/:intentId([0-9a-fA-F-]{36})/verify", requireAuth, requireRole("admin"), async (req, res, next) => {
   try {
     const input = verifyLeadUnlockIntentSchema.parse(req.body);
     const now = nowIso();
-    const result = verifyPartnerLeadUnlockIntent({
+    const result = await verifyPartnerLeadUnlockIntent({
       intentId: req.params.intentId,
       action: input.action,
       verifiedBy: req.auth.sub,
@@ -1194,14 +1214,14 @@ partnerRouter.patch("/lead-unlock-intents/:intentId([0-9a-fA-F-]{36})/verify", r
     if (result.result === "NOT_FOUND") throw notFound("Lead unlock payment intent not found");
     if (result.result === "LEAD_NOT_FOUND") throw notFound("Partner lead not found");
     if (result.result === "OWNED_BY_OTHER") {
-      const owner = result.lead?.partnerId ? getPartnerById(result.lead.partnerId) : null;
+      const owner = result.lead?.partnerId ? await getPartnerById(result.lead.partnerId) : null;
       const ownerName = owner?.name ? ` (${owner.name})` : "";
       throw conflict(`This lead is already owned by another partner${ownerName}.`);
     }
     if (result.result === "ALREADY_PROCESSED") throw badRequest(`Payment intent is already ${result.intent?.status || "processed"}.`);
 
     if (result.result === "APPROVED" && result.lead) {
-      appendPartnerLeadDispositionEvent({
+      await appendPartnerLeadDispositionEvent({
         id: crypto.randomUUID(),
         leadId: result.lead.id,
         userSellFlowId: result.lead.userSellFlowId,
@@ -1215,7 +1235,7 @@ partnerRouter.patch("/lead-unlock-intents/:intentId([0-9a-fA-F-]{36})/verify", r
         createdAt: now,
       });
 
-      enqueueLeadEventOutbox({
+      await enqueueLeadEventOutbox({
         id: crypto.randomUUID(),
         eventType: "lead.unlock-payment.approved",
         leadId: result.lead.id,
@@ -1243,9 +1263,9 @@ partnerRouter.patch("/lead-unlock-intents/:intentId([0-9a-fA-F-]{36})/verify", r
   }
 });
 
-partnerRouter.post("/leads/:leadId/claim", requireAuth, requireRole("partner"), (req, res, next) => {
+partnerRouter.post("/leads/:leadId/claim", requireAuth, requireRole("partner"), async (req, res, next) => {
   try {
-    const existing = getPartnerLeadById(req.params.leadId);
+    const existing = await getPartnerLeadById(req.params.leadId);
     assertPartnerCanAccessLead(existing, req);
 
     if (existing.status !== "AVAILABLE") {
@@ -1253,10 +1273,10 @@ partnerRouter.post("/leads/:leadId/claim", requireAuth, requireRole("partner"), 
     }
 
     const now = nowIso();
-    const lead = claimPartnerLead({ id: existing.id, partnerId: req.auth.sub, updatedAt: now });
+    const lead = await claimPartnerLead({ id: existing.id, partnerId: req.auth.sub, updatedAt: now });
     if (!lead) throw badRequest("Lead is already claimed.");
 
-    appendPartnerLeadDispositionEvent({
+    await appendPartnerLeadDispositionEvent({
       id: crypto.randomUUID(),
       leadId: lead.id,
       userSellFlowId: lead.userSellFlowId,
@@ -1270,7 +1290,7 @@ partnerRouter.post("/leads/:leadId/claim", requireAuth, requireRole("partner"), 
       createdAt: now,
     });
 
-    enqueueLeadEventOutbox({
+    await enqueueLeadEventOutbox({
       id: crypto.randomUUID(),
       eventType: "lead.claimed",
       leadId: lead.id,
@@ -1295,10 +1315,10 @@ partnerRouter.post("/leads/:leadId/claim", requireAuth, requireRole("partner"), 
   }
 });
 
-partnerRouter.patch("/leads/:leadId/status", requireAuth, requireRole("partner"), (req, res, next) => {
+partnerRouter.patch("/leads/:leadId/status", requireAuth, requireRole("partner"), async (req, res, next) => {
   try {
     const input = workflowStatusSchema.parse(req.body);
-    const existing = getPartnerLeadById(req.params.leadId);
+    const existing = await getPartnerLeadById(req.params.leadId);
     assertPartnerCanAccessLead(existing, req);
 
     if (existing.partnerId !== req.auth.sub) {
@@ -1321,8 +1341,8 @@ partnerRouter.patch("/leads/:leadId/status", requireAuth, requireRole("partner")
     const now = nowIso();
     const releasesLeadToBucket = (["ACCEPTED", "IN_PROGRESS"].includes(existing.status) && input.status === "CANCELLED") || input.status === "REJECTED";
     const lead = releasesLeadToBucket
-      ? releasePartnerLeadToBucket({ id: existing.id, partnerId: req.auth.sub, updatedAt: now })
-      : updatePartnerLeadWorkflowStatus({
+      ? await releasePartnerLeadToBucket({ id: existing.id, partnerId: req.auth.sub, updatedAt: now })
+      : await updatePartnerLeadWorkflowStatus({
           id: existing.id,
           partnerId: req.auth.sub,
           status: input.status,
@@ -1332,7 +1352,7 @@ partnerRouter.patch("/leads/:leadId/status", requireAuth, requireRole("partner")
 
     let finalLead = lead;
     if (lead && input.status === "IN_PROGRESS") {
-      finalLead = setPartnerLeadPickupStartedAt({
+      finalLead = await setPartnerLeadPickupStartedAt({
         id: existing.id,
         partnerId: req.auth.sub,
         pickupStartedAt: now,
@@ -1341,12 +1361,12 @@ partnerRouter.patch("/leads/:leadId/status", requireAuth, requireRole("partner")
     }
 
     if (finalLead && input.status === "COMPLETED") {
-      closePartnerLeadUnlockOrder({ leadId: existing.id, partnerId: req.auth.sub, closedAt: now });
+      await closePartnerLeadUnlockOrder({ leadId: existing.id, partnerId: req.auth.sub, closedAt: now });
     }
 
     if (finalLead) {
       const dispositionKey = input.status === "REJECTED" ? "REJECTED" : releasesLeadToBucket ? "CANCELLED" : toDispositionKey(finalLead.status);
-      appendPartnerLeadDispositionEvent({
+      await appendPartnerLeadDispositionEvent({
         id: crypto.randomUUID(),
         leadId: finalLead.id,
         userSellFlowId: finalLead.userSellFlowId,
@@ -1360,7 +1380,7 @@ partnerRouter.patch("/leads/:leadId/status", requireAuth, requireRole("partner")
         createdAt: now,
       });
 
-      enqueueLeadEventOutbox({
+      await enqueueLeadEventOutbox({
         id: crypto.randomUUID(),
         eventType: "lead.status.updated",
         leadId: finalLead.id,
@@ -1387,10 +1407,10 @@ partnerRouter.patch("/leads/:leadId/status", requireAuth, requireRole("partner")
   }
 });
 
-partnerRouter.patch("/leads/:leadId/reschedule", requireAuth, requireRole("partner"), (req, res, next) => {
+partnerRouter.patch("/leads/:leadId/reschedule", requireAuth, requireRole("partner"), async (req, res, next) => {
   try {
     const input = rescheduleLeadSchema.parse(req.body);
-    const existing = getPartnerLeadById(req.params.leadId);
+    const existing = await getPartnerLeadById(req.params.leadId);
     assertPartnerCanAccessLead(existing, req);
 
     if (existing.partnerId !== req.auth.sub) {
@@ -1410,7 +1430,7 @@ partnerRouter.patch("/leads/:leadId/reschedule", requireAuth, requireRole("partn
       rescheduleReason: input.reason,
     };
 
-    const lead = updatePartnerLeadReschedule({
+    const lead = await updatePartnerLeadReschedule({
       id: existing.id,
       partnerId: req.auth.sub,
       pickupScheduleJson: JSON.stringify(pickupSchedule),
@@ -1422,7 +1442,7 @@ partnerRouter.patch("/leads/:leadId/reschedule", requireAuth, requireRole("partn
     }
 
     const note = input.comment ? `${input.reason} — ${input.comment}` : input.reason;
-    appendPartnerLeadDispositionEvent({
+    await appendPartnerLeadDispositionEvent({
       id: crypto.randomUUID(),
       leadId: lead.id,
       userSellFlowId: lead.userSellFlowId,
@@ -1436,7 +1456,7 @@ partnerRouter.patch("/leads/:leadId/reschedule", requireAuth, requireRole("partn
       createdAt: now,
     });
 
-    enqueueLeadEventOutbox({
+    await enqueueLeadEventOutbox({
       id: crypto.randomUUID(),
       eventType: "lead.rescheduled",
       leadId: lead.id,
@@ -1462,10 +1482,10 @@ partnerRouter.patch("/leads/:leadId/reschedule", requireAuth, requireRole("partn
   }
 });
 
-partnerRouter.patch("/leads/:leadId/call-status", requireAuth, requireRole("partner"), (req, res, next) => {
+partnerRouter.patch("/leads/:leadId/call-status", requireAuth, requireRole("partner"), async (req, res, next) => {
   try {
     const input = callStatusSchema.parse(req.body);
-    const existing = getPartnerLeadById(req.params.leadId);
+    const existing = await getPartnerLeadById(req.params.leadId);
     assertPartnerCanAccessLead(existing, req);
 
     if (existing.partnerId !== req.auth.sub) {
@@ -1478,7 +1498,7 @@ partnerRouter.patch("/leads/:leadId/call-status", requireAuth, requireRole("part
     }
 
     const now = nowIso();
-    const lead = markPartnerLeadCallStatus({
+    const lead = await markPartnerLeadCallStatus({
       id: existing.id,
       partnerId: req.auth.sub,
       callStatus: input.callStatus,
@@ -1486,7 +1506,7 @@ partnerRouter.patch("/leads/:leadId/call-status", requireAuth, requireRole("part
       calledAt: now,
       updatedAt: now,
     });
-    appendPartnerLeadDispositionEvent({
+    await appendPartnerLeadDispositionEvent({
       id: crypto.randomUUID(),
       leadId: existing.id,
       userSellFlowId: existing.userSellFlowId,
@@ -1500,7 +1520,7 @@ partnerRouter.patch("/leads/:leadId/call-status", requireAuth, requireRole("part
       createdAt: now,
     });
 
-    enqueueLeadEventOutbox({
+    await enqueueLeadEventOutbox({
       id: crypto.randomUUID(),
       eventType: "lead.call-status.updated",
       leadId: lead.id,
@@ -1528,7 +1548,7 @@ partnerRouter.patch("/leads/:leadId/call-status", requireAuth, requireRole("part
 
 partnerRouter.post("/leads/:leadId/customer-otp/send", requireAuth, requireRole("partner"), async (req, res, next) => {
   try {
-    const lead = getPartnerLeadById(req.params.leadId);
+    const lead = await getPartnerLeadById(req.params.leadId);
     assertPartnerCanAccessLead(lead, req);
 
     if (!lead.partnerId || lead.partnerId !== req.auth.sub) {
@@ -1557,7 +1577,7 @@ partnerRouter.post("/leads/:leadId/customer-otp/send", requireAuth, requireRole(
 partnerRouter.post("/leads/:leadId/customer-otp/verify", requireAuth, requireRole("partner"), async (req, res, next) => {
   try {
     const input = customerOtpVerifySchema.parse(req.body);
-    const lead = getPartnerLeadById(req.params.leadId);
+    const lead = await getPartnerLeadById(req.params.leadId);
     assertPartnerCanAccessLead(lead, req);
 
     if (!lead.partnerId || lead.partnerId !== req.auth.sub) {
@@ -1579,10 +1599,10 @@ partnerRouter.post("/leads/:leadId/customer-otp/verify", requireAuth, requireRol
   }
 });
 
-partnerRouter.get("/active-pickups", requireAuth, requireRole("partner"), (req, res, next) => {
+partnerRouter.get("/active-pickups", requireAuth, requireRole("partner"), async (req, res, next) => {
   try {
     const query = activePickupQuerySchema.parse(req.query);
-    const rows = listPartnerActivePickups({
+    const rows = await listPartnerActivePickups({
       partnerId: req.auth.sub,
       pincode: query.pincode,
       limit: query.limit,
@@ -1593,7 +1613,7 @@ partnerRouter.get("/active-pickups", requireAuth, requireRole("partner"), (req, 
   }
 });
 
-partnerRouter.post("/leads/:leadId/onsite-validation", requireAuth, requireRole("partner"), upload.array("photos", REQUIRED_ONSITE_VALIDATION_PHOTOS), (req, res, next) => {
+partnerRouter.post("/leads/:leadId/onsite-validation", requireAuth, requireRole("partner"), upload.array("photos", REQUIRED_ONSITE_VALIDATION_PHOTOS), async (req, res, next) => {
   try {
     rejectRemovedFields(req.body, ["result", "notes"]);
     const rawChecklist = req.body.checklist;
@@ -1618,7 +1638,7 @@ partnerRouter.post("/leads/:leadId/onsite-validation", requireAuth, requireRole(
       assertMaxBytes(file, env.mediaMaxImageBytes);
     });
 
-    const existing = getPartnerLeadById(req.params.leadId);
+    const existing = await getPartnerLeadById(req.params.leadId);
     assertPartnerCanAccessLead(existing, req);
 
     if (existing.partnerId !== req.auth.sub) {
@@ -1630,46 +1650,48 @@ partnerRouter.post("/leads/:leadId/onsite-validation", requireAuth, requireRole(
     }
 
     const now = nowIso();
-    const photoAssets = files.map((file, index) => {
-      const mediaId = crypto.randomUUID();
-      const mediaRelativePath = buildMediaRelativePath({
-        tenantType: "partner",
-        ownerId: req.auth.sub,
-        entityType: "onsite-validation",
-        entityId: existing.id,
-        mediaId,
-        fileName: file.originalname,
-      });
-      writeMediaBuffer({ relativePath: mediaRelativePath, buffer: file.buffer });
-      const media = createMediaAsset({
-        id: mediaId,
-        tenantType: "partner",
-        tenantId: req.auth.sub,
-        ownerRole: "partner",
-        ownerId: req.auth.sub,
-        entityType: "onsite-validation",
-        entityId: existing.id,
-        slot: `photo-${index + 1}`,
-        originalFileName: file.originalname,
-        storedFileName: path.basename(mediaRelativePath),
-        mimeType: file.mimetype,
-        sizeBytes: file.size,
-        relativePath: mediaRelativePath,
-        storageProvider: "LOCAL_DISK",
-        checksum: calculateChecksum(file.buffer),
-        createdAt: now,
-        updatedAt: now,
-      });
-      return {
-        mediaAssetId: media.id,
-        fileName: file.originalname,
-        mimeType: file.mimetype,
-        sizeBytes: file.size,
-        mediaUrl: `/api/v1/media/${media.id}`,
-      };
-    });
+    const photoAssets = await Promise.all(
+      files.map(async (file, index) => {
+        const mediaId = crypto.randomUUID();
+        const mediaRelativePath = buildMediaRelativePath({
+          tenantType: "partner",
+          ownerId: req.auth.sub,
+          entityType: "onsite-validation",
+          entityId: existing.id,
+          mediaId,
+          fileName: file.originalname,
+        });
+        writeMediaBuffer({ relativePath: mediaRelativePath, buffer: file.buffer });
+        const media = await createMediaAsset({
+          id: mediaId,
+          tenantType: "partner",
+          tenantId: req.auth.sub,
+          ownerRole: "partner",
+          ownerId: req.auth.sub,
+          entityType: "onsite-validation",
+          entityId: existing.id,
+          slot: `photo-${index + 1}`,
+          originalFileName: file.originalname,
+          storedFileName: path.basename(mediaRelativePath),
+          mimeType: file.mimetype,
+          sizeBytes: file.size,
+          relativePath: mediaRelativePath,
+          storageProvider: "LOCAL_DISK",
+          checksum: calculateChecksum(file.buffer),
+          createdAt: now,
+          updatedAt: now,
+        });
+        return {
+          mediaAssetId: media.id,
+          fileName: file.originalname,
+          mimeType: file.mimetype,
+          sizeBytes: file.size,
+          mediaUrl: `/api/v1/media/${media.id}`,
+        };
+      }),
+    );
 
-    const computedQuote = computeOnsiteRequote({
+    const computedQuote = await computeOnsiteRequote({
       lead: existing,
       checklist,
       partnerChecks: input.partnerChecks,
@@ -1692,7 +1714,7 @@ partnerRouter.post("/leads/:leadId/onsite-validation", requireAuth, requireRole(
       updatedAt: now,
     };
 
-    const lead = savePartnerLeadOnsiteValidation({
+    const lead = await savePartnerLeadOnsiteValidation({
       id: existing.id,
       partnerId: req.auth.sub,
       onsiteValidationJson: JSON.stringify(payload),
@@ -1701,7 +1723,7 @@ partnerRouter.post("/leads/:leadId/onsite-validation", requireAuth, requireRole(
       updatedAt: now,
     });
 
-    appendPartnerLeadDispositionEvent({
+    await appendPartnerLeadDispositionEvent({
       id: crypto.randomUUID(),
       leadId: existing.id,
       userSellFlowId: existing.userSellFlowId,
@@ -1715,7 +1737,7 @@ partnerRouter.post("/leads/:leadId/onsite-validation", requireAuth, requireRole(
       createdAt: now,
     });
 
-    enqueueLeadEventOutbox({
+    await enqueueLeadEventOutbox({
       id: crypto.randomUUID(),
       eventType: "lead.onsite.validated",
       leadId: lead.id,
@@ -1740,7 +1762,7 @@ partnerRouter.post("/leads/:leadId/onsite-validation", requireAuth, requireRole(
   }
 });
 
-partnerRouter.post("/leads/:leadId/payment-proof/metadata", requireAuth, requireRole("partner"), upload.single("file"), (req, res, next) => {
+partnerRouter.post("/leads/:leadId/payment-proof/metadata", requireAuth, requireRole("partner"), upload.single("file"), async (req, res, next) => {
   try {
     rejectRemovedFields(req.body, ["transactionRef", "notes"]);
     const input = paymentProofMetadataSchema.parse(
@@ -1761,7 +1783,7 @@ partnerRouter.post("/leads/:leadId/payment-proof/metadata", requireAuth, require
           },
     );
 
-    const existing = getPartnerLeadById(req.params.leadId);
+    const existing = await getPartnerLeadById(req.params.leadId);
     assertPartnerCanAccessLead(existing, req);
 
     if (existing.partnerId !== req.auth.sub) {
@@ -1800,7 +1822,7 @@ partnerRouter.post("/leads/:leadId/payment-proof/metadata", requireAuth, require
         fileName: input.fileName,
       });
       writeMediaBuffer({ relativePath: mediaRelativePath, buffer: req.file.buffer });
-      media = createMediaAsset({
+      media = await createMediaAsset({
         id: paymentProofId,
         tenantType: "partner",
         tenantId: req.auth.sub,
@@ -1837,7 +1859,7 @@ partnerRouter.post("/leads/:leadId/payment-proof/metadata", requireAuth, require
       submittedAt: now,
     };
 
-    const lead = savePartnerLeadPaymentProofMetadata({
+    const lead = await savePartnerLeadPaymentProofMetadata({
       id: existing.id,
       partnerId: req.auth.sub,
       paymentProofJson: JSON.stringify(payload),
@@ -1845,7 +1867,7 @@ partnerRouter.post("/leads/:leadId/payment-proof/metadata", requireAuth, require
       updatedAt: now,
     });
 
-    appendPartnerLeadDispositionEvent({
+    await appendPartnerLeadDispositionEvent({
       id: crypto.randomUUID(),
       leadId: existing.id,
       userSellFlowId: existing.userSellFlowId,
@@ -1859,7 +1881,7 @@ partnerRouter.post("/leads/:leadId/payment-proof/metadata", requireAuth, require
       createdAt: now,
     });
 
-    enqueueLeadEventOutbox({
+    await enqueueLeadEventOutbox({
       id: crypto.randomUUID(),
       eventType: "lead.payment-proof.submitted",
       leadId: lead.id,
@@ -1904,7 +1926,7 @@ partnerRouter.post("/leads/:leadId/completion", requireAuth, requireRole("partne
   try {
     rejectRemovedFields(req.body, ["remarks"]);
     const input = completionSchema.parse(req.body);
-    const existing = getPartnerLeadById(req.params.leadId);
+    const existing = await getPartnerLeadById(req.params.leadId);
     assertPartnerCanAccessLead(existing, req);
 
     if (existing.partnerId !== req.auth.sub) {
@@ -1931,7 +1953,7 @@ partnerRouter.post("/leads/:leadId/completion", requireAuth, requireRole("partne
     }
 
     const now = nowIso();
-    const partner = getPartnerById(req.auth.sub);
+    const partner = await getPartnerById(req.auth.sub);
     const finalAmount = expectedFinalAmount;
     const invoice = {
       id: `invoice-${existing.id}`,
@@ -1965,7 +1987,7 @@ partnerRouter.post("/leads/:leadId/completion", requireAuth, requireRole("partne
       completedAt: now,
     };
 
-    savePartnerLeadCompletionEvent({
+    await savePartnerLeadCompletionEvent({
       id: existing.id,
       partnerId: req.auth.sub,
       completionEventJson: JSON.stringify(completionPayload),
@@ -1973,7 +1995,7 @@ partnerRouter.post("/leads/:leadId/completion", requireAuth, requireRole("partne
       updatedAt: now,
     });
 
-    const lead = updatePartnerLeadWorkflowStatus({
+    const lead = await updatePartnerLeadWorkflowStatus({
       id: existing.id,
       partnerId: req.auth.sub,
       status: "COMPLETED",
@@ -1986,9 +2008,9 @@ partnerRouter.post("/leads/:leadId/completion", requireAuth, requireRole("partne
       status: "COMPLETED",
       updatedAt: now,
     });
-    closePartnerLeadUnlockOrder({ leadId: existing.id, partnerId: req.auth.sub, closedAt: now });
+    await closePartnerLeadUnlockOrder({ leadId: existing.id, partnerId: req.auth.sub, closedAt: now });
 
-    appendPartnerLeadDispositionEvent({
+    await appendPartnerLeadDispositionEvent({
       id: crypto.randomUUID(),
       leadId: existing.id,
       userSellFlowId: existing.userSellFlowId,
@@ -2002,7 +2024,7 @@ partnerRouter.post("/leads/:leadId/completion", requireAuth, requireRole("partne
       createdAt: now,
     });
 
-    enqueueLeadEventOutbox({
+    await enqueueLeadEventOutbox({
       id: crypto.randomUUID(),
       eventType: "lead.completed",
       leadId: lead.id,
@@ -2028,13 +2050,13 @@ partnerRouter.post("/leads/:leadId/completion", requireAuth, requireRole("partne
   }
 });
 
-partnerRouter.get("/leads/:leadId/disposition-events", requireAuth, requireRole("partner"), (req, res, next) => {
+partnerRouter.get("/leads/:leadId/disposition-events", requireAuth, requireRole("partner"), async (req, res, next) => {
   try {
     const query = timelineQuerySchema.parse(req.query);
-    const lead = getPartnerLeadById(req.params.leadId);
+    const lead = await getPartnerLeadById(req.params.leadId);
     assertPartnerCanAccessLead(lead, req);
 
-    const rows = listPartnerLeadDispositionTimeline({
+    const rows = await listPartnerLeadDispositionTimeline({
       leadId: req.params.leadId,
       limit: query.limit,
     });
@@ -2045,21 +2067,21 @@ partnerRouter.get("/leads/:leadId/disposition-events", requireAuth, requireRole(
   }
 });
 
-partnerRouter.post("/coins/recharge", requireAuth, requireRole("partner"), (req, res, next) => {
+partnerRouter.post("/coins/recharge", requireAuth, requireRole("partner"), async (req, res, next) => {
   try {
     const input = rechargeCoinsSchema.parse(req.body);
-    const latestKyc = getLatestKycForPartner(req.auth.sub);
+    const latestKyc = await getLatestKycForPartner(req.auth.sub);
     if (!latestKyc || latestKyc.verificationStatus !== "VERIFIED") {
       throw badRequest("KYC must be VERIFIED before recharging coins.");
     }
 
-    const duplicatePending = getPendingPartnerRechargeRequestByTxnRef(req.auth.sub, input.upiTxnRef);
+    const duplicatePending = await getPendingPartnerRechargeRequestByTxnRef(req.auth.sub, input.upiTxnRef);
     if (duplicatePending) {
       throw badRequest("A recharge request with this UPI reference is already pending admin review.");
     }
 
     const now = nowIso();
-    const requestRow = createPartnerCoinRechargeRequest({
+    const requestRow = await createPartnerCoinRechargeRequest({
       id: crypto.randomUUID(),
       partnerId: req.auth.sub,
       amount: input.amount,
@@ -2081,10 +2103,10 @@ partnerRouter.post("/coins/recharge", requireAuth, requireRole("partner"), (req,
   }
 });
 
-partnerRouter.get("/coins/recharge-requests", requireAuth, requireRole("partner"), (req, res, next) => {
+partnerRouter.get("/coins/recharge-requests", requireAuth, requireRole("partner"), async (req, res, next) => {
   try {
     const query = rechargeRequestListSchema.parse(req.query);
-    const rows = listPartnerCoinRechargeRequests({
+    const rows = await listPartnerCoinRechargeRequests({
       partnerId: req.auth.sub,
       status: query.status,
       limit: query.limit,
@@ -2095,10 +2117,10 @@ partnerRouter.get("/coins/recharge-requests", requireAuth, requireRole("partner"
   }
 });
 
-partnerRouter.get("/coins/recharge-requests/admin", requireAuth, requireRole("admin"), (req, res, next) => {
+partnerRouter.get("/coins/recharge-requests/admin", requireAuth, requireRole("admin"), async (req, res, next) => {
   try {
     const query = adminRechargeRequestListSchema.parse(req.query);
-    const rows = listPartnerCoinRechargeRequests({
+    const rows = await listPartnerCoinRechargeRequests({
       partnerId: query.partnerId || undefined,
       status: query.status,
       limit: query.limit,
@@ -2109,15 +2131,15 @@ partnerRouter.get("/coins/recharge-requests/admin", requireAuth, requireRole("ad
   }
 });
 
-partnerRouter.patch("/coins/recharge-requests/:requestId/verify", requireAuth, requireRole("admin"), (req, res, next) => {
+partnerRouter.patch("/coins/recharge-requests/:requestId/verify", requireAuth, requireRole("admin"), async (req, res, next) => {
   try {
     const input = verifyRechargeRequestSchema.parse(req.body);
-    const existing = getPartnerCoinRechargeRequestById(req.params.requestId);
+    const existing = await getPartnerCoinRechargeRequestById(req.params.requestId);
     if (!existing) {
       throw notFound("Recharge request not found");
     }
 
-    const result = verifyPartnerCoinRechargeRequest({
+    const result = await verifyPartnerCoinRechargeRequest({
       requestId: req.params.requestId,
       action: input.action,
       verifiedBy: req.auth.sub,
@@ -2145,21 +2167,21 @@ partnerRouter.patch("/coins/recharge-requests/:requestId/verify", requireAuth, r
   }
 });
 
-partnerRouter.get("/dashboard", requireAuth, requireRole("partner"), (req, res, next) => {
+partnerRouter.get("/dashboard", requireAuth, requireRole("partner"), async (req, res, next) => {
   try {
     const query = dashboardQuerySchema.parse({
       pincode: req.query.pincode,
     });
 
-    const partner = getPartnerById(req.auth.sub);
-    const metrics = getPartnerDashboardMetrics({
+    const partner = await getPartnerById(req.auth.sub);
+    const metrics = await getPartnerDashboardMetrics({
       partnerId: req.auth.sub,
       pincode: query.pincode,
       now: new Date(),
     });
     const now = nowIso();
-    ensurePartnerCoinWallet(req.auth.sub, now);
-    const wallet = getPartnerCoinWallet(req.auth.sub);
+    await ensurePartnerCoinWallet(req.auth.sub, now);
+    const wallet = await getPartnerCoinWallet(req.auth.sub);
 
     res.json(
       success({

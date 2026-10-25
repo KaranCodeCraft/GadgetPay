@@ -240,7 +240,7 @@ async function persistServiceabilityUpload({ file, parsed, uploadedBy }) {
   });
 
   writeMediaBuffer({ relativePath: mediaRelativePath, buffer: file.buffer });
-  createMediaAsset({
+  await createMediaAsset({
     id: mediaId,
     tenantType: "admin",
     tenantId: null,
@@ -264,12 +264,18 @@ async function persistServiceabilityUpload({ file, parsed, uploadedBy }) {
   let insertedCount = 0;
   let updatedCount = 0;
   for (const row of parsed) {
-    const existing = getServiceabilityByPincode(row.pincode);
+    const existing = await getServiceabilityByPincode(row.pincode);
     if (existing) updatedCount += 1;
     else insertedCount += 1;
 
-    const metadata = await resolvePincodeMetadata(row.pincode);
-    upsertServiceability({
+    let metadata = { state: null, district: null, officeCount: null, deliveryOfficeCount: null, metadataJson: null };
+    try {
+      metadata = await resolvePincodeMetadata(row.pincode);
+    } catch {
+      // allow upload even if external metadata provider is unavailable
+    }
+
+    await upsertServiceability({
       pincode: row.pincode,
       status: row.status,
       reason: row.reason,
@@ -285,7 +291,7 @@ async function persistServiceabilityUpload({ file, parsed, uploadedBy }) {
     });
   }
 
-  createServiceabilityUploadHistory({
+  await createServiceabilityUploadHistory({
     id: uploadId,
     fileName: file.originalname,
     uploadedBy,
@@ -343,19 +349,23 @@ adminServiceabilityRouter.get("/validate/:pincode", async (req, res, next) => {
   }
 });
 
-adminServiceabilityRouter.get("/pincodes", (req, res) => {
-  const statusFilter = typeof req.query.status === "string" ? req.query.status : undefined;
-  const search = (req.query.search || "").toString().trim();
-  const rows = listServiceability({
-    status: statusFilter,
-    search,
-  });
+adminServiceabilityRouter.get("/pincodes", async (req, res, next) => {
+  try {
+    const statusFilter = typeof req.query.status === "string" ? req.query.status : undefined;
+    const search = (req.query.search || "").toString().trim();
+    const rows = await listServiceability({
+      status: statusFilter,
+      search,
+    });
 
-  res.json(success({ rows, count: rows.length }));
+    res.json(success({ rows, count: rows.length }));
+  } catch (err) {
+    next(err);
+  }
 });
 
-adminServiceabilityRouter.post("/upload", handleServiceabilityUploadMultipart, (req, res, next) => {
-  (async () => {
+adminServiceabilityRouter.post("/upload", handleServiceabilityUploadMultipart, async (req, res, next) => {
+  try {
     const files = getServiceabilityUploadFiles(req);
     if (files.length === 0) {
       throw badRequest("At least one Excel file is required");
@@ -388,19 +398,25 @@ adminServiceabilityRouter.post("/upload", handleServiceabilityUploadMultipart, (
       uploadId: uploads[0]?.uploadId,
       sourceFileName: uploads[0]?.sourceFileName,
     }));
-  })().catch((err) => next(err));
+  } catch (err) {
+    next(err);
+  }
 });
 
-adminServiceabilityRouter.get("/uploads", (req, res) => {
-  const rows = listServiceabilityUploadHistory();
-  res.json(success({ rows, count: rows.length, expectedHeaders: EXPECTED_HEADERS }));
+adminServiceabilityRouter.get("/uploads", async (req, res, next) => {
+  try {
+    const rows = await listServiceabilityUploadHistory();
+    res.json(success({ rows, count: rows.length, expectedHeaders: EXPECTED_HEADERS }));
+  } catch (err) {
+    next(err);
+  }
 });
 
-adminServiceabilityRouter.patch("/uploads/:uploadId/status", (req, res, next) => {
+adminServiceabilityRouter.patch("/uploads/:uploadId/status", async (req, res, next) => {
   try {
     const uploadId = z.string().uuid().parse(req.params.uploadId);
     const status = z.object({ status: z.enum(["ACTIVE", "DEACTIVATED"]) }).parse(req.body).status;
-    const uploadRow = getServiceabilityUploadHistoryById(uploadId);
+    const uploadRow = await getServiceabilityUploadHistoryById(uploadId);
     if (!uploadRow) {
       throw notFound("Serviceability upload not found");
     }
@@ -410,7 +426,7 @@ adminServiceabilityRouter.patch("/uploads/:uploadId/status", (req, res, next) =>
     }
 
     const now = nowIso();
-    const result = deactivateServiceabilityUploadAndRows({
+    const result = await deactivateServiceabilityUploadAndRows({
       uploadId,
       deactivatedBy: req.auth.sub,
       deactivatedAt: now,
@@ -427,15 +443,15 @@ adminServiceabilityRouter.patch("/uploads/:uploadId/status", (req, res, next) =>
   }
 });
 
-adminServiceabilityRouter.delete("/uploads/:uploadId", (req, res, next) => {
+adminServiceabilityRouter.delete("/uploads/:uploadId", async (req, res, next) => {
   try {
     const uploadId = z.string().uuid().parse(req.params.uploadId);
-    const uploadRow = getServiceabilityUploadHistoryById(uploadId);
+    const uploadRow = await getServiceabilityUploadHistoryById(uploadId);
     if (!uploadRow) {
       throw notFound("Serviceability upload not found");
     }
 
-    const result = deleteServiceabilityUploadPermanently({ uploadId });
+    const result = await deleteServiceabilityUploadPermanently({ uploadId });
     res.json(success({
       uploadId,
       fileName: uploadRow.fileName,
@@ -447,10 +463,16 @@ adminServiceabilityRouter.delete("/uploads/:uploadId", (req, res, next) => {
   }
 });
 
-adminServiceabilityRouter.post("/pincodes", (req, res, next) => {
-  (async () => {
+adminServiceabilityRouter.post("/pincodes", async (req, res, next) => {
+  try {
     const input = createSchema.parse(req.body);
-    const metadata = await resolvePincodeMetadata(input.pincode);
+    let metadata = { state: null, district: null, officeCount: null, deliveryOfficeCount: null, metadataJson: null };
+    try {
+      metadata = await resolvePincodeMetadata(input.pincode);
+    } catch {
+      // allow pincode creation even if external provider lookup fails
+    }
+
     const row = {
       pincode: input.pincode,
       status: input.status,
@@ -464,23 +486,35 @@ adminServiceabilityRouter.post("/pincodes", (req, res, next) => {
       updatedAt: nowIso(),
     };
 
-    const persisted = upsertServiceability(row);
+    const persisted = await upsertServiceability(row);
     res.json(success(persisted));
-  })().catch((err) => {
+  } catch (err) {
     next(err);
-  });
+  }
 });
 
-adminServiceabilityRouter.put("/pincodes/:pincode", (req, res, next) => {
-  (async () => {
+adminServiceabilityRouter.put("/pincodes/:pincode", async (req, res, next) => {
+  try {
     const pincode = z.string().regex(/^\d{6}$/).parse(req.params.pincode);
     const input = updateSchema.parse(req.body);
-    const existing = getServiceabilityByPincode(pincode);
+    const existing = await getServiceabilityByPincode(pincode);
     if (!existing) {
       throw notFound("Serviceability pincode not found");
     }
 
-    const metadata = await resolvePincodeMetadata(pincode);
+    let metadata = {
+      state: existing.state,
+      district: existing.district,
+      officeCount: existing.officeCount,
+      deliveryOfficeCount: existing.deliveryOfficeCount,
+      metadataJson: existing.metadata ? JSON.stringify(existing.metadata) : null,
+    };
+    try {
+      metadata = await resolvePincodeMetadata(pincode);
+    } catch {
+      // keep existing metadata
+    }
+
     const row = {
       pincode,
       status: input.status,
@@ -494,18 +528,18 @@ adminServiceabilityRouter.put("/pincodes/:pincode", (req, res, next) => {
       updatedAt: nowIso(),
     };
 
-    const persisted = upsertServiceability(row);
+    const persisted = await upsertServiceability(row);
     res.json(success(persisted));
-  })().catch((err) => {
+  } catch (err) {
     next(err);
-  });
+  }
 });
 
-adminServiceabilityRouter.delete("/pincodes/:pincode", (req, res, next) => {
+adminServiceabilityRouter.delete("/pincodes/:pincode", async (req, res, next) => {
   try {
     const pincode = z.string().regex(/^\d{6}$/).parse(req.params.pincode);
-    const result = deleteServiceabilityByPincode(pincode);
-    if (!result.changes) {
+    const result = await deleteServiceabilityByPincode(pincode);
+    if (!result?.changes) {
       throw notFound("Serviceability pincode not found");
     }
     res.json(success({ pincode, deleted: true }));
@@ -514,11 +548,11 @@ adminServiceabilityRouter.delete("/pincodes/:pincode", (req, res, next) => {
   }
 });
 
-adminServiceabilityRouter.patch("/pincodes/:pincode/toggle", (req, res, next) => {
+adminServiceabilityRouter.patch("/pincodes/:pincode/toggle", async (req, res, next) => {
   try {
     const pincode = z.string().regex(/^\d{6}$/).parse(req.params.pincode);
     const input = toggleSchema.parse(req.body);
-    const prev = getServiceabilityByPincode(pincode);
+    const prev = await getServiceabilityByPincode(pincode);
 
     const row = {
       pincode,
@@ -534,7 +568,7 @@ adminServiceabilityRouter.patch("/pincodes/:pincode/toggle", (req, res, next) =>
       previousStatus: prev?.status || null,
     };
 
-    const persisted = upsertServiceability(row);
+    const persisted = await upsertServiceability(row);
     res.json(success({ ...persisted, previousStatus: prev?.status || null }));
   } catch (err) {
     next(err);

@@ -518,7 +518,11 @@ export async function touchPartnerPincodeAssignment({ partnerId, pincode, assign
   });
 }
 
-export async function deactivatePartnerPincodeScope({ partnerId, pincode, updatedBy, updatedAt }) {
+export async function deactivatePartnerPincodeScope(arg1, arg2, arg3, arg4) {
+  const { partnerId, pincode, updatedBy, updatedAt } =
+    typeof arg1 === "object" && arg1 !== null
+      ? arg1
+      : { partnerId: arg1, pincode: arg2, updatedBy: arg3, updatedAt: arg4 };
   const result = await prisma.partnerPincodeScope.updateMany({
     where: { partnerId, pincode },
     data: {
@@ -1085,7 +1089,7 @@ export async function getPartnerLeadUnlockIntentById({ intentId, partnerId, now 
 }
 
 export async function createPartnerLeadUnlockIntent({ leadId, partnerId, unlockPrice, intentId, now, expiresAt }) {
-  return await prisma.$transaction(async (tx) => {
+  const txResult = await prisma.$transaction(async (tx) => {
     await tx.partnerLeadPaymentIntent.updateMany({
       where: { status: "PENDING_PAYMENT", expiresAt: { lt: now } },
       data: { status: "EXPIRED", adminNote: "Payment window expired" },
@@ -1126,7 +1130,7 @@ export async function createPartnerLeadUnlockIntent({ leadId, partnerId, unlockP
     if (intent) {
       return {
         result: intent.status === "APPROVED" ? "ALREADY_APPROVED" : "EXISTING_INTENT",
-        lead: await attachPartnerUnlockOrder(await getPartnerLeadById(leadId), partnerId),
+        lead: existingLead,
         intent,
       };
     }
@@ -1134,8 +1138,8 @@ export async function createPartnerLeadUnlockIntent({ leadId, partnerId, unlockP
     if (existingLead.partnerId === partnerId && ["ACCEPTED", "IN_PROGRESS", "COMPLETED"].includes(existingLead.status)) {
       return {
         result: "ALREADY_APPROVED",
-        lead: await attachPartnerUnlockOrder(existingLead, partnerId),
-        intent: await getPartnerLeadUnlockOrderForPartner({ leadId: existingLead.id, partnerId }),
+        lead: existingLead,
+        intent: null,
       };
     }
 
@@ -1151,7 +1155,7 @@ export async function createPartnerLeadUnlockIntent({ leadId, partnerId, unlockP
       quoteSellingPrice: existingLead.quote?.sellingPrice ?? null,
     };
 
-    await tx.partnerLeadPaymentIntent.create({
+    const createdIntent = await tx.partnerLeadPaymentIntent.create({
       data: {
         id: intentId,
         leadId: existingLead.id,
@@ -1167,14 +1171,24 @@ export async function createPartnerLeadUnlockIntent({ leadId, partnerId, unlockP
       },
     });
 
-    const lead = await attachPartnerUnlockOrder(await getPartnerLeadById(existingLead.id), partnerId);
-    const finalIntent = await getPartnerLeadUnlockOrderForPartner({ leadId: existingLead.id, partnerId });
     return {
       result: "CREATED",
-      lead,
-      intent: finalIntent,
+      lead: existingLead,
+      intent: mapPartnerLeadUnlockOrder(createdIntent),
     };
-  });
+  }, { maxWait: 10000, timeout: 20000 });
+
+  if (txResult.result === "CREATED" || txResult.result === "EXISTING_INTENT" || txResult.result === "ALREADY_APPROVED") {
+    const fullLead = await getPartnerLeadById(leadId);
+    const intent = txResult.intent || await getPartnerLeadUnlockOrderForPartner({ leadId, partnerId });
+    return {
+      ...txResult,
+      lead: await attachPartnerUnlockOrder(fullLead, partnerId),
+      intent,
+    };
+  }
+
+  return txResult;
 }
 
 export async function markPartnerLeadUnlockScreenshotSent({ intentId, partnerId, now }) {
@@ -1209,7 +1223,7 @@ export async function listPartnerLeadUnlockIntentsForAdmin({ status, partnerId, 
 }
 
 export async function verifyPartnerLeadUnlockIntent({ intentId, action, verifiedBy, adminNote, verifiedAt }) {
-  return await prisma.$transaction(async (tx) => {
+  const txResult = await prisma.$transaction(async (tx) => {
     await tx.partnerLeadPaymentIntent.updateMany({
       where: { status: "PENDING_PAYMENT", expiresAt: { lt: verifiedAt } },
       data: { status: "EXPIRED", adminNote: "Payment window expired" },
@@ -1219,11 +1233,11 @@ export async function verifyPartnerLeadUnlockIntent({ intentId, action, verified
     const intent = mapPartnerLeadUnlockOrder(rawIntent);
     if (!intent) return { result: "NOT_FOUND", intent: null, lead: null };
     if (!["PENDING_PAYMENT", "SCREENSHOT_SENT"].includes(intent.status)) {
-      const lead = await getPartnerLeadById(intent.leadId, { viewerPartnerId: intent.partnerId });
-      return { result: "ALREADY_PROCESSED", intent, lead };
+      return { result: "ALREADY_PROCESSED", intent, leadId: intent.leadId, partnerId: intent.partnerId };
     }
 
-    const existingLead = await getPartnerLeadById(intent.leadId);
+    const rawLead = await tx.partnerLead.findUnique({ where: { id: intent.leadId } });
+    const existingLead = mapPartnerLead(rawLead);
     if (!existingLead) return { result: "LEAD_NOT_FOUND", intent, lead: null };
 
     if (action === "REJECT") {
@@ -1233,7 +1247,7 @@ export async function verifyPartnerLeadUnlockIntent({ intentId, action, verified
       });
       return {
         result: "REJECTED",
-        intent: await getPartnerLeadUnlockIntentById({ intentId: intent.id }),
+        intentId: intent.id,
         lead: existingLead,
       };
     }
@@ -1260,7 +1274,7 @@ export async function verifyPartnerLeadUnlockIntent({ intentId, action, verified
       return {
         result: "OWNED_BY_OTHER",
         intent,
-        lead: (await getPartnerLeadById(intent.leadId)) || existingLead,
+        leadId: intent.leadId,
       };
     }
 
@@ -1276,11 +1290,46 @@ export async function verifyPartnerLeadUnlockIntent({ intentId, action, verified
 
     return {
       result: "APPROVED",
-      intent: await getPartnerLeadUnlockIntentById({ intentId: intent.id }),
-      lead: await getPartnerLeadById(intent.leadId, { viewerPartnerId: intent.partnerId }),
+      intentId: intent.id,
+      leadId: intent.leadId,
+      partnerId: intent.partnerId,
       fromStatus: existingLead.status,
     };
-  });
+  }, { maxWait: 10000, timeout: 20000 });
+
+  if (txResult.result === "APPROVED") {
+    const [finalIntent, finalLead] = await Promise.all([
+      getPartnerLeadUnlockIntentById({ intentId: txResult.intentId }),
+      getPartnerLeadById(txResult.leadId, { viewerPartnerId: txResult.partnerId }),
+    ]);
+    return {
+      result: "APPROVED",
+      intent: finalIntent,
+      lead: finalLead,
+      fromStatus: txResult.fromStatus,
+    };
+  }
+
+  if (txResult.result === "REJECTED") {
+    const finalIntent = await getPartnerLeadUnlockIntentById({ intentId: txResult.intentId });
+    return {
+      result: "REJECTED",
+      intent: finalIntent,
+      lead: txResult.lead,
+    };
+  }
+
+  if (txResult.result === "ALREADY_PROCESSED") {
+    const lead = await getPartnerLeadById(txResult.leadId, { viewerPartnerId: txResult.partnerId });
+    return { result: "ALREADY_PROCESSED", intent: txResult.intent, lead };
+  }
+
+  if (txResult.result === "OWNED_BY_OTHER" && txResult.leadId) {
+    const lead = await getPartnerLeadById(txResult.leadId);
+    return { result: "OWNED_BY_OTHER", intent: txResult.intent, lead };
+  }
+
+  return txResult;
 }
 
 export async function closePartnerLeadUnlockOrder({ leadId, partnerId, closedAt }) {
@@ -1582,7 +1631,7 @@ export async function getAdminLeadAssignmentMetrics({ fromDate, toDate, pincode,
 }
 
 export async function assignAdminLead({ leadId, partnerId, adminId, assignmentMode = "MANUAL", note = null, createdAt }) {
-  return await prisma.$transaction(async (tx) => {
+  const txResult = await prisma.$transaction(async (tx) => {
     const rawLead = await tx.partnerLead.findUnique({ where: { id: leadId } });
     const lead = mapPartnerLead(rawLead);
     if (!lead) return { result: "NOT_FOUND", lead: null, assignment: null };
@@ -1614,10 +1663,8 @@ export async function assignAdminLead({ leadId, partnerId, adminId, assignmentMo
       },
     });
 
-    const updatedLead = await getPartnerLeadById(leadId);
     return {
       result: "UPDATED",
-      lead: updatedLead,
       assignment: {
         id: assignmentId,
         leadId,
@@ -1629,7 +1676,12 @@ export async function assignAdminLead({ leadId, partnerId, adminId, assignmentMo
       },
       previousStatus: lead.status,
     };
-  });
+  }, { maxWait: 10000, timeout: 20000 });
+
+  if (txResult.result === "UPDATED") {
+    txResult.lead = await getPartnerLeadById(leadId);
+  }
+  return txResult;
 }
 
 export async function closeAdminLead({ leadId, closedBy, closedAt }) {
@@ -1777,7 +1829,7 @@ export async function listAllLeadEventOutbox(limit = 100000) {
 export async function markLeadEventOutboxProcessed(id) {
   await prisma.leadEventOutbox.update({
     where: { id },
-    data: { deliveryStatus: "PROCESSED", lastError: null },
+    data: { deliveryStatus: "SENT", lastError: null },
   });
 }
 
@@ -2299,16 +2351,32 @@ export async function getPartnerDashboardMetrics({ partnerId, pincode, now = new
 
 // Serviceability
 export async function upsertServiceability(row) {
+  let metadataObj = {};
+  if (row.metadataJson) {
+    try {
+      metadataObj = typeof row.metadataJson === "string" ? JSON.parse(row.metadataJson) : row.metadataJson;
+    } catch {
+      metadataObj = {};
+    }
+  }
+  if (row.status) {
+    metadataObj.runtimeStatus = row.status;
+  }
+  const metadataJson = JSON.stringify(metadataObj);
+
+  const prismaStatus =
+    row.status === "ACTIVE" || row.status === "SERVICEABLE" ? "SERVICEABLE" : "UNSERVICEABLE";
+
   const result = await prisma.serviceabilityPincode.upsert({
     where: { pincode: row.pincode },
     update: {
-      status: row.status === "ACTIVE" || row.status === "SERVICEABLE" ? "SERVICEABLE" : "UNSERVICEABLE",
+      status: prismaStatus,
       reason: row.reason,
       state: row.state || null,
       district: row.district || null,
       officeCount: row.officeCount ?? null,
       deliveryOfficeCount: row.deliveryOfficeCount ?? null,
-      metadataJson: row.metadataJson || null,
+      metadataJson,
       sourceUploadId: row.sourceUploadId || null,
       sourceFileName: row.sourceFileName || null,
       updatedBy: row.updatedBy,
@@ -2316,13 +2384,13 @@ export async function upsertServiceability(row) {
     },
     create: {
       pincode: row.pincode,
-      status: row.status === "ACTIVE" || row.status === "SERVICEABLE" ? "SERVICEABLE" : "UNSERVICEABLE",
+      status: prismaStatus,
       reason: row.reason,
       state: row.state || null,
       district: row.district || null,
       officeCount: row.officeCount ?? null,
       deliveryOfficeCount: row.deliveryOfficeCount ?? null,
-      metadataJson: row.metadataJson || null,
+      metadataJson,
       sourceUploadId: row.sourceUploadId || null,
       sourceFileName: row.sourceFileName || null,
       updatedBy: row.updatedBy,
@@ -2336,18 +2404,24 @@ export async function getServiceabilityByPincode(pincode) {
   if (!pincode) return null;
   const row = await prisma.serviceabilityPincode.findUnique({ where: { pincode } });
   if (!row) return null;
-  // Normalize Prisma enum → runtime status used throughout the backend
-  const normalizedStatus = row.status === "SERVICEABLE" ? "ACTIVE" : row.status === "UNSERVICEABLE" ? "INACTIVE" : row.status;
+  const metadata = row.metadataJson ? parseJsonColumn(row.metadataJson, null) : null;
+  const normalizedStatus = metadata?.runtimeStatus || (row.status === "SERVICEABLE" ? "ACTIVE" : "INACTIVE");
   return {
     ...row,
     status: normalizedStatus,
-    metadata: row.metadataJson ? parseJsonColumn(row.metadataJson, null) : null,
+    metadata,
   };
 }
 
 export async function listServiceability({ status, search } = {}) {
   const where = {};
-  if (status) where.status = status;
+  if (status) {
+    if (status === "ACTIVE" || status === "SERVICEABLE") {
+      where.status = "SERVICEABLE";
+    } else if (status === "INACTIVE" || status === "UNSERVICEABLE" || status === "LIMITED") {
+      where.status = "UNSERVICEABLE";
+    }
+  }
   if (search) {
     where.OR = [
       { pincode: { contains: search, mode: "insensitive" } },
@@ -2361,15 +2435,29 @@ export async function listServiceability({ status, search } = {}) {
     orderBy: { pincode: "asc" },
   });
 
-  return rows.map((row) => ({
-    ...row,
-    metadata: row.metadataJson ? parseJsonColumn(row.metadataJson, null) : null,
-  }));
+  const mapped = rows.map((row) => {
+    const metadata = row.metadataJson ? parseJsonColumn(row.metadataJson, null) : null;
+    const normalizedStatus = metadata?.runtimeStatus || (row.status === "SERVICEABLE" ? "ACTIVE" : "INACTIVE");
+    return {
+      ...row,
+      status: normalizedStatus,
+      metadata,
+    };
+  });
+
+  if (status === "LIMITED") {
+    return mapped.filter((r) => r.status === "LIMITED");
+  }
+  if (status === "INACTIVE") {
+    return mapped.filter((r) => r.status === "INACTIVE");
+  }
+
+  return mapped;
 }
 
 export async function deleteServiceabilityByPincode(pincode) {
   const result = await prisma.serviceabilityPincode.deleteMany({ where: { pincode } });
-  return result.count > 0;
+  return { changes: result.count };
 }
 
 export async function createServiceabilityUploadHistory(rec) {

@@ -1508,6 +1508,7 @@ function LocationSection() {
   };
 
   const safeRows = Array.isArray(rows) ? rows : [];
+  const safeUploadRows = Array.isArray(uploadRows) ? uploadRows : [];
 
   const activeCount = safeRows.filter((r) => r.status === "ACTIVE").length;
   const limitedCount = safeRows.filter((r) => r.status === "LIMITED").length;
@@ -1697,11 +1698,11 @@ function LocationSection() {
       <div className="admin-card" style={{ marginTop: 12 }}>
         <div className="admin-card-toprow">
           <h3 className="admin-card-title">Uploaded Files (CRUD)</h3>
-          <span className="admin-muted">{uploadRows.length} file(s)</span>
+          <span className="admin-muted">{safeUploadRows.length} file(s)</span>
         </div>
 
         <div className="admin-location-upload-list">
-          {uploadRows.length === 0 ? (
+          {safeUploadRows.length === 0 ? (
             <p className="admin-muted">No location excel files uploaded yet.</p>
           ) : (
             safeUploadRows.map((row) => (
@@ -4380,7 +4381,7 @@ function AdminPage() {
       getAdminOverviewMetrics(token, metricsFilters),
       getAdminAssignmentMetrics(token, metricsFilters),
     ]);
-    setLeads(leadResult.rows.map(mapPartnerLeadToLead));
+    setLeads(Array.isArray(leadResult?.rows) ? leadResult.rows.map(mapPartnerLeadToLead) : []);
     setLeadSummary(summaryResult);
     setOverviewMetrics(overviewResult);
     setAssignmentMetrics(assignmentResult);

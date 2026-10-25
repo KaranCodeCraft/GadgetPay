@@ -33,6 +33,7 @@ const handler = {
     if (
       value &&
       typeof value === "object" &&
+      typeof prop === "string" &&
       !prop.startsWith("$") &&
       !prop.startsWith("_")
     ) {

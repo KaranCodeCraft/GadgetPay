@@ -106,31 +106,31 @@ export const adminLeadsRouter = Router();
 
 adminLeadsRouter.use(requireAuth, requireRole("admin"));
 
-adminLeadsRouter.get("/", (req, res, next) => {
+adminLeadsRouter.get("/", async (req, res, next) => {
   try {
     const query = listLeadsQuerySchema.parse(req.query);
-    const result = listPartnerLeadsForAdmin(query);
+    const result = await listPartnerLeadsForAdmin(query);
     res.json(success({ rows: result.rows, count: result.count }));
   } catch (err) {
     next(err);
   }
 });
 
-adminLeadsRouter.get("/disposition-summary", (req, res, next) => {
+adminLeadsRouter.get("/disposition-summary", async (req, res, next) => {
   try {
     const query = dispositionSummaryQuerySchema.parse(req.query);
-    const summary = listPartnerLeadDispositionSummary(query);
+    const summary = await listPartnerLeadDispositionSummary(query);
     res.json(success(summary));
   } catch (err) {
     next(err);
   }
 });
 
-adminLeadsRouter.get("/overview", (req, res, next) => {
+adminLeadsRouter.get("/overview", async (req, res, next) => {
   try {
     const query = metricsQuerySchema.parse(req.query);
-    const overview = getAdminOverviewMetricsFromSnapshot(query) || getAdminOverviewMetrics(query);
-    const partnerActivity = getAdminPartnerActivityFeed({
+    const overview = (await getAdminOverviewMetricsFromSnapshot(query)) || (await getAdminOverviewMetrics(query));
+    const partnerActivity = await getAdminPartnerActivityFeed({
       fromDate: query.fromDate,
       toDate: query.toDate,
       pincode: query.pincode,
@@ -142,35 +142,36 @@ adminLeadsRouter.get("/overview", (req, res, next) => {
   }
 });
 
-adminLeadsRouter.get("/disposition-metrics", (req, res, next) => {
+adminLeadsRouter.get("/disposition-metrics", async (req, res, next) => {
   try {
     const query = metricsQuerySchema.parse(req.query);
-    const summary = getAdminLeadDispositionSummaryFromSnapshot(query) || listPartnerLeadDispositionSummary(query);
+    const summary = (await getAdminLeadDispositionSummaryFromSnapshot(query)) || (await listPartnerLeadDispositionSummary(query));
     res.json(success(summary));
   } catch (err) {
     next(err);
   }
 });
 
-adminLeadsRouter.get("/assignment-metrics", (req, res, next) => {
+adminLeadsRouter.get("/assignment-metrics", async (req, res, next) => {
   try {
     const query = metricsQuerySchema.parse(req.query);
-    const metrics = getAdminLeadAssignmentMetricsFromSnapshot(query) || getAdminLeadAssignmentMetrics(query);
+    const metrics = (await getAdminLeadAssignmentMetricsFromSnapshot(query)) || (await getAdminLeadAssignmentMetrics(query));
     res.json(success(metrics));
   } catch (err) {
     next(err);
   }
 });
 
-adminLeadsRouter.get("/partners/search", (req, res, next) => {
+adminLeadsRouter.get("/partners/search", async (req, res, next) => {
   try {
     const query = partnerSearchQuerySchema.parse(req.query);
-    const rows = listPartnersForAdminSearch({
+    const rawRows = await listPartnersForAdminSearch({
       search: query.search,
       pincode: query.pincode,
       includeUnmapped: query.includeUnmapped,
       limit: query.limit,
-    }).filter((row) => {
+    });
+    const rows = rawRows.filter((row) => {
       if (query.includeUnmapped) return true;
       return row.scopePincode === query.pincode && row.scopeActive;
     });
@@ -181,20 +182,20 @@ adminLeadsRouter.get("/partners/search", (req, res, next) => {
   }
 });
 
-adminLeadsRouter.get("/partners", (req, res, next) => {
+adminLeadsRouter.get("/partners", async (req, res, next) => {
   try {
     const query = adminPartnerListQuerySchema.parse(req.query);
-    const rows = listPartnersForAdmin(query);
+    const rows = await listPartnersForAdmin(query);
     res.json(success({ rows, count: rows.length }));
   } catch (err) {
     next(err);
   }
 });
 
-adminLeadsRouter.patch("/partners/:partnerId/status", (req, res, next) => {
+adminLeadsRouter.patch("/partners/:partnerId/status", async (req, res, next) => {
   try {
     const input = z.object({ status: z.enum(["ACTIVE", "SUSPENDED", "DEACTIVATED"]) }).parse(req.body);
-    const partner = updatePartnerAccountStatus({
+    const partner = await updatePartnerAccountStatus({
       partnerId: req.params.partnerId,
       status: input.status,
       updatedBy: req.auth.sub,
@@ -207,24 +208,24 @@ adminLeadsRouter.patch("/partners/:partnerId/status", (req, res, next) => {
   }
 });
 
-adminLeadsRouter.get("/partner-scopes", (req, res, next) => {
+adminLeadsRouter.get("/partner-scopes", async (req, res, next) => {
   try {
     const query = scopeListQuerySchema.parse(req.query);
-    const rows = listPartnerPincodeScopes(query);
+    const rows = await listPartnerPincodeScopes(query);
     res.json(success({ rows, count: rows.length }));
   } catch (err) {
     next(err);
   }
 });
 
-adminLeadsRouter.post("/partner-scopes", (req, res, next) => {
+adminLeadsRouter.post("/partner-scopes", async (req, res, next) => {
   try {
     const input = upsertScopeSchema.parse(req.body);
-    const partner = getPartnerById(input.partnerId);
+    const partner = await getPartnerById(input.partnerId);
     if (!partner) throw notFound("Partner not found");
 
     const now = nowIso();
-    const scope = upsertPartnerPincodeScope({
+    const scope = await upsertPartnerPincodeScope({
       id: crypto.randomUUID(),
       partnerId: input.partnerId,
       pincode: input.pincode,
@@ -240,24 +241,25 @@ adminLeadsRouter.post("/partner-scopes", (req, res, next) => {
   }
 });
 
-adminLeadsRouter.get("/eligible-partners", (req, res, next) => {
+adminLeadsRouter.get("/eligible-partners", async (req, res, next) => {
   try {
     const query = z.object({ pincode: z.string().regex(/^\d{6}$/) }).parse(req.query);
-    const rows = listEligiblePartnersForPincode(query.pincode);
+    const rows = await listEligiblePartnersForPincode(query.pincode);
     res.json(success({ rows, count: rows.length }));
   } catch (err) {
     next(err);
   }
 });
 
-adminLeadsRouter.post("/:leadId/assign", (req, res, next) => {
+adminLeadsRouter.post("/:leadId/assign", async (req, res, next) => {
   try {
     const input = assignLeadSchema.parse(req.body);
-    const lead = getPartnerLeadById(req.params.leadId);
+    const lead = await getPartnerLeadById(req.params.leadId);
     if (!lead) throw notFound("Lead not found");
-    const partner = getPartnerById(input.partnerId);
+    const partner = await getPartnerById(input.partnerId);
     if (!partner) throw notFound("Partner not found");
-    if (!partnerEligibleForPincode({ partnerId: input.partnerId, pincode: lead.pincode })) {
+    const eligible = await partnerEligibleForPincode({ partnerId: input.partnerId, pincode: lead.pincode });
+    if (!eligible) {
       throw badRequest("Partner is not eligible for the lead pincode.", {
         partnerId: input.partnerId,
         pincode: lead.pincode,
@@ -265,7 +267,7 @@ adminLeadsRouter.post("/:leadId/assign", (req, res, next) => {
     }
 
     const now = nowIso();
-    const result = assignAdminLead({
+    const result = await assignAdminLead({
       leadId: req.params.leadId,
       partnerId: input.partnerId,
       adminId: req.auth.sub,
@@ -281,7 +283,7 @@ adminLeadsRouter.post("/:leadId/assign", (req, res, next) => {
     const dispositionKey = isAuto ? "ASSIGNED_AUTO" : "ASSIGNED_MANUAL";
     const eventType = isAuto ? "lead.assigned.auto" : "lead.assigned.manual";
 
-    appendPartnerLeadDispositionEvent({
+    await appendPartnerLeadDispositionEvent({
       id: crypto.randomUUID(),
       leadId: result.lead.id,
       userSellFlowId: result.lead.userSellFlowId,
@@ -295,7 +297,7 @@ adminLeadsRouter.post("/:leadId/assign", (req, res, next) => {
       createdAt: now,
     });
 
-    enqueueLeadEventOutbox({
+    await enqueueLeadEventOutbox({
       id: crypto.randomUUID(),
       eventType,
       leadId: result.lead.id,
@@ -320,15 +322,15 @@ adminLeadsRouter.post("/:leadId/assign", (req, res, next) => {
   }
 });
 
-adminLeadsRouter.post("/:leadId/close", (req, res, next) => {
+adminLeadsRouter.post("/:leadId/close", async (req, res, next) => {
   try {
     const input = z.object({ note: z.string().trim().max(300).optional() }).parse(req.body || {});
     const now = nowIso();
-    const result = closeAdminLead({ leadId: req.params.leadId, closedBy: req.auth.sub, closedAt: now });
+    const result = await closeAdminLead({ leadId: req.params.leadId, closedBy: req.auth.sub, closedAt: now });
     if (result.result === "NOT_FOUND" || !result.lead) throw notFound("Lead not found");
     if (result.result === "TERMINAL") throw badRequest("Lead is already closed or completed.");
 
-    appendPartnerLeadDispositionEvent({
+    await appendPartnerLeadDispositionEvent({
       id: crypto.randomUUID(),
       leadId: result.lead.id,
       userSellFlowId: result.lead.userSellFlowId,
@@ -342,7 +344,7 @@ adminLeadsRouter.post("/:leadId/close", (req, res, next) => {
       createdAt: now,
     });
 
-    enqueueLeadEventOutbox({
+    await enqueueLeadEventOutbox({
       id: crypto.randomUUID(),
       eventType: "lead.closed.admin",
       leadId: result.lead.id,
@@ -368,44 +370,49 @@ adminLeadsRouter.post("/:leadId/close", (req, res, next) => {
   }
 });
 
-adminLeadsRouter.post("/assign/bulk", (req, res, next) => {
+adminLeadsRouter.post("/assign/bulk", async (req, res, next) => {
   try {
     const input = assignBulkLeadSchema.parse(req.body);
-    const partner = getPartnerById(input.partnerId);
+    const partner = await getPartnerById(input.partnerId);
     if (!partner) throw notFound("Partner not found");
     const now = nowIso();
 
-    const rows = input.leadIds.map((leadId) => {
-      const lead = getPartnerLeadById(leadId);
+    const rows = [];
+    for (const leadId of input.leadIds) {
+      const lead = await getPartnerLeadById(leadId);
       if (!lead) {
-        return {
+        rows.push({
           leadId,
           result: "NOT_FOUND",
           lead: null,
           assignment: null,
-        };
+        });
+        continue;
       }
 
-      if (!partnerEligibleForPincode({ partnerId: input.partnerId, pincode: lead.pincode })) {
-        return {
+      const eligible = await partnerEligibleForPincode({ partnerId: input.partnerId, pincode: lead.pincode });
+      if (!eligible) {
+        rows.push({
           leadId,
           result: "INELIGIBLE_PINCODE",
           lead,
           assignment: null,
-        };
+        });
+        continue;
       }
 
-      const row = assignAdminLeadsBulk({
+      const bulkResults = await assignAdminLeadsBulk({
         leadIds: [leadId],
         partnerId: input.partnerId,
         adminId: req.auth.sub,
         assignmentMode: "MANUAL",
         note: input.note || null,
         createdAt: now,
-      })[0];
+      });
+      const row = bulkResults[0];
 
       if (row.result === "UPDATED" && row.lead) {
-        appendPartnerLeadDispositionEvent({
+        await appendPartnerLeadDispositionEvent({
           id: crypto.randomUUID(),
           leadId: row.lead.id,
           userSellFlowId: row.lead.userSellFlowId,
@@ -419,7 +426,7 @@ adminLeadsRouter.post("/assign/bulk", (req, res, next) => {
           createdAt: now,
         });
 
-        enqueueLeadEventOutbox({
+        await enqueueLeadEventOutbox({
           id: crypto.randomUUID(),
           eventType: "lead.assigned.manual",
           leadId: row.lead.id,
@@ -440,8 +447,8 @@ adminLeadsRouter.post("/assign/bulk", (req, res, next) => {
         });
       }
 
-      return row;
-    });
+      rows.push(row);
+    }
 
     res.json(success({ rows, count: rows.length }));
   } catch (err) {
@@ -449,13 +456,13 @@ adminLeadsRouter.post("/assign/bulk", (req, res, next) => {
   }
 });
 
-adminLeadsRouter.get("/:leadId/disposition-events", (req, res, next) => {
+adminLeadsRouter.get("/:leadId/disposition-events", async (req, res, next) => {
   try {
     const query = timelineQuerySchema.parse(req.query);
-    const lead = getPartnerLeadById(req.params.leadId);
+    const lead = await getPartnerLeadById(req.params.leadId);
     if (!lead) throw notFound("Lead not found");
 
-    const rows = listPartnerLeadDispositionTimeline({
+    const rows = await listPartnerLeadDispositionTimeline({
       leadId: req.params.leadId,
       limit: query.limit,
     });
