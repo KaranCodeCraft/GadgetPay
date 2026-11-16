@@ -1891,7 +1891,26 @@ button {
   padding: 0;
   box-shadow: none;
   outline: none;
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.gp-logo:hover {
+  transform: scale(1.02);
+}
+
+.gp-logo-img {
+  height: 92px;
+  width: auto;
+  object-fit: contain;
+  display: block;
+  filter: drop-shadow(0 2px 8px rgba(22, 160, 133, 0.22));
+  transition: filter 0.2s ease, transform 0.2s ease;
+}
+
+.gp-logo:hover .gp-logo-img {
+  filter: drop-shadow(0 4px 14px rgba(22, 160, 133, 0.38));
 }
 
 .gp-login {
@@ -9809,6 +9828,10 @@ button {
     order: 1;
     font-size: 22px;
     line-height: 1.2;
+  }
+
+  .gp-logo-img {
+    height: 68px !important;
   }
 
   .gp-head-actions {

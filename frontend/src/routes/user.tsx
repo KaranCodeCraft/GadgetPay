@@ -331,7 +331,7 @@ function UserFooter() {
     <footer className="gp-user-footer">
       <div className="gp-wrap gp-user-footer-grid">
         <div className="gp-user-footer-brand">
-          <div className="gp-user-footer-logo"><img src="/logo-dark.png" alt="GadgetPe" style={{ height: "40px", width: "auto" }} /></div>
+          <div className="gp-user-footer-logo"><img src="/logo-dark.png" alt="GadgetPe" style={{ height: "60px", width: "auto" }} /></div>
           <h3>Turn Your Device Into Money</h3>
           <p>GadgetPe is a modern device marketplace that makes selling your old smartphones, iPads, and tablets simple, secure, and rewarding.</p>
           <div className="gp-user-footer-social" aria-label="Contact shortcuts">
@@ -678,8 +678,15 @@ function UserPage() {
     <main className="gp-page">
       <header className="gp-header">
         {/* Single row: Logo | Search | Login */}
-        <div className="gp-wrap gp-head-row" style={{ display: "grid", gridTemplateColumns: "1fr 2fr 1fr", alignItems: "center", gap: "20px" }}>
-          <div className="gp-logo"><img src="/logo.png" alt="GadgetPe" style={{ height: "60px", width: "auto" }} /></div>
+        <div className="gp-wrap gp-head-row" style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", alignItems: "center", gap: "24px" }}>
+          <Link to="/user" className="gp-logo" aria-label="GadgetPe Home">
+            <img
+              src="/logo.png"
+              alt="GadgetPe"
+              className="gp-logo-img"
+              style={{ height: "92px", width: "auto", objectFit: "contain", display: "block" }}
+            />
+          </Link>
 
           <div className="gp-search-bar" ref={searchRef} style={{ maxWidth: "600px", margin: "0 auto", width: "100%" }}>
             <Search size={16} className="gp-search-icon" aria-hidden="true" />
