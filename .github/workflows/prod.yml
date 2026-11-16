@@ -51,6 +51,15 @@ jobs:
 
           set -e
 
+          # Load NVM
+          export NVM_DIR="/home/ubuntu/.nvm"
+          source "$NVM_DIR/nvm.sh"
+
+          # Verify Node environment
+          echo "Node version:"
+          node -v
+          npm -v
+
           cd /home/ubuntu/apps/GadgetPay
 
           echo "Pulling latest production code..."
