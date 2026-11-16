@@ -57,7 +57,7 @@ jobs:
           git pull origin main
 
           echo "Installing backend dependencies..."
-          cd /backend
+          cd backend
           npm install
 
           echo "Installing frontend dependencies..."
