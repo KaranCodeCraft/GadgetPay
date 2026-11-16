@@ -1,5 +1,31 @@
 import { createFileRoute, Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
-import { Coins, Flame, History, IndianRupee, Instagram, ListChecks, Mail, MapPin, Menu, PackageCheck, PhoneCall, Search, ShieldCheck, Smartphone, Tablet, TabletSmartphone, Truck, UserRound } from "lucide-react";
+import {
+  ArrowRight,
+  Award,
+  CheckCircle2,
+  ChevronRight,
+  Coins,
+  Flame,
+  History,
+  IndianRupee,
+  Instagram,
+  ListChecks,
+  Mail,
+  MapPin,
+  Menu,
+  PackageCheck,
+  PhoneCall,
+  Search,
+  ShieldCheck,
+  Smartphone,
+  Sparkles,
+  Star,
+  Tablet,
+  TabletSmartphone,
+  Truck,
+  UserRound,
+  Zap,
+} from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import { clearRoleSession, getActiveRole } from "../lib/auth/role-session";
@@ -29,13 +55,94 @@ type PriceTicker = {
 const topPhones: TopPhone[] = [];
 
 const brands = [
-  { name: "Apple", logoUrl: getBrandLogoUrl("Apple") ?? "https://logo.clearbit.com/apple.com" },
-  { name: "Xiaomi", logoUrl: "https://uxwing.com/wp-content/themes/uxwing/download/brands-and-social-media/xiaomi-mi-logo-icon.png" },
-  { name: "Samsung", logoUrl: getBrandLogoUrl("Samsung") ?? "https://logo.clearbit.com/samsung.com" },
-  { name: "Vivo", logoUrl: "https://upload.wikimedia.org/wikipedia/commons/2/29/Vivo_Logo.svg" },
-  { name: "OnePlus", logoUrl: getBrandLogoUrl("OnePlus") ?? "https://logo.clearbit.com/oneplus.com" },
-  { name: "OPPO", logoUrl: getBrandLogoUrl("OPPO") ?? "https://logo.clearbit.com/oppo.com" },
-  { name: "realme", logoUrl: "https://upload.wikimedia.org/wikipedia/commons/b/bc/Realme-realme-_logo_box-RGB-01.png" },
+  { name: "Apple", logoUrl: getBrandLogoUrl("Apple") ?? "https://logo.clearbit.com/apple.com", to: "/user/sell-phone?brand=Apple", badge: "iPhones & iPads" },
+  { name: "Xiaomi", logoUrl: "https://uxwing.com/wp-content/themes/uxwing/download/brands-and-social-media/xiaomi-mi-logo-icon.png", to: "/user/sell-phone?brand=Xiaomi", badge: "Redmi & Mi" },
+  { name: "Samsung", logoUrl: getBrandLogoUrl("Samsung") ?? "https://logo.clearbit.com/samsung.com", to: "/user/sell-phone?brand=Samsung", badge: "Galaxy S & A Series" },
+  { name: "Vivo", logoUrl: "https://upload.wikimedia.org/wikipedia/commons/2/29/Vivo_Logo.svg", to: "/user/sell-phone?brand=Vivo", badge: "V & X Series" },
+  { name: "OnePlus", logoUrl: getBrandLogoUrl("OnePlus") ?? "https://logo.clearbit.com/oneplus.com", to: "/user/sell-phone?brand=OnePlus", badge: "Nord & Flagships" },
+  { name: "OPPO", logoUrl: getBrandLogoUrl("OPPO") ?? "https://logo.clearbit.com/oppo.com", to: "/user/sell-phone?brand=OPPO", badge: "Reno & F Series" },
+  { name: "realme", logoUrl: "https://upload.wikimedia.org/wikipedia/commons/b/bc/Realme-realme-_logo_box-RGB-01.png", to: "/user/sell-phone?brand=realme", badge: "GT & Number Series" },
+];
+
+const quickCategoryCards = [
+  {
+    title: "Sell Phones",
+    tag: "Most Popular",
+    desc: "iPhone, Samsung, OnePlus & 30+ brands",
+    cta: "Check Phone Value",
+    icon: Smartphone,
+    to: "/user/sell-phone",
+  },
+  {
+    title: "Sell iPads",
+    tag: "High Value",
+    desc: "iPad Pro, Air, mini & standard models",
+    cta: "Check iPad Value",
+    icon: Tablet,
+    to: "/user/sell-tablet?category=ipad",
+  },
+  {
+    title: "Sell Tablets",
+    tag: "Best Rates",
+    desc: "OnePlus Pad, Xiaomi Pad, Samsung Tab",
+    cta: "Check Tab Value",
+    icon: TabletSmartphone,
+    to: "/user/sell-tablet?category=tablet",
+  },
+];
+
+const howItWorksSteps = [
+  {
+    num: "1",
+    tag: "Takes ~60s",
+    title: "Get Instant Price Estimate",
+    desc: "Choose your device model and answer simple questions about its working condition and accessories.",
+  },
+  {
+    num: "2",
+    tag: "Zero Convenience Fee",
+    title: "Free Doorstep Pickup",
+    desc: "Pick a date and time slot that fits your schedule. Our verified partner comes directly to your home.",
+  },
+  {
+    num: "3",
+    tag: "Direct to Bank / UPI",
+    title: "Instant On-the-Spot Payment",
+    desc: "After a quick physical check, your funds are transferred directly into your UPI or bank account before pickup.",
+  },
+];
+
+const whyChooseUsFeatures = [
+  {
+    icon: IndianRupee,
+    title: "Best Market Price",
+    desc: "Transparent algorithmic pricing ensures you always get top value for your old device without endless haggling.",
+  },
+  {
+    icon: Truck,
+    title: "Free Doorstep Pickup",
+    desc: "Enjoy hassle-free doorstep collection from your home or office with flexible rescheduling at zero cost.",
+  },
+  {
+    icon: Zap,
+    title: "Instant Payout",
+    desc: "Immediate money transfer via UPI, IMPS, or bank transfer right at your doorstep before the device leaves your hands.",
+  },
+  {
+    icon: ShieldCheck,
+    title: "100% Data Safe & Secure",
+    desc: "Certified data wipe assistance guidelines to ensure complete privacy and zero lingering personal information.",
+  },
+  {
+    icon: Award,
+    title: "Verified Professional Partners",
+    desc: "Trained and background-verified field executives equipped with specialized diagnostic toolkits.",
+  },
+  {
+    icon: Smartphone,
+    title: "Wide Device Support",
+    desc: "Sell iPhones, Android smartphones, iPads, and modern tablets across major brands and variants.",
+  },
 ];
 // const subnavMarqueeItems = ["All", "Sell SmartPhones", "Sell iPads", "Sell Tabs", "More"];
 const faqs = [
@@ -123,7 +230,8 @@ const searchableItems: SearchItem[] = [
   { id: "faq-4", label: "Can I cancel or reschedule?", type: "FAQ", href: "#faq", keywords: ["cancel", "reschedule", "pickup", "schedule"] },
   { id: "faq-5", label: "How long does payment take?", type: "FAQ", href: "#faq", keywords: ["payment", "instant", "verification", "payout"] },
   { id: "faq-6", label: "Which devices can I sell?", type: "FAQ", href: "#faq", keywords: ["devices", "smartphones", "ipads", "tablets", "supported"] },
-  { id: "sell-tablet", label: "Sell Tablet", type: "Page", href: "/user/sell-tablet", keywords: ["tablet", "ipad", "sell", "tab"] },
+  { id: "sell-ipad", label: "Sell iPad", type: "Page", href: "/user/sell-tablet?category=ipad", keywords: ["ipad", "apple", "tablet", "sell"] },
+  { id: "sell-tablet", label: "Sell Tablet", type: "Page", href: "/user/sell-tablet?category=tablet", keywords: ["tablet", "tab", "android", "sell"] },
   { id: "pickup-status", label: "Pickup Status", type: "Page", href: "/user/pickup-status", keywords: ["pickup", "status", "track", "schedule"] },
   { id: "my-listings", label: "My Listings", type: "Page", href: "/user/my-listings", keywords: ["listings", "my", "active", "sold"] },
   { id: "payments", label: "Payments", type: "Page", href: "/user/payments", keywords: ["payments", "payout", "upi", "settlement"] },
@@ -150,19 +258,19 @@ const sellFlowOptions = [
     title: "Sell Phones",
     description: "Pick your smartphone model and get an instant quote.",
     icon: Smartphone,
-    to: "/user/sell-phone" as const,
+    to: "/user/sell-phone",
   },
   {
     title: "Sell iPads",
-    description: "Start your iPad flow in the tablet category.",
+    description: "Sell your Apple iPad with an instant quote.",
     icon: Tablet,
-    to: "/user/sell-tablet" as const,
+    to: "/user/sell-tablet?category=ipad",
   },
   {
     title: "Sell Tablets",
     description: "Sell Android and other tablets with the same flow.",
     icon: TabletSmartphone,
-    to: "/user/sell-tablet" as const,
+    to: "/user/sell-tablet?category=tablet",
   },
 ];
 
@@ -515,7 +623,7 @@ function UserPage() {
     }
   };
 
-  const handleSellFlowSelection = (to: "/user/sell-phone" | "/user/sell-tablet") => {
+  const handleSellFlowSelection = (to: string) => {
     setShowSellTypeModal(false);
     void navigate({ to });
   };
@@ -703,8 +811,8 @@ function UserPage() {
               <span className="gp-nav-trigger">All <span className="gp-nav-chevron">▾</span></span>
               <div className="gp-dropdown">
                 <a href="/user/sell-phone">Sell Phones</a>
-                <a href="/user/sell-tablet">Sell iPads</a>
-                <a href="/user/sell-tablet">Sell Tablets</a>
+                <a href="/user/sell-tablet?category=ipad">Sell iPads</a>
+                <a href="/user/sell-tablet?category=tablet">Sell Tablets</a>
                 <a href="#how">How It Works</a>
                 <a href="/partner">Become Our Partner</a>
                 <a href="#faq">Help</a>
@@ -730,10 +838,11 @@ function UserPage() {
             <div className="gp-nav-item">
               <span className="gp-nav-trigger">Sell iPads <span className="gp-nav-chevron">▾</span></span>
               <div className="gp-dropdown">
-                <a href="/user/sell-tablet">iPad Air</a>
-                <a href="/user/sell-tablet">iPad Pro</a>
-                <a href="/user/sell-tablet">iPad mini</a>
-                <a href="/user/sell-tablet">iPad (standard)</a>
+                <a href="/user/sell-tablet?category=ipad">All iPads</a>
+                <a href="/user/sell-tablet?category=ipad&series=IPAD+AIR">iPad Air</a>
+                <a href="/user/sell-tablet?category=ipad&series=IPAD+PRO">iPad Pro</a>
+                <a href="/user/sell-tablet?category=ipad&series=IPAD+MINI">iPad mini</a>
+                <a href="/user/sell-tablet?category=ipad&series=IPAD">iPad (standard)</a>
               </div>
             </div>
 
@@ -741,10 +850,10 @@ function UserPage() {
             <div className="gp-nav-item">
               <span className="gp-nav-trigger">Sell Tablets <span className="gp-nav-chevron">▾</span></span>
               <div className="gp-dropdown">
-                <a href="/user/sell-tablet">All Tablets & iPads</a>
-                <a href="/user/sell-tablet">Samsung Tabs</a>
-                <a href="/user/sell-tablet">Xiaomi Tabs</a>
-                <a href="/user/sell-tablet">Other Tablets</a>
+                <a href="/user/sell-tablet?category=tablet">All Tablets</a>
+                <a href="/user/sell-tablet?category=tablet&brand=OnePlus">OnePlus Tabs</a>
+                <a href="/user/sell-tablet?category=tablet&brand=OPPO">OPPO Tabs</a>
+                <a href="/user/sell-tablet?category=tablet&brand=realme">Realme Tabs</a>
               </div>
             </div>
 
@@ -823,47 +932,121 @@ function UserPage() {
         </div>
       </section> */}
 
-      <section className="hero" id="sell">
-        <div className="hero-copy">
-          <span className="hero-kicker">✨ The Smartest Way to Sell Your Old Gadgets</span>
-          <h1 className="hero-title">
-            Turn Your Old Device
-            <span>Into Money.</span>
-          </h1>
-          <p className="hero-sub">
-            Get the best value for your used smartphones, iPads, tablets and more –
-            quickly, safely and effortlessly with GadgetPe.
-          </p>
-          <div className="hero-feature-strip">
-            <span><HeroIconMoney /><span className="hero-chip-text"><strong>Best Price</strong><small>Guaranteed</small></span></span>
-            <span><HeroIconTruck /><span className="hero-chip-text"><strong>Free</strong><small>Doorstep Pickup</small></span></span>
-            <span><HeroIconShield /><span className="hero-chip-text"><strong>100% Safe</strong><small>&amp; Transparent</small></span></span>
+      <section className="hero-revamped" id="sell">
+        <div className="hero-revamped-inner">
+          <div className="hero-copy">
+            <span className="hero-pill-badge">
+              <Sparkles size={14} /> The Smartest Way to Sell Old Gadgets
+            </span>
+            <h1 className="hero-main-title">
+              Sell Old Gadgets. <br />
+              <span className="hero-gradient-text">Get Paid Instantly.</span>
+            </h1>
+            <p className="hero-lead-text">
+              Turn your unused smartphones, iPads, and tablets into instant cash with fair market valuation and free doorstep pickup.
+            </p>
+
+            {/* Quick 1-Click Sell Category Cards */}
+            <div className="hero-category-cards" aria-label="Sell category options">
+              {quickCategoryCards.map((card) => {
+                const Icon = card.icon;
+                return (
+                  <Link key={card.title} to={card.to} className="hero-category-card">
+                    <div>
+                      <div className="hero-category-card-top">
+                        <span className="hero-category-icon-wrap">
+                          <Icon size={20} />
+                        </span>
+                        <span className="hero-category-badge">{card.tag}</span>
+                      </div>
+                      <h3 className="hero-category-title">{card.title}</h3>
+                      <p className="hero-category-sub">{card.desc}</p>
+                    </div>
+                    <div className="hero-category-footer">
+                      <span>{card.cta}</span>
+                      <ArrowRight size={14} />
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+
+            {/* Trust Strip */}
+            <div className="hero-trust-strip">
+              <div className="hero-trust-item">
+                <span className="hero-trust-item-icon">
+                  <IndianRupee size={16} />
+                </span>
+                <div className="hero-trust-item-copy">
+                  <strong>Best Value</strong>
+                  <span>Market-matched prices</span>
+                </div>
+              </div>
+              <div className="hero-trust-item">
+                <span className="hero-trust-item-icon">
+                  <Truck size={16} />
+                </span>
+                <div className="hero-trust-item-copy">
+                  <strong>Free Pickup</strong>
+                  <span>Right at your doorstep</span>
+                </div>
+              </div>
+              <div className="hero-trust-item">
+                <span className="hero-trust-item-icon">
+                  <Zap size={16} />
+                </span>
+                <div className="hero-trust-item-copy">
+                  <strong>Instant Cash</strong>
+                  <span>UPI / Bank on inspection</span>
+                </div>
+              </div>
+              <div className="hero-trust-item">
+                <span className="hero-trust-item-icon">
+                  <ShieldCheck size={16} />
+                </span>
+                <div className="hero-trust-item-copy">
+                  <strong>Safe &amp; Verified</strong>
+                  <span>Trained pickup partners</span>
+                </div>
+              </div>
+            </div>
           </div>
-          <div className="cta-row">
-            <button
-              type="button"
-              className="hero-main-cta cta-green"
-              onClick={() => {
-                setShowSellTypeModal(true);
-              }}
-            >
-              Sell Your Device Now
-            </button>
+
+          <div className="hero-art-showcase">
+            <img src="/hero.jpeg" alt="Sell your old smartphones and gadgets on GadgetPe" className="hero-art-main-img" />
+            <div className="hero-float-tag hero-float-tag-1">
+              <span style={{ width: 32, height: 32, borderRadius: 8, background: "#e8f7f2", color: "#16a085", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                <CheckCircle2 size={18} />
+              </span>
+              <div>
+                <strong style={{ display: "block", fontSize: 13, color: "#0f172a" }}>Instant ₹ Transfer</strong>
+                <span style={{ fontSize: 11, color: "#64748b" }}>On doorstep verification</span>
+              </div>
+            </div>
+            <div className="hero-float-tag hero-float-tag-2">
+              <span style={{ width: 32, height: 32, borderRadius: 8, background: "#fef3c7", color: "#d97706", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                <Star size={18} fill="#d97706" />
+              </span>
+              <div>
+                <strong style={{ display: "block", fontSize: 13, color: "#0f172a" }}>4.8/5 Rated</strong>
+                <span style={{ fontSize: 11, color: "#64748b" }}>By 10,000+ satisfied sellers</span>
+              </div>
+            </div>
           </div>
-        </div>
-        <div className="hero-art">
-          <img src="/hero.jpeg" alt="Sell your old smartphones, tablets and gadgets" className="hero-art-image" />
-          <div className="hero-art-stage" aria-hidden="true" />
         </div>
       </section>
 
       <section className="gp-section" id="top-brands">
         <div className="gp-wrap">
-          <h2>Top Brands</h2>
-          <div className="gp-brand-strip">
+          <div className="gp-section-header">
+            <span className="gp-section-kicker">Popular Brands</span>
+            <h2 className="gp-section-title">Select Your Brand</h2>
+            <p className="gp-section-desc">Choose your device brand to get an instant tailored evaluation</p>
+          </div>
+          <div className="gp-brand-strip-revamped">
             {brands.map((brand) => (
-              <span key={brand.name} className="gp-brand-item">
-                <span className="gp-brand-logo-wrap">
+              <Link key={brand.name} to={brand.to} className="gp-brand-card-link">
+                <span className="gp-brand-card-logo-wrap">
                   {failedBrandLogos[brand.name] ? (
                     <span className="gp-brand-logo-fallback" aria-hidden="true">{brand.name.charAt(0)}</span>
                   ) : (
@@ -876,176 +1059,136 @@ function UserPage() {
                     />
                   )}
                 </span>
-                <span>{brand.name}</span>
-              </span>
+                <span style={{ fontWeight: 700 }}>{brand.name}</span>
+                <span className="gp-brand-card-badge">{brand.badge}</span>
+              </Link>
             ))}
           </div>
         </div>
       </section>
 
-      <section className="gp-section gp-how-tone" id="how">
+      <section className="gp-how-section" id="how">
         <div className="gp-wrap">
-          <h2>How GadgetPe Works</h2>
-          <div className="gp-steps">
-            <article>
-              <div className="gp-icon">1</div>
-              <h3>Get an Instant Price Estimate</h3>
-              <p>Choose your device and answer a few quick questions about its condition.</p>
-            </article>
-            <article>
-              <div className="gp-icon">2</div>
-              <h3>Schedule a Free Doorstep Pickup</h3>
-              <p>Select a convenient date and time. Our verified pickup partner will visit your location.</p>
-            </article>
-            <article>
-              <div className="gp-icon">3</div>
-              <h3>Receive Instant Payment</h3>
-              <p>Once your device is verified, payment is processed instantly via UPI or bank transfer.</p>
-            </article>
+          <div className="gp-section-header">
+            <span className="gp-section-kicker">Simple 3-Step Process</span>
+            <h2 className="gp-section-title">How GadgetPe Works</h2>
+            <p className="gp-section-desc">From price calculation to cash in your account in under 24 hours</p>
           </div>
-        </div>
-      </section>
-
-      {/* <section className="gp-section gp-user-reviews" aria-labelledby="user-reviews-heading">
-        <div className="gp-wrap">
-          <div className="gp-user-reviews-head">
-            <h2 id="user-reviews-heading">User Reviews</h2>
-          </div>
-
-          <div className="gp-user-reviews-viewport" role="region" aria-live="polite" aria-label="User reviews carousel">
-            <div
-              className="gp-user-reviews-track"
-              style={{ transform: `translateX(-${activeReviewIndex * 100}%)` }}
-            >
-              {userReviews.map((review) => (
-                <article key={`${review.name}-${review.device}`} className="gp-user-review-card">
-                  <p className="gp-user-review-text">&ldquo;{review.quote}&rdquo;</p>
-                  <div className="gp-user-review-meta">
-                    <strong>{review.name}</strong>
-                    <span>{review.city}</span>
-                  </div>
-                  <div className="gp-user-review-sale">
-                    <span>{review.device}</span>
-                    <strong>{review.amount}</strong>
-                  </div>
-                </article>
-              ))}
-            </div>
-          </div>
-
-          <div className="gp-user-reviews-dots" aria-label="Jump to review">
-            {userReviews.map((review, index) => (
-              <button
-                type="button"
-                key={`${review.name}-dot`}
-                className={`gp-user-reviews-dot ${activeReviewIndex === index ? "is-active" : ""}`}
-                aria-label={`Show review ${index + 1}`}
-                onClick={() => setActiveReviewIndex(index)}
-              />
-            ))}
-          </div>
-        </div>
-      </section> */}
-
-      {/* <section className="gp-section gp-soft gp-phones-market" id="deals">
-        <div className="gp-wrap">
-          <h2>Become Our Partner</h2>
-          <div className="gp-table">
-            <div className="gp-row gp-row-head">
-              <span>Phone</span>
-              <span>Live Price</span>
-              <span>Action</span>
-            </div>
-            {topPhones.length > 0 ? topPhones.map((phoneItem, index) => {
-              const key = `${phoneItem.name}-${phoneItem.variant}`;
-              const ticker = priceTickers[key];
-              return (
-                <div key={key} className="gp-row">
-                  <span>
-                    <strong>{phoneItem.name}</strong>
-                    <small>{phoneItem.variant}</small>
-                  </span>
-                  <span className={`gp-price gp-price-${ticker.trend}`}>
-                    <span className={`gp-price-indicator`}>{ticker.trend === "up" ? "▲" : "▼"}</span>
-                    <span className={`gp-price-value ${ticker.pulse % 2 === 0 ? "flash-a" : "flash-b"}`}>Rs. {formatInr(ticker.value)}</span>
-                    <span className="gp-price-percent">{ticker.changePercent}%</span>
-                  </span>
-                  <button type="button" onClick={() => setIsLoginOpen(true)}>{index % 2 === 0 ? "Sell Now" : "Check"}</button>
+          <div className="gp-steps-grid">
+            {howItWorksSteps.map((step) => (
+              <article key={step.num} className="gp-step-card">
+                <div className="gp-step-card-top">
+                  <span className="gp-step-num-pill">{step.num}</span>
+                  <span className="gp-step-tag">{step.tag}</span>
                 </div>
-              );
-            }) : (
-              <div className="gp-row">
-                <span>
-                  <strong>No live phone price data</strong>
-                  <small>Please check back later.</small>
-                </span>
-                <span className="gp-price">-</span>
-                <button type="button" disabled>Unavailable</button>
-              </div>
-            )}
-          </div>
-        </div>
-      </section> */}
-
-      <section className="gp-section" id="why-sell">
-        <div className="gp-wrap">
-          <h2>Why Sell with GadgetPe</h2>
-          <div className="gp-why-sell-list" aria-label="Why sell with GadgetPe benefits">
-            {[
-              "Best Market Prices",
-              "Free Doorstep Pickup",
-              "Instant & Secure Payment",
-              "Safe & Transparent Process",
-              "Verified Pickup Partners",
-              "Wide Device Coverage",
-            ].map((item) => (
-              <article key={item}>
-                <p>{item}</p>
+                <h3>{step.title}</h3>
+                <p>{step.desc}</p>
               </article>
             ))}
           </div>
         </div>
       </section>
 
-      <section className="gp-section" id="faq">
+      <section className="gp-why-section" id="why-sell">
         <div className="gp-wrap">
-          <h2>FAQ</h2>
-          <div className="gp-faq-list">
+          <div className="gp-section-header">
+            <span className="gp-section-kicker">The GadgetPe Advantage</span>
+            <h2 className="gp-section-title">Why Sell With GadgetPe?</h2>
+            <p className="gp-section-desc">We make selling your old devices fast, safe, and truly rewarding</p>
+          </div>
+          <div className="gp-why-grid-revamped">
+            {whyChooseUsFeatures.map((feat) => {
+              const Icon = feat.icon;
+              return (
+                <article key={feat.title} className="gp-why-card">
+                  <span className="gp-why-icon-wrap">
+                    <Icon size={22} />
+                  </span>
+                  <h3>{feat.title}</h3>
+                  <p>{feat.desc}</p>
+                </article>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      <section className="gp-reviews-section" id="reviews">
+        <div className="gp-wrap">
+          <div className="gp-section-header">
+            <span className="gp-section-kicker">Seller Stories</span>
+            <h2 className="gp-section-title">What Our Customers Say</h2>
+            <p className="gp-section-desc">Real experiences from customers who traded their old gadgets for quick cash</p>
+          </div>
+          <div className="gp-reviews-grid">
+            {userReviews.map((rev) => (
+              <article key={`${rev.name}-${rev.device}`} className="gp-review-card-modern">
+                <div>
+                  <div className="gp-review-stars" aria-label="5 out of 5 stars">
+                    {[...Array(5)].map((_, i) => (
+                      <Star key={i} size={15} fill="#f59e0b" color="#f59e0b" />
+                    ))}
+                  </div>
+                  <p className="gp-review-quote">&ldquo;{rev.quote}&rdquo;</p>
+                </div>
+                <div className="gp-review-bottom">
+                  <div className="gp-review-author">
+                    <strong>{rev.name}</strong>
+                    <span>{rev.city}</span>
+                  </div>
+                  <div className="gp-review-device-tag">
+                    <span>{rev.device}</span> • <strong>{rev.amount}</strong>
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="gp-faq-section" id="faq">
+        <div className="gp-wrap">
+          <div className="gp-section-header">
+            <span className="gp-section-kicker">Got Questions?</span>
+            <h2 className="gp-section-title">Frequently Asked Questions</h2>
+            <p className="gp-section-desc">Everything you need to know about selling with GadgetPe</p>
+          </div>
+          <div className="gp-faq-grid">
             {faqs.map((item) => (
-              <details key={item.question}>
-                <summary>{item.question}</summary>
-                <p>{item.answer}</p>
+              <details key={item.question} className="gp-faq-item">
+                <summary className="gp-faq-summary">
+                  <span>{item.question}</span>
+                  <span style={{ color: "#16a085", fontSize: 18, fontWeight: 700 }}>+</span>
+                </summary>
+                <p className="gp-faq-answer">{item.answer}</p>
               </details>
             ))}
           </div>
         </div>
       </section>
 
-      <section className="gp-section gp-soft" id="become-partner">
+      <section className="gp-section" id="become-partner" style={{ background: "#f8fafc", padding: "60px 0" }}>
         <div className="gp-wrap">
-          <div className="gp-partner-promo">
-            <h2>Become a Partner</h2>
-            <p>
-              Join our growing network of trusted partners and connect with customers looking to sell their old
-              devices. Expand your business with quality leads, streamlined operations, and dedicated support.
-            </p>
-            <a href="/partner" className="gp-partner-promo-link">Explore Partner Program</a>
+          <div className="gp-partner-banner-modern">
+            <div>
+              <span className="gp-partner-banner-badge">Partner Network</span>
+              <h2 className="gp-partner-banner-title">Grow Your Business With GadgetPe</h2>
+              <p className="gp-partner-banner-desc">
+                Join our certified partner network to fulfill doorstep device inspections, pickups, and trade-ins. Get consistent local orders, prompt weekly payouts, and end-to-end partner app support.
+              </p>
+              <div className="gp-partner-perks">
+                <span className="gp-partner-perk-item"><CheckCircle2 size={15} color="#5eead4" /> Daily local pickup leads</span>
+                <span className="gp-partner-perk-item"><CheckCircle2 size={15} color="#5eead4" /> Verified seller devices</span>
+                <span className="gp-partner-perk-item"><CheckCircle2 size={15} color="#5eead4" /> Dedicated partner support</span>
+              </div>
+            </div>
+            <Link to="/partner" className="gp-partner-btn">
+              <span>Become a Partner</span>
+              <ArrowRight size={16} />
+            </Link>
           </div>
         </div>
       </section>
-
-      {/* Sell Phone / Sell Tablet cards — commented out, preserved for re-enabling
-      <section className="user-sell-type-grid" aria-label="Sell category">
-        <Link to="/user/sell-phone" className="user-sell-type-tile user-sell-phone-tile">
-          <span className="user-sell-type-label">Sell Phone</span>
-          <small>List your smartphone in seconds</small>
-        </Link>
-        <Link to="/user/sell-tablet" className="user-sell-type-tile user-sell-tablet-tile">
-          <span className="user-sell-type-label">Sell Tablet</span>
-          <small>Open tablet selling flow</small>
-        </Link>
-      </section>
-      */}
 
       {isLoggedIn && showSellModal && (
         <div className="user-auth-overlay" role="dialog" aria-modal="true">

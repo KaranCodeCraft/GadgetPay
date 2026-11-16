@@ -7,7 +7,7 @@ async function answerVisibleQuestionsAndAdvance(page: Page) {
     const toggleRows = page.locator(".user-toggle-row");
     const toggleRowCount = await toggleRows.count();
     for (let row = 0; row < toggleRowCount; row += 1) {
-      const firstOption = toggleRows.nth(row).locator("button").first();
+      const firstOption = toggleRows.nth(row).locator("label, button, input").first();
       if (await firstOption.count()) {
         await firstOption.click();
       }

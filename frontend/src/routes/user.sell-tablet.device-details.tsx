@@ -1,4 +1,4 @@
-﻿import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { ArrowRight } from "lucide-react";
@@ -15,6 +15,7 @@ type QuestionGroupKey = "basicFunctionality" | "batteryAndCharging" | "accessori
 type QuestionnaireQuestion = {
   key: string;
   label: string;
+  hint?: string;
   options?: AnswerValue[];
 };
 
@@ -32,24 +33,24 @@ const issueOptions = [
 ] as const;
 
 const basicFunctionalityQuestions = [
-  { key: "canMakeCalls", label: "Are you able to make or receive calls?" },
-  { key: "touchWorking", label: "Is touch screen working properly?" },
-  { key: "displayWorking", label: "Is display brightness and color working properly?" },
-  { key: "screenReplaced", label: "Has the screen been replaced?" },
+  { key: "canMakeCalls", label: "Are you able to make or receive calls?", hint: "Check your tablet for cellular or call connectivity." },
+  { key: "touchWorking", label: "Is touch screen working properly?", hint: "Check touch screen functionality and responsiveness." },
+  { key: "displayWorking", label: "Is display brightness and color working properly?", hint: "Check display colors, brightness, or screen lines." },
+  { key: "screenReplaced", label: "Has the screen been replaced?", hint: 'Pick "Yes" if screen was ever changed or repaired.' },
 ] satisfies QuestionnaireQuestion[];
 
 const batteryAndChargingQuestions = [
-  { key: "charging", label: "Is the tablet charging properly?" },
-  { key: "batteryDrain", label: "Does battery drain quickly?" },
-  { key: "heating", label: "Does tablet heat abnormally?" },
+  { key: "charging", label: "Is the tablet charging properly?", hint: "Check if tablet charges properly when plugged into power." },
+  { key: "batteryDrain", label: "Does battery drain quickly?", hint: "Check if battery percentage drops abnormally fast." },
+  { key: "heating", label: "Does tablet heat abnormally?", hint: "Check if tablet becomes unusually warm during use or charging." },
 ] satisfies QuestionnaireQuestion[];
 
 const accessoriesAndOwnershipQuestions = [
-  { key: "billInvoice", label: "Do you have bill / invoice?" },
-  { key: "originalBox", label: "Do you have original box?" },
-  { key: "originalCharger", label: "Do you have original charger?" },
-  { key: "underWarranty", label: "Is tablet under warranty?" },
-  { key: "accountLocked", label: "Is tablet locked by password / iCloud / Google account?" },
+  { key: "billInvoice", label: "Do you have bill / invoice?", hint: "Valid purchase invoice or bill for the device." },
+  { key: "originalBox", label: "Do you have original box?", hint: "Original manufacturer packaging box." },
+  { key: "originalCharger", label: "Do you have original charger?", hint: "Original working charger and charging cable." },
+  { key: "underWarranty", label: "Is tablet under warranty?", hint: "Check if tablet is still covered under brand warranty." },
+  { key: "accountLocked", label: "Is tablet locked by password / iCloud / Google account?", hint: "Ensure tablet is unlocked and removed from all accounts." },
 ] satisfies QuestionnaireQuestion[];
 
 type StoredDetails = {
@@ -181,7 +182,7 @@ function getSlideDescription(slide: SlideItem[]) {
   return "Calls, display and touch.";
 }
 
-function AnswerToggleGroup({ value, options = ["yes", "no"], onChange }: { value?: AnswerValue; options?: AnswerValue[]; onChange: (value: AnswerValue) => void }) {
+function AnswerToggleGroup({ name, value, options = ["yes", "no"], onChange }: { name: string; value?: AnswerValue; options?: AnswerValue[]; onChange: (value: AnswerValue) => void }) {
   const answerLabels: Record<AnswerValue, string> = {
     yes: "Yes",
     no: "No",
@@ -189,16 +190,19 @@ function AnswerToggleGroup({ value, options = ["yes", "no"], onChange }: { value
   };
 
   return (
-    <div className="user-toggle-row">
+    <div className="user-radio-group user-toggle-row">
       {options.map((option) => (
-        <button
-          key={option}
-          type="button"
-          className={`user-toggle-btn${value === option ? " active" : ""}`}
-          onClick={() => onChange(option)}
-        >
-          {answerLabels[option]}
-        </button>
+        <label key={option} className={`user-radio-label${value === option ? " selected" : ""}`}>
+          <input
+            type="radio"
+            name={name}
+            value={option}
+            checked={value === option}
+            onChange={() => onChange(option)}
+          />
+          <span className="user-radio-mark" />
+          <span className="user-radio-text">{answerLabels[option]}</span>
+        </label>
       ))}
     </div>
   );
@@ -381,6 +385,10 @@ function buildDeviceDetailsMetadata({ selectedIssues, updatedAt }: { selectedIss
     return Boolean(answerMaps[item.group][item.question.key]);
   });
 
+  const continueDisabledReason = !isSlideComplete
+    ? "Please answer all questions above to continue"
+    : undefined;
+
   const progressItems = slides.flat().filter((item) => item.kind !== "issue");
   const answeredCount = progressItems.filter((item) => {
     if (item.kind === "appleBatteryHealth") return Boolean(appleBatteryHealth);
@@ -406,7 +414,9 @@ function buildDeviceDetailsMetadata({ selectedIssues, updatedAt }: { selectedIss
     return (
       <article className="user-question-card" key={`${item.group}-${item.question.key}`}>
         <h3>{item.question.label}</h3>
+        {item.question.hint && <p className="user-question-hint">{item.question.hint}</p>}
         <AnswerToggleGroup
+          name={`${item.group}-${item.question.key}`}
           value={answerMaps[item.group][item.question.key]}
           options={item.question.options}
           onChange={(answer) => updateAnswerMap(item.group, (previousAnswers) => ({ ...previousAnswers, [item.question.key]: answer }))}
@@ -422,18 +432,11 @@ function buildDeviceDetailsMetadata({ selectedIssues, updatedAt }: { selectedIss
         <div className="user-question-progress" aria-label="Device questionnaire progress">
           <div className="user-question-progress-copy">
             <span>Slide {activeSlideIndex + 1} of {slides.length}</span>
-            <span>{answeredCount} of {totalRequiredCount} answered</span>
           </div>
           <div className="user-question-progress-bar" aria-hidden="true">
             <div className="user-question-progress-fill" style={{ width: `${progressPercent}%` }} />
           </div>
         </div>
-        <h1>Device Details</h1>
-        {storedSelectedModel?.modelName ? (
-          <p>Selected Model: {storedSelectedModel.modelName}</p>
-        ) : (
-          <p>Answer this questionnaire to continue.</p>
-        )}
 
         <section className="user-questionnaire-block user-question-slide" aria-label={getSlideTitle(activeSlide)}>
           <div className="user-questionnaire-heading">
@@ -458,11 +461,23 @@ function buildDeviceDetailsMetadata({ selectedIssues, updatedAt }: { selectedIss
               className="user-auth-submit"
               style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
               disabled={!isSlideComplete}
+              aria-describedby={continueDisabledReason ? "user-question-action-hint" : undefined}
               onClick={isLastSlide ? completeFinalStep : () => moveToSlide(activeSlideIndex + 1)}
             >
               {isLastSlide ? "Continue to Quote" : (<>Continue <ArrowRight size={16} /></>)}
             </button>
           </div>
+          {continueDisabledReason && (
+            <p id="user-question-action-hint" className="user-question-action-hint" role="status">
+              {continueDisabledReason}
+            </p>
+          )}
+          {storedSelectedModel?.modelName && (
+            <div className="user-device-model-info">
+              <span className="user-device-model-label">Device Details</span>
+              <span className="user-device-model-name">Selected Model: {storedSelectedModel.modelName}</span>
+            </div>
+          )}
         </section>
       </section>
     </main>
